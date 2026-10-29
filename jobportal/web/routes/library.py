@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from jobportal.ai import client as ai
 from jobportal.candidate import library
 from jobportal.documents import exports, render, revise
-from jobportal.search import pipeline
+from jobportal.search import packages
 from jobportal.web.common import ai_error, lead_or_404, read_upload
 
 router = APIRouter()
@@ -108,6 +108,6 @@ async def use_for_lead(item_id: int, lead_id: int, body: dict):
         library.create(f"{lead['company']}: {lead['title']}"[:80] + " (before swap)", lead["resume_md"],
                        (lead.get("package") or {}).get("resume_style"), "saved from lead", lead_id)
     try:
-        return await pipeline.use_saved_resume(lead_id, item, bool(body.get("tailor")))
+        return await packages.use_saved_resume(lead_id, item, bool(body.get("tailor")))
     except ai.AIError as e:
         raise ai_error(e)

@@ -36,22 +36,7 @@ from jobportal.core.textutil import LocationMatcher, age_days, fingerprint, url_
 from jobportal.search import plan
 from jobportal.search.collectors import COLLECTORS, details, hunt
 from jobportal.search.collectors.base import SOCIAL_SOURCES, Ctx, RawJob
-
-# Work on one lead moved to packages.py. These names stay importable from here because the web routes and tests still call
-# pipeline.build_package, pipeline.lead_summary and so on. New code should import them from packages.
-from jobportal.search.packages import (  # noqa: F401
-    LIST_FIELDS,
-    add_manual_lead,
-    apply_answers,
-    build_package,
-    check_resume,
-    gap_questions,
-    insert_lead,
-    lead_summary,
-    polish_resume,
-    render_files,
-    use_saved_resume,
-)
+from jobportal.search.packages import build_package, insert_lead, lead_summary
 
 # Sources that skip the tech-role title check: their "titles" are post headlines (social posts, feed items), or an AI agent
 # already judged the lead a match for the candidate (the AI hunt).

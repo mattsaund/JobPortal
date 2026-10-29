@@ -114,8 +114,8 @@ def test_chatgpt_sign_in_endpoints(client):
 def _lead_with_documents() -> int:
     """A lead with a resume and a package, as if a search had built one."""
     from jobportal.core import db
-    from jobportal.search import pipeline
-    lead_id = pipeline.add_manual_lead("https://jobs.example.com/123", "Build internal tools in Python.", "Software Engineering Intern",
+    from jobportal.search import packages
+    lead_id = packages.add_manual_lead("https://jobs.example.com/123", "Build internal tools in Python.", "Software Engineering Intern",
                                        "Example Robotics", "Columbus, OH")
     db.update_lead(lead_id, resume_md="# Jordan Rivera\njordan.rivera@example.com\n\n## Projects\n- Budget Buddy",
                    package={"interview_prep_md": "## Likely questions\n- Tell me about Budget Buddy.",

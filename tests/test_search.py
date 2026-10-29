@@ -379,12 +379,6 @@ def test_stop_puts_the_lead_being_packaged_back_in_the_queue(fake_ai, no_renderi
     assert db.one("SELECT stage FROM leads")["stage"] == "qualified"  # not stuck in "packaging"
 
 
-def test_pipeline_still_offers_the_moved_names():
-    for name in ("LIST_FIELDS", "lead_summary", "add_manual_lead", "build_package", "polish_resume", "check_resume", "render_files",
-                 "gap_questions", "apply_answers", "use_saved_resume"):
-        assert getattr(pipeline, name) is getattr(packages, name)
-
-
 # ---------------------------------------------------------------- per-lead work
 
 

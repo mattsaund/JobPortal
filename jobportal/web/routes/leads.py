@@ -11,7 +11,7 @@ from jobportal.candidate import profile
 from jobportal.core import background, bus, db
 from jobportal.core.config import APP_STATUSES, LEADS_DIR
 from jobportal.core.textutil import coverage
-from jobportal.search import pipeline
+from jobportal.search import packages, pipeline
 from jobportal.web.common import ai_error, lead_or_404
 
 router = APIRouter()
@@ -56,7 +56,7 @@ def leads(tab: str = "ready", q: str = "", sort: str = "score", kind: str = "", 
     if kind:
         where.append("kind=?")
         args.append(kind)
-    rows = db.q(f"SELECT {pipeline.LIST_FIELDS} FROM leads WHERE {' AND '.join(where)} ORDER BY {SORTS.get(sort, SORTS['score'])} LIMIT ?",
+    rows = db.q(f"SELECT {packages.LIST_FIELDS} FROM leads WHERE {' AND '.join(where)} ORDER BY {SORTS.get(sort, SORTS['score'])} LIMIT ?",
                 (*args, limit))
     open_questions = profile.open_counts_by_lead()
     for row in rows:
@@ -121,7 +121,7 @@ def patch_lead(lead_id: int, body: dict):
     if "cover_md" in fields and fields["cover_md"] != current.get("cover_md"):
         _clear_rendered(folder, "cover_letter.pdf", "cover_letter.docx")
     db.update_lead(lead_id, **fields)
-    summary = pipeline.lead_summary(lead_id)
+    summary = packages.lead_summary(lead_id)
     bus.publish("lead", summary)
     return summary
 
@@ -139,7 +139,7 @@ async def lead_gap_questions(lead_id: int):
     """Ask the user 1 to 3 questions whose answers could truthfully strengthen this lead's resume."""
     lead_or_404(lead_id)
     try:
-        return {"added": await pipeline.gap_questions(lead_id)}
+        return {"added": await packages.gap_questions(lead_id)}
     except ai.AIError as e:
         raise ai_error(e)
 
@@ -148,7 +148,7 @@ async def lead_gap_questions(lead_id: int):
 async def lead_apply_answers(lead_id: int):
     """Rework this lead's resume with the answers just given (in the background)."""
     lead_or_404(lead_id)
-    background.spawn(pipeline.apply_answers(lead_id), error_title="Couldn't update the resume", lead_id=lead_id)
+    background.spawn(packages.apply_answers(lead_id), error_title="Couldn't update the resume", lead_id=lead_id)
     return {"ok": True}
 
 
@@ -156,7 +156,7 @@ async def lead_apply_answers(lead_id: int):
 async def rebuild_package(lead_id: int):
     """Build (or rebuild) the full application package for one lead, in the background."""
     lead_or_404(lead_id)
-    background.spawn(pipeline.build_package(lead_id), error_title="Package failed", lead_id=lead_id)
+    background.spawn(packages.build_package(lead_id), error_title="Package failed", lead_id=lead_id)
     return {"ok": True}
 
 
@@ -166,10 +166,10 @@ async def add_manual_lead(body: dict):
     url, text = (body.get("url") or "").strip(), (body.get("text") or "").strip()
     if not url and not text:
         raise HTTPException(400, "paste a URL or the job text")
-    lead_id = pipeline.add_manual_lead(url, text, body.get("title") or "", body.get("company") or "", body.get("location", ""),
+    lead_id = packages.add_manual_lead(url, text, body.get("title") or "", body.get("company") or "", body.get("location", ""),
                                        body.get("kind", "posting"))
-    background.spawn(pipeline.build_package(lead_id), error_title="Package failed", lead_id=lead_id)
-    return pipeline.lead_summary(lead_id)
+    background.spawn(packages.build_package(lead_id), error_title="Package failed", lead_id=lead_id)
+    return packages.lead_summary(lead_id)
 
 
 @router.post("/api/leads/retriage")
@@ -193,13 +193,13 @@ async def retag_industries():
 @router.get("/api/tracker")
 def tracker():
     """The Tracker board: leads by application status, follow-ups due by tomorrow, response rate and applications per week."""
-    rows = db.q(f"SELECT {pipeline.LIST_FIELDS} FROM leads WHERE app_status IN ({','.join('?' * len(TRACK))}) ORDER BY updated_at DESC", TRACK)
+    rows = db.q(f"SELECT {packages.LIST_FIELDS} FROM leads WHERE app_status IN ({','.join('?' * len(TRACK))}) ORDER BY updated_at DESC", TRACK)
     columns = {status: [] for status in TRACK}
     for row in rows:
         columns[row["app_status"]].append(db.lead_row(row))
     applied = db.one("SELECT COUNT(*) n FROM leads WHERE applied_at IS NOT NULL")["n"]
     responded = db.one("SELECT COUNT(*) n FROM leads WHERE applied_at IS NOT NULL AND app_status IN ('assessment','interviewing','offer','rejected')")["n"]
-    due = db.q(f"SELECT {pipeline.LIST_FIELDS} FROM leads WHERE follow_up_at IS NOT NULL AND follow_up_at <= ? "
+    due = db.q(f"SELECT {packages.LIST_FIELDS} FROM leads WHERE follow_up_at IS NOT NULL AND follow_up_at <= ? "
                "AND app_status IN ('applied','assessment','interviewing') ORDER BY follow_up_at", ((date.today() + timedelta(days=1)).isoformat(),))
     weekly = db.q("SELECT strftime('%Y-%W', applied_at) wk, COUNT(*) n FROM leads WHERE applied_at IS NOT NULL GROUP BY wk ORDER BY wk DESC LIMIT 12")
     return {"columns": columns,

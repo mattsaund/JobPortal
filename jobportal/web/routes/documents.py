@@ -9,7 +9,7 @@ from jobportal.ai import client as ai
 from jobportal.candidate import profile
 from jobportal.core import db
 from jobportal.documents import exports, render, revise
-from jobportal.search import pipeline
+from jobportal.search import packages
 from jobportal.web.common import ai_error, lead_or_404
 
 router = APIRouter()
@@ -76,6 +76,6 @@ async def resume_check(lead_id: int):
     package = lead.get("package") or {}
     style = package.get("resume_style") or {"theme": "classic", "max_pages": 1}
     archetype = (package.get("resume_strategy") or {}).get("archetype", "")
-    package["resume_check"] = await pipeline.check_resume(lead["resume_md"], package.get("keywords") or [], style, archetype)
+    package["resume_check"] = await packages.check_resume(lead["resume_md"], package.get("keywords") or [], style, archetype)
     db.update_lead(lead_id, package=package)
     return package["resume_check"]
