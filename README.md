@@ -85,6 +85,16 @@ _Coming soon._
 - [ ] Screenshots and a demo video
 - [ ] Final presentation
 
+## To do
+
+- [ ] Add profile editing and creation
+- [ ] Job listing saving
+- [ ] Get a good color scheme
+- [ ] Pick a good font
+- [ ] Get a good logo
+- [ ] Change the name (maybe?)
+- [ ] Simplify the UI: fewer buttons and fewer words. Sleek, simple and easy to use.
+
 ## Built with
 
 - **Python** and **FastAPI** for the local server

@@ -135,4 +135,9 @@ nohup.out
 *.sublime-workspace
 *.swp
 *.swo
+
+# ---------------------------------------------------------------- Claude Code (AI coding assistant) files
 .claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
