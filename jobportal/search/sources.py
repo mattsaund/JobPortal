@@ -1,7 +1,8 @@
-"""The two checks on the Sources page. Neither one saves anything.
+"""The two checks on the Sources page (web/routes/search.py calls them). Neither one saves anything.
 
-detect_board finds the company job board behind a careers page address, so the user can add a company by pasting a link.
-test_collector runs one source by itself and reports how many of its jobs would pass the rule filters."""
+detect_board finds the company job board behind a careers page address, so the user can add a company by pasting a link. It
+uses collectors/ats.py to recognize the board and read it once. test_collector runs one source by itself, with the current
+settings, and reports how many of its jobs would pass the same rule filters a search run uses (pipeline.RuleFilters)."""
 import asyncio
 import re
 
@@ -10,7 +11,7 @@ from jobportal.search.collectors import COLLECTORS, ats
 from jobportal.search.collectors.base import Ctx
 from jobportal.search.pipeline import RuleFilters
 
-SUPPORTED_BOARDS = "Greenhouse, Lever, Ashby, Workday, UKG, iCIMS, SmartRecruiters"
+SUPPORTED_BOARDS = "Greenhouse, Lever, Ashby, Workday, UKG, iCIMS, SmartRecruiters"  # named in the "not found" message
 # Careers pages often embed or link the real job board. This finds such a link in the page's HTML.
 BOARD_LINK = re.compile(r"(https?://[a-z0-9.-]*(?:myworkdayjobs\.com|greenhouse\.io|lever\.co|ashbyhq\.com|icims\.com"
                         r"|ultipro\.com|smartrecruiters\.com)[^\"'\s<>]*)", re.I)
