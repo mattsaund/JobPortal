@@ -126,6 +126,10 @@ Start with [CONTRIBUTING.md](CONTRIBUTING.md). It has the team list, what to ins
 tests. Everything else, from how the code works to our school documents and design ideas, is in
 [documentation/](documentation/).
 
+> **Heads up: documents outside the `documentation/` folder are ignored.** Git only picks up PDF, Word, ODT, RTF, Pages and
+> Keynote files inside `documentation/`. Anywhere else in the repo they're skipped and never committed, so a real resume
+> can't end up here by accident. Save school documents, design files and notes in `documentation/`.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

@@ -209,7 +209,8 @@ Add or update a test with every bug fix and every feature.
 ## Rules
 
 1. **No personal data in the repo.** JobPortal starts empty. Never commit a real resume, a database, generated documents or
-   anyone's contact details. `.gitignore` blocks databases, PDFs and Word files, but check `git status` before you commit.
+   anyone's contact details. `.gitignore` blocks databases everywhere, and PDF, Word and other document files everywhere
+   except `documentation/`, but check `git status` before you commit.
 2. **Only the resume and the questions teach JobPortal about the user.** That means the imported resume, the standard
    questions and the questions asked along the way. Don't add other ways to feed the profile.
 3. **Keep it cross-platform.** Anything that touches the operating system (opening files and links, notifications, finding
