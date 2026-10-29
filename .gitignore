@@ -1,39 +1,138 @@
-# Python
+# What git should never track. Patterns without a leading slash match in every folder.
+
+# ---------------------------------------------------------------- macOS
+.DS_Store
+.DS_Store?
+._*
+.AppleDouble
+.LSOverride
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+.apdisk
+Network Trash Folder
+Temporary Items
+__MACOSX/
+
+# ---------------------------------------------------------------- Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.stackdump
+*.lnk
+
+# ---------------------------------------------------------------- Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ---------------------------------------------------------------- Python caches and builds
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
+*.egg
 *.egg-info/
+.eggs/
 build/
 dist/
+pip-wheel-metadata/
+__pypackages__/
+
+# Virtual environments
 .venv/
 venv/
+/env/
+ENV/
+
+# Test, lint and type-check caches
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+.hypothesis/
+.tox/
+.nox/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
+.ipynb_checkpoints/
 
-# JobPortal keeps user data outside the repo (see README, "Where your data lives").
-# These catch a JOBPORTAL_HOME pointed inside the checkout by mistake.
-data/
-jobportal-data/
-dev-data/
+# ---------------------------------------------------------------- Release builds
+# What the Release workflow makes (also if you run its steps on your own computer).
+/out/
+/dmg/
+JobPortal.AppDir/
+appimagetool
+pdf-engine/
+*.AppImage
+*.dmg
+*.exe
+*.msi
+*.msix
+*.cab
+
+# ---------------------------------------------------------------- JobPortal data
+# JobPortal keeps user data outside the repo (see README, "Your data"). These catch a data folder pointed inside the
+# checkout by mistake, and anything from one that got copied in.
+/data/
+/jobportal-data/
+/dev-data/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+*.pid
+chatgpt_auth.json
 
-# Personal files that should never be committed
+# Personal documents (resumes, cover letters, exports) never belong in the repo. Test fixtures are fictional and allowed.
 *.pdf
 *.docx
-!tests/fixtures/*.pdf
-!tests/fixtures/*.docx
-.env
+*.doc
+*.odt
+*.rtf
+*.pages
+!tests/fixtures/*
 
-# Editors, tools and OS files
+# ---------------------------------------------------------------- Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---------------------------------------------------------------- Logs, temporary and backup files
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+nohup.out
+
+# ---------------------------------------------------------------- Editors and tools
 .vscode/
 .idea/
-.claude/
+*.iml
+.fleet/
+.history/
+*.sublime-workspace
 *.swp
-.DS_Store
-._*
-Thumbs.db
-[Dd]esktop.ini
-*~
+*.swo
+.claude/
