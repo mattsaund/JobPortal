@@ -5,7 +5,8 @@ Windows, macOS and Linux.
 
 ## Set up
 
-1. Install Python 3.11 or newer, and Claude Code (run `claude` once to log in). For PDF export you need Chrome, Edge or Chromium.
+1. Install Python 3.11 or newer. For PDF export you need Chrome, Edge or Chromium. AI features need a ChatGPT Go, Plus or Pro
+   plan; sign in from inside the app.
 2. Clone the repository and install it in editable mode with the development tools:
 
    ```bash
@@ -31,8 +32,8 @@ python -m ruff check .
 python -m pytest
 ```
 
-Tests never call Claude: they use the `fake_claude` fixture in `tests/conftest.py`, and every test starts from an empty data
-folder. CI runs lint, tests, `jobportal --doctor`, a server smoke test and the start scripts on Ubuntu, macOS and Windows for
+Tests never call OpenAI. They use the `fake_ai` fixture in `tests/conftest.py` or the mock server in `tests/test_ai.py`.
+Every test starts from an empty data folder. CI runs lint, tests, `jobportal --doctor`, a server smoke test and the start scripts on Ubuntu, macOS and Windows for
 every push and pull request.
 
 ## Workflow
@@ -50,12 +51,11 @@ resume, database, generated document or anyone's contact details. Tests and exam
 
 **Keep it cross-platform.**
 - Anything that touches the operating system goes through `jobportal/osutil.py` (opening files and links, notifications,
-  finding Chrome, LibreOffice or Claude Code). Don't call `xdg-open`, `open`, `start` or other system commands directly.
+  finding Chrome or LibreOffice). Don't call `xdg-open`, `open`, `start` or other system commands directly.
 - Use `pathlib` for paths and pass `encoding="utf-8"` to every `read_text`, `write_text` and `open` (Windows defaults to a
   different encoding).
 - No shell-specific commands in Python, and no `strftime` codes that only exist on some systems (such as `%-d`).
-- Long text goes to Claude Code through stdin or a temporary file, never on the command line (Windows limits a command
-  line to about 32,000 characters).
+- Every AI request goes through `jobportal/ai.py`. ChatGPT tokens stay in `openai_auth.py` and the data folder.
 - Keep `run.sh` and `run.ps1` in step with each other.
 
 **Keep the AI truthful.** Prompts may let the model choose, reorder and rephrase, never invent. If the profile is missing
@@ -64,6 +64,18 @@ something, the answer is a question for the user (`profile.ask`), not a guess.
 **Match the surrounding code.** The backend is plain FastAPI and SQLite; the dashboard is vanilla JavaScript with no build
 step. Follow the existing style for naming, comments and structure. In anything user-facing, write plainly: no em dashes,
 and no middle dots as separators.
+
+## Releases
+
+Push a version tag (for example `v0.2.0`) to `main`. The Release workflow builds the Windows, macOS and Linux apps, tests that
+each one starts, and publishes them on the Releases page. Bump `__version__` in `jobportal/__init__.py` first.
+
+To build the app for your own system:
+
+```bash
+pip install -e ".[build]"
+pyinstaller --noconfirm packaging/jobportal.spec   # the app lands in dist/
+```
 
 ## Where things are
 

@@ -1,20 +1,21 @@
 """HTTP API and dashboard server. It binds to 127.0.0.1 only: JobPortal is a private, single-user tool."""
 import asyncio
+import html
 import json
 import re
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, analysis, bus, claude, db, extract, onboarding, osutil, pipeline, prompts, render
+from . import __version__, ai, analysis, bus, db, extract, onboarding, openai_auth, osutil, pipeline, prompts, render
 from . import profile as profile_mod
 from . import settings as settings_mod
 from .collectors import COLLECTORS, ats
 from .collectors.base import Ctx, RawJob
-from .config import APP_STATUSES, DATA, EFFORTS, LEADS_DIR, MODELS, STATIC
+from .config import APP_STATUSES, DATA, EFFORTS, LEADS_DIR, PORT, STATIC
 from .textutil import fingerprint, url_key
 
 _tasks: set[asyncio.Task] = set()
@@ -47,7 +48,7 @@ async def auto_runner():
 @asynccontextmanager
 async def lifespan(_app):
     db.conn()
-    bus.state["usage"] = db.kv_get("usage")
+    openai_auth.publish()
     settings_mod.migrate_defaults()
     db.ex("UPDATE leads SET stage='qualified' WHERE stage='packaging'")
     db.ex("UPDATE runs SET status='interrupted', finished_at=? WHERE status='running'", (db.now(),))
@@ -55,7 +56,7 @@ async def lifespan(_app):
     spawn(auto_runner())
     spawn(profile_mod.answers_watcher(settings_mod.get))
     yield
-    claude.kill_all()
+    ai.kill_all()
     for t in list(_tasks):
         t.cancel()
 
@@ -67,11 +68,14 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
 
 @app.middleware("http")
 async def local_only(request: Request, call_next):
-    """Refuse requests whose Host isn't this machine, so a web page can't reach the API through DNS rebinding."""
-    host = (request.headers.get("host") or "").rsplit(":", 1)[0].lower()
-    if host not in LOCAL_HOSTS:
-        from fastapi.responses import PlainTextResponse
+    """Refuse requests whose Host isn't this machine, so a web page can't reach the API through DNS rebinding. Also refuse
+    changes sent from any other site's pages: browsers mark those with an Origin that isn't the dashboard's own."""
+    host_port = (request.headers.get("host") or "").lower()
+    if host_port.rsplit(":", 1)[0] not in LOCAL_HOSTS:
         return PlainTextResponse("JobPortal only answers requests addressed to 127.0.0.1 or localhost.", status_code=403)
+    origin = (request.headers.get("origin") or "").lower()
+    if origin and request.method not in ("GET", "HEAD", "OPTIONS") and origin != f"http://{host_port}":
+        return PlainTextResponse("JobPortal only accepts changes from its own dashboard.", status_code=403)
     return await call_next(request)
 
 
@@ -114,9 +118,53 @@ async def events(request: Request):
 
 @app.get("/api/meta")
 def meta():
-    return {"version": __version__, "os": osutil.os_name(), "data_dir": str(DATA), "models": MODELS, "efforts": EFFORTS,
+    return {"version": __version__, "os": osutil.os_name(), "data_dir": str(DATA), "efforts": EFFORTS,
             "statuses": APP_STATUSES, "collectors": [{"key": k, "label": v[0]} for k, v in COLLECTORS.items()],
-            "pdf_ready": bool(osutil.find_chrome()), "claude_found": bool(osutil.find_claude(settings_mod.get()["ai"].get("claude_bin")))}
+            "pdf_ready": bool(osutil.find_chrome())}
+
+
+# ---------------------------------------------------------------- Sign in with ChatGPT
+def ai_http_error(e: Exception) -> HTTPException:
+    return HTTPException(401 if isinstance(e, ai.NotSignedIn) else 429 if isinstance(e, ai.UsageLimitError) else 502, str(e))
+
+
+@app.get("/api/ai/status")
+def ai_status():
+    return {**openai_auth.status(), "tokens": bus.state.get("tokens", 0), "web_search": ai.web_search_ok}
+
+
+@app.post("/api/ai/signin")
+def ai_signin():
+    """Start Sign in with ChatGPT; the dashboard opens the returned URL in the system browser."""
+    return {"url": openai_auth.start(PORT)}
+
+
+@app.get(openai_auth.CALLBACK_PATH)
+async def ai_callback(request: Request):
+    """OpenAI sends the browser back here after the user signs in."""
+    try:
+        st = await openai_auth.finish(dict(request.query_params))
+        who = f" ({st['email']})" if st.get("email") else ""
+        title, body = "You're signed in", f"JobPortal can now use your ChatGPT plan{who}. You can close this tab and go back to JobPortal."
+    except openai_auth.AuthError as e:
+        title, body = "Sign-in didn't finish", f"{e} Go back to JobPortal and try again."
+    return HTMLResponse(f"""<!doctype html><meta charset="utf-8"><title>JobPortal</title>
+<body style="background:#0c0d10;color:#ecebe7;font:15px/1.6 ui-monospace,Menlo,Consolas,monospace;display:grid;place-items:center;height:100vh;margin:0">
+<div style="max-width:520px;padding:28px;border:1px solid #262b34;border-radius:12px;background:#13151a">
+<h1 style="font-size:20px;margin:0 0 10px">{html.escape(title)}</h1><p style="margin:0">{html.escape(body)}</p></div></body>""")
+
+
+@app.post("/api/ai/signout")
+async def ai_signout():
+    return await openai_auth.sign_out()
+
+
+@app.get("/api/ai/models")
+async def ai_models(refresh: int = 0):
+    try:
+        return {"models": await ai.models(force=bool(refresh))}
+    except ai.AIError as e:
+        raise ai_http_error(e)
 
 
 @app.get("/api/stats")
@@ -235,8 +283,8 @@ async def lead_gap_questions(lead_id: int):
     _lead_or_404(lead_id)
     try:
         return {"added": await pipeline.gap_questions(lead_id)}
-    except claude.ClaudeError as e:
-        raise HTTPException(502, str(e))
+    except ai.AIError as e:
+        raise ai_http_error(e)
 
 
 @app.post("/api/leads/{lead_id}/apply-answers")
@@ -341,10 +389,10 @@ INSTRUCTION: {instruction}
 CURRENT DOCUMENT:
 {text}"""
     try:
-        out = await claude.run(prompt, system=system, schema=prompts.REVISE_SCHEMA, stage="revise", purpose=f"revise:{doc}",
+        out = await ai.run(prompt, system=system, schema=prompts.REVISE_SCHEMA, stage="revise", purpose=f"revise:{doc}",
                                lead_id=lead_id, label=f"revise {doc}", timeout=600)
-    except claude.ClaudeError as e:
-        raise HTTPException(502, str(e))
+    except ai.AIError as e:
+        raise ai_http_error(e)
     db.add_event(lead_id, "revise", f"{doc}: {instruction[:200]}")
     return {"text": out["text"], "change_summary": out.get("change_summary", "")}
 
@@ -706,8 +754,8 @@ async def profile_sync_answers():
 async def profile_voice():
     try:
         return await profile_mod.learn_voice("manual")
-    except claude.ClaudeError as e:
-        raise HTTPException(502, str(e))
+    except ai.AIError as e:
+        raise ai_http_error(e)
 
 
 @app.get("/api/profile/resume")
@@ -728,6 +776,16 @@ def open_data_folder():
     """Show the folder that holds the database, generated files and the imported resume."""
     DATA.mkdir(parents=True, exist_ok=True)
     return {"ok": osutil.open_path(DATA), "path": str(DATA)}
+
+
+@app.post("/api/quit")
+def quit_app(request: Request):
+    """Stop JobPortal. The dashboard offers this in a browser tab, where closing the tab leaves the server running."""
+    server = getattr(request.app.state, "server", None)
+    if server is None:
+        raise HTTPException(409, "This server can't be stopped from the dashboard.")
+    server.should_exit = True
+    return {"ok": True}
 
 
 @app.get("/api/questions")
@@ -861,10 +919,10 @@ async def library_revise(item_id: int, body: dict):
     prompt = (f"DOCUMENT TYPE: resume (layout {style['theme']}, page limit {style['max_pages']})\nJOB: none, this is a saved resume in the "
               f"candidate's collection (\"{it['name']}\")\n\nINSTRUCTION: {body.get('instruction', '')}\n\nCURRENT DOCUMENT:\n{body.get('text') or it['md']}")
     try:
-        out = await claude.run(prompt, system=system, schema=prompts.REVISE_SCHEMA, stage="revise", purpose="library-revise",
+        out = await ai.run(prompt, system=system, schema=prompts.REVISE_SCHEMA, stage="revise", purpose="library-revise",
                                label=f"revise saved resume: {it['name'][:24]}", timeout=600)
-    except claude.ClaudeError as e:
-        raise HTTPException(502, str(e))
+    except ai.AIError as e:
+        raise ai_http_error(e)
     return {"text": out["text"], "change_summary": out.get("change_summary", "")}
 
 
@@ -878,8 +936,8 @@ async def library_import(request: Request, filename: str, name: str = ""):
         return await library.import_file(filename, data, name)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    except claude.ClaudeError as e:
-        raise HTTPException(502, str(e))
+    except ai.AIError as e:
+        raise ai_http_error(e)
 
 
 @app.put("/api/library/{item_id}")
@@ -931,8 +989,8 @@ async def library_apply(item_id: int, lead_id: int, body: dict):
                        (lead.get("package") or {}).get("resume_style"), "saved from lead", lead_id)
     try:
         return await pipeline.use_saved_resume(lead_id, it, bool(body.get("tailor")))
-    except claude.ClaudeError as e:
-        raise HTTPException(502, str(e))
+    except ai.AIError as e:
+        raise ai_http_error(e)
 
 
 @app.get("/api/crm")
@@ -980,10 +1038,10 @@ async def retag_industries():
         for i in range(0, len(rows), 40):
             batch = [{"id": r["id"], "company": r["company"], "title": r["title"], "description": (r["description"] or "")[:400]} for r in rows[i:i + 40]]
             try:
-                out = await claude.run(json.dumps(batch), system=f"Tag each employer's industry with exactly one of: {'; '.join(inds)}. "
+                out = await ai.run(json.dumps(batch), system=f"Tag each employer's industry with exactly one of: {'; '.join(inds)}. "
                                        "Judge by what the employer does, not the role. Return one result per id.",
                                        schema=schema, stage="triage", purpose="retag-industries", label="retag industries", timeout=600)
-            except claude.ClaudeError as e:
+            except ai.AIError as e:
                 bus.publish("toast", {"title": "Re-tag failed", "body": str(e)[:200], "level": "error"})
                 return
             for r in out.get("results", []):

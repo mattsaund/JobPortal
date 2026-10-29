@@ -12,7 +12,7 @@ import re
 import time
 from datetime import date
 
-from . import bus, claude, db, prompts
+from . import ai, bus, db, prompts
 
 KEYS = ["facts", "project_bank", "story_bank", "targeting", "qa", "search_plan", "provenance", "skills_inventory", "voice"]
 VOICE_PLACEHOLDER = "(not learned yet)"
@@ -333,7 +333,7 @@ async def build(reason: str = "manual") -> dict:
 
 === CURRENT PROFILE (may include the candidate's own edits; keep them unless a source contradicts them) ===
 {json.dumps(current, indent=1)[:60000] if is_built() else '(first build: empty)'}"""
-            out = await claude.run(prompt, system=prompts.system("profile", prompts.PROFILE_SYSTEM), schema=prompts.PROFILE_SCHEMA,
+            out = await ai.run(prompt, system=prompts.system("profile", prompts.PROFILE_SYSTEM), schema=prompts.PROFILE_SCHEMA,
                                    stage="profile", purpose="profile-build", label="profile: build", timeout=2400)
             return await _finish("build", reason, out)
         except Exception as e:
@@ -369,7 +369,7 @@ open questions (drop the ones these answers resolve).
 
 === CURRENT PROFILE ===
 {json.dumps(current, indent=1)[:80000]}"""
-            out = await claude.run(prompt, system=prompts.system("profile", prompts.PROFILE_SYSTEM), schema=prompts.REFRESH_SCHEMA,
+            out = await ai.run(prompt, system=prompts.system("profile", prompts.PROFILE_SYSTEM), schema=prompts.REFRESH_SCHEMA,
                                    stage="profile", purpose="profile-update", label="profile: add answers", timeout=1800)
             return await _finish("update", reason, out)
         except Exception as e:
@@ -389,7 +389,7 @@ async def _finish(mode: str, reason: str, out: dict) -> dict:
     _mark_synced()
     db.kv_set("profile.built_at", db.now())
     entry = {"ts": db.now(), "mode": mode, "reason": reason, "sections": updated, "changes": out.get("changes") or [],
-             "cost_usd": round(out.get("_cost_usd", 0), 3)}
+             "tokens": out.get("_tokens", 0)}
     db.kv_set("profile.changelog", ([entry] + changelog())[:60])
     n = len(entry["changes"])
     bus.publish("toast", {"title": "Profile built" if mode == "build" else "Profile updated",
@@ -439,12 +439,12 @@ async def learn_voice(reason: str = "manual") -> dict:
     sample = (standard_answers().get("writing_sample") or "").strip()
     if len(sample) < 200:
         return {"ok": False, "message": "Paste a longer writing sample (a cover letter or a few paragraphs) in Standard answers first."}
-    out = await claude.run(f"WRITING SAMPLE:\n{sample[:40000]}", system=VOICE_SYSTEM, schema=VOICE_SCHEMA, stage="profile",
+    out = await ai.run(f"WRITING SAMPLE:\n{sample[:40000]}", system=VOICE_SYSTEM, schema=VOICE_SCHEMA, stage="profile",
                            purpose="profile-voice", label="profile: learn voice", timeout=900)
     save("voice", out["voice_md"].strip())
     db.kv_set("profile.voice_sample_sha", hashlib.sha1(sample.encode()).hexdigest())
     entry = {"ts": db.now(), "mode": "voice", "reason": reason, "sections": ["voice"],
-             "changes": [f"Learned your writing voice: {out.get('summary', '')[:200]}"], "cost_usd": round(out.get("_cost_usd", 0), 3)}
+             "changes": [f"Learned your writing voice: {out.get('summary', '')[:200]}"], "tokens": out.get("_tokens", 0)}
     db.kv_set("profile.changelog", ([entry] + changelog())[:60])
     bus.publish("profile", entry)
     bus.publish("toast", {"title": "Learned your writing voice", "body": out.get("summary", "")[:200]})

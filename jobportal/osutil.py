@@ -1,5 +1,5 @@
 """Everything that differs between Windows, macOS and Linux: opening files and links, desktop notifications,
-finding Chrome / Edge / Chromium (PDF export) and LibreOffice (old .doc files), and launching Claude Code."""
+and finding Chrome, Edge or Chromium (PDF export) and LibreOffice (old .doc files)."""
 import os
 import shutil
 import subprocess
@@ -121,35 +121,3 @@ def find_soffice() -> str | None:
     if IS_WIN:
         return _first_existing(Path(d) / r"LibreOffice\program\soffice.exe" for d in _win_dirs())
     return None
-
-
-def find_claude(setting: str = "claude") -> str | None:
-    """Path to the Claude Code CLI (`claude`), looking where its installers put it on each OS."""
-    setting = (setting or "claude").strip()
-    if Path(setting).is_file():
-        return setting
-    p = shutil.which(setting)
-    if p:
-        return p
-    home = Path.home()
-    exe = "claude.exe" if IS_WIN else "claude"
-    candidates = [home / ".local" / "bin" / exe, home / ".claude" / "local" / exe]
-    if IS_WIN:
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            candidates.append(Path(appdata) / "npm" / "claude.cmd")
-    else:
-        candidates += [Path("/opt/homebrew/bin/claude"), Path("/usr/local/bin/claude"), home / ".npm-global" / "bin" / "claude"]
-    return _first_existing(candidates)
-
-
-def claude_command(setting: str = "claude") -> list[str]:
-    """The argv prefix that starts Claude Code. On Windows an npm install is a .cmd shim, and cmd.exe would mangle the
-    JSON arguments we pass, so the shim is bypassed and node runs Claude Code's entry script directly."""
-    path = find_claude(setting) or setting or "claude"
-    if IS_WIN and path.lower().endswith((".cmd", ".bat")):
-        cli = Path(path).parent / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js"
-        node = shutil.which("node")
-        if cli.is_file() and node:
-            return [node, str(cli)]
-    return [path]

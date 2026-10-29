@@ -131,7 +131,7 @@ const closeModal = () => ($("#modal").innerHTML = "");
 function connect() {
   const es = new EventSource("/api/events");
   es.onmessage = (e) => { try { onEvent(JSON.parse(e.data)); } catch (err) { console.error(err); } };
-  es.onerror = () => { es.close(); setTimeout(connect, 2500); };
+  es.onerror = () => { es.close(); if (!S.quit) setTimeout(connect, 2500); };
 }
 const refreshSoon = debounce(() => { refreshStats(); if (S.route[0] === "leads") loadLeads(true); }, 2500);
 function onEvent({ kind, data }) {
@@ -139,7 +139,7 @@ function onEvent({ kind, data }) {
     const wasRunning = S.state.running;
     S.state = data;
     if (data.running && !wasRunning) S.runStart = Date.now();
-    renderAgents(); renderUsage();
+    renderAgents(); renderAI();
     if (S.route[0] === "leads") renderMission();
     if (wasRunning && !data.running) refreshSoon();
   } else if (kind === "log") {
@@ -151,9 +151,9 @@ function onEvent({ kind, data }) {
     refreshSoon();
   } else if (kind === "toast") {
     toast(data.title, data.body, data.level || "", data.lead_id);
-  } else if (kind === "usage") { S.state.usage = data; renderUsage(); }
+  } else if (kind === "ai") { onAIStatus(data); }
+  else if (kind === "tokens") { S.state.tokens = data; renderAI(); if (S.route[0] === "leads") renderMission(); }
   else if (kind === "agents") { S.state.active_agents = data; renderAgents(); }
-  else if (kind === "cost") { S.state.cost_usd = data; if (S.route[0] === "leads") renderMission(); }
   else if (kind === "run_done") { toast(`Run #${data.run_id} ${data.status}`, `${data.stats.qualified || 0} qualified, ${data.stats.packaged || 0} packaged`); refreshSoon(); }
   else if (kind === "profile") { S.profileCache = null; if (S.route[0] === "profile" && !S.dirty && !["answers", "questions"].includes(S.ptab)) renderProfile(); }
   else if (kind === "profile_status") { onProfileStatus(data); }
@@ -165,22 +165,42 @@ function onEvent({ kind, data }) {
 function renderNav() {
   const st = S.stats || {};
   const openQ = (S.questions || []).filter((q) => q.status === "open").length;
-  const items = [...(onboarded() ? [] : [["setup", "Set up", "!"]]), ["leads", "Leads", st.ready], ["crm", "Equity mining"], ["tracker", "Tracker", st.followups_due], ["resumes", "Resumes"], ["analysis", "Analysis"], ["dreams", "Dream list"], ["contacts", "Contacts"],
+  const items = [...(onboarded() && aiReady() ? [] : [["setup", "Set up", "!"]]), ["leads", "Leads", st.ready], ["crm", "Equity mining"], ["tracker", "Tracker", st.followups_due], ["resumes", "Resumes"], ["analysis", "Analysis"], ["dreams", "Dream list"], ["contacts", "Contacts"],
     ["sources", "Sources"], ["profile", "Profile", openQ], ["settings", "Settings"], ["runs", "Runs"]];
   $("#nav").innerHTML = items.map(([k, l, b]) =>
     `<a href="#/${k}" class="${S.route[0] === k || (k === "leads" && S.route[0] === "lead") ? "on" : ""}">${I[k]}${l}${b ? `<span class="badge">${b}</span>` : ""}</a>`).join("");
 }
-function renderUsage() {
-  const u = S.state.usage, w = u?.unifiedWindows || {};
-  const row = (lbl, x) => {
-    if (!x) return "";
-    const p = Math.round((x.utilization || 0) * 100);
-    const reset = x.resetsAt ? new Date(x.resetsAt * 1000) : null;
-    const when = reset ? (reset - Date.now() < 86400000 ? reset.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : reset.toLocaleDateString([], { weekday: "short" })) : "";
-    return `<div class="row" title="resets ${esc(when)}"><span>${lbl}</span><div class="bar ${p > 85 ? "bad" : p > 65 ? "warn" : ""}"><i style="width:${p}%"></i></div><span>${p}%</span></div>`;
-  };
-  $("#usage").innerHTML = u ? `<div>Claude usage</div>${row("5h", w.five_hour)}${row("7d", w.seven_day)}` : `<div>Claude usage</div><div class="small">shows after the first AI call</div>`;
+const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : (n || 0).toLocaleString());
+const aiReady = () => !!(S.state.ai && S.state.ai.signed_in);
+function renderAI() {
+  const el = $("#usage"); if (!el) return;
+  const a = S.state.ai || {};
+  el.innerHTML = a.signed_in
+    ? `<div>ChatGPT</div><div class="small" style="overflow:hidden;text-overflow:ellipsis" title="${esc(a.email || "")}">${esc(a.name || a.email || "signed in")}</div><div class="small">${fmtTokens(+S.state.tokens || 0)} tokens this session</div>`
+    : `<div>ChatGPT</div><div class="small">not signed in</div><button class="btn sm primary" data-act="ai-signin" style="margin-top:6px">Continue with ChatGPT</button>`;
 }
+function onAIStatus(data) {
+  const was = aiReady();
+  S.state.ai = data; renderAI(); renderNav();
+  if (!was && aiReady()) toast("Signed in with ChatGPT", data.email || data.name || "JobPortal can use your plan now.");
+  if (S.route[0] === "setup" && S.setupStep === "chatgpt" && aiReady()) renderSetup("resume");
+  if (S.route[0] === "settings" && !S.cfgDirty) renderSettings();
+}
+// Sign in with ChatGPT happens in the system browser; OpenAI sends it back to this app's server, which then publishes "ai".
+async function aiSignIn() {
+  const w = desktop() ? null : window.open("", "_blank");  // opened during the click so popup blockers allow it
+  try {
+    const r = await api("/api/ai/signin", { method: "POST" });
+    if (desktop()) window.pywebview.api.open_external(r.url); else if (w) w.location = r.url; else location.href = r.url;
+    toast("Finish signing in", "Sign in with ChatGPT in your browser. JobPortal updates when you're done.");
+  } catch (e) { if (w) w.close(); toast("Couldn't start sign-in", e.message, "error"); }
+}
+async function aiSignOut() {
+  const r = await api("/api/ai/signout", { method: "POST" });
+  toast("Signed out of ChatGPT", r.note || "JobPortal no longer uses your plan.");
+}
+$("#usage").addEventListener("click", (e) => { if (e.target.closest("[data-act=ai-signin]")) aiSignIn(); });
+
 // ---------- profile status (setup progress, builds, answers waiting to be added)
 const onboarded = () => { const st = S.pstatus || {}; return !!(st.has_resume && st.answers_saved && st.built); };
 function onProfileStatus(data) {
@@ -260,7 +280,8 @@ function renderMission() {
   const st = S.state, c = st.counts || {};
   const chips = [["found", c.found], ["candidates", c.candidates], ["triaged", c.triaged], ["qualified", c.qualified], ["packaged", c.packaged]]
     .filter(([, v]) => v != null).map(([k, v]) => `<span class="chip"><b>${v}</b> ${k}</span>`).join("");
-  const cost = st.cost_usd ? `<span class="chip" title="API-equivalent cost of this run's Claude calls (your subscription covers it)">≈$${(+st.cost_usd).toFixed(2)}</span>` : "";
+  const used = (+st.tokens || 0) - (+st.run_tokens_start || 0);
+  const cost = st.running && used > 0 ? `<span class="chip" title="AI tokens this run has used on your ChatGPT plan">${fmtTokens(used)} tokens</span>` : "";
   const t0 = st.started_at ? Date.parse(st.started_at) : S.runStart;
   const el2 = st.running && t0 ? Math.max(0, Math.floor((Date.now() - t0) / 1000)) : 0;
   el.innerHTML = `<div class="mission ${st.running ? "running" : ""}">
@@ -400,7 +421,7 @@ function leadCard(l, fresh) {
 }
 
 function addLeadModal() {
-  modal(`<h2>Add a lead</h2><p class="muted small">Paste any job link (LinkedIn, Workday, a post, a Reddit comment) or paste the job text. Claude builds the full package.</p>
+  modal(`<h2>Add a lead</h2><p class="muted small">Paste any job link (LinkedIn, Workday, a post, a Reddit comment) or paste the job text. JobPortal builds the full package.</p>
     <div class="stack"><label class="f"><span>URL</span><input type="url" id="al-url" placeholder="https://…"></label>
     <label class="f"><span>…or paste the posting text</span><textarea id="al-text" rows="7"></textarea></label>
     <div class="grid3"><label class="f"><span>Title (optional)</span><input type="text" id="al-title"></label>
@@ -410,7 +431,7 @@ function addLeadModal() {
   $("#al-go").onclick = async () => {
     try {
       const l = await api("/api/leads/manual", { method: "POST", body: { url: $("#al-url").value, text: $("#al-text").value, title: $("#al-title").value, company: $("#al-co").value, kind: $("#al-kind").value } });
-      closeModal(); toast("Building package", "Claude is researching and tailoring. It pops up here when it's ready.", "", l.id); location.hash = `#/lead/${l.id}`;
+      closeModal(); toast("Building package", "JobPortal is researching and tailoring. It pops up here when it's ready.", "", l.id); location.hash = `#/lead/${l.id}`;
     } catch (e) { toast("Couldn't add lead", e.message, "error"); }
   };
 }
@@ -428,10 +449,10 @@ async function renderLead(id, fromEvent) {
   const pkg = l.package || {}, fit = pkg.fit || {}, packaged = !!l.resume_md;
   const apply = safeUrl(l.apply_url) || safeUrl(l.url);
   let banner = "";
-  if (l.stage === "packaging") banner = `<div class="banner accent"><span class="spin"></span><div><b>Claude is building this package:</b> reading the posting, researching the team, finding contacts, tailoring your resume and cover letter. Usually 2 to 6 minutes.</div></div>`;
+  if (l.stage === "packaging") banner = `<div class="banner accent"><span class="spin"></span><div><b>JobPortal is building this package:</b> reading the posting, researching the team, finding contacts, tailoring your resume and cover letter. Usually 2 to 6 minutes.</div></div>`;
   else if (l.stage === "error") banner = `<div class="banner bad"><div><b>Package failed:</b> ${esc(l.stage_error)}</div><span class="spacer"></span><button class="btn sm" data-act="regen">Retry</button></div>`;
   else if (!packaged) banner = `<div class="banner"><div>${l.stage === "filtered" ? "Triage scored this below your threshold." : "Queued for packaging."} Want the full package now?</div><span class="spacer"></span><button class="btn primary sm" data-act="regen">Build package</button></div>`;
-  else if (l.stage === "closed") banner = `<div class="banner bad"><div><b>Claude couldn't find this posting open anymore.</b> Double-check the link before spending time on it.</div></div>`;
+  else if (l.stage === "closed") banner = `<div class="banner bad"><div><b>JobPortal couldn't find this posting open anymore.</b> Double-check the link before spending time on it.</div></div>`;
   if (packaged && ["applied", "assessment", "interviewing"].includes(l.app_status) && l.follow_up_at && daysUntil(l.follow_up_at) <= 0)
     banner += `<div class="banner accent"><div><b>Follow-up due.</b> A ready-to-send follow-up email is in the Emails tab.</div><span class="spacer"></span><button class="btn sm" data-act="ltabgo" data-tab="emails">Open emails</button></div>`;
 
@@ -483,7 +504,7 @@ function renderLeadTab() {
         <dt>Found via</dt><dd>${esc(l.source_detail || l.source)}</dd>
         <dt>Posting</dt><dd>${safeUrl(l.url) ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.slice(0, 70))}</a>` : "none"}</dd>
         <dt>Triage</dt><dd>${tri.score ?? "-"}, ${esc(tri.eligibility || "")}${tri.reasons?.length ? `: ${esc(tri.reasons.join("; "))}` : ""}</dd>
-        <dt>AI cost</dt><dd>about $${(+l.cost_usd || 0).toFixed(2)} API-equivalent</dd></dl></div>
+        <dt>AI usage</dt><dd>${(+l.tokens || 0).toLocaleString()} tokens</dd></dl></div>
       ${tri.red_flags?.length ? `<div class="card"><h3>Red flags</h3><ul class="clean warn">${tri.red_flags.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
       ${(cov.hit || cov.miss) ? `<div class="card"><h3>ATS keywords in your resume: ${Math.round((l.ats_coverage || 0) * 100)}%</h3><div class="cov">${(cov.hit || []).map((k) => `<span class="chip good">${esc(k)}</span>`).join("")}${(cov.miss || []).map((k) => `<span class="chip" title="Not in the resume. Add it only if it's true.">${esc(k)}</span>`).join("")}</div></div>` : ""}
     </div></div>`;
@@ -522,7 +543,7 @@ function renderLeadTab() {
         <div class="grid2"><label class="f"><span>To</span><input type="email" list="cemails" data-ef="to_addr" value="${esc(pickTo(e))}" placeholder="pick a contact or type an address"></label>
           <label class="f"><span>Subject</span><input type="text" data-ef="subject" value="${esc(e.subject)}"></label></div>
         <textarea data-ef="body">${esc(e.body)}</textarea>
-        <div class="revise" style="margin:0"><input type="text" data-erev="${i}" placeholder="Tell Claude how to change this email"><button class="btn sm" data-act="revise-email" data-i="${i}">Revise</button></div></div>`).join("")}
+        <div class="revise" style="margin:0"><input type="text" data-erev="${i}" placeholder="Say how to change this email"><button class="btn sm" data-act="revise-email" data-i="${i}">Revise</button></div></div>`).join("")}
         ${pkg.linkedin_note ? `<div class="card"><h3>LinkedIn connection note <span id="lncount" class="muted">${pkg.linkedin_note.length}/300</span></h3>
           <textarea id="lnote" rows="3" style="font-family:var(--sans)">${esc(pkg.linkedin_note)}</textarea>
           <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-lnote">Copy</button></div></div>` : ""}
@@ -532,7 +553,7 @@ function renderLeadTab() {
     const cs = pkg.contacts || [];
     const inp = (i, k, v, ph) => `<input type="text" data-cf="${k}" data-i="${i}" value="${esc(v || "")}" placeholder="${ph}">`;
     b.innerHTML = `<div class="card"><div class="row" style="margin-bottom:6px"><h3 style="margin:0">People to reach (${cs.length})</h3><span class="spacer"></span>${exportBtns(l.id, "contacts", ["csv"])}</div>
-      <p class="muted small" style="margin-top:0">Found by Claude on the public web. Every field is editable and saves when you leave it. <b>found</b> means the email was seen publicly; <b>pattern</b> means it was inferred from the company's email format (verify it).</p>
+      <p class="muted small" style="margin-top:0">Found by the AI on the public web. Every field is editable and saves when you leave it. <b>found</b> means the email was seen publicly; <b>pattern</b> means it was inferred from the company's email format (verify it).</p>
       ${cs.length ? `<table class="t"><thead><tr><th>Name / title / org</th><th>Email</th><th>LinkedIn and notes</th><th>Why them</th><th>Status</th><th></th></tr></thead><tbody>
       ${cs.map((c, i) => `<tr><td style="min-width:200px">${inp(i, "name", c.name, "Name")}<div style="height:4px"></div>${inp(i, "title", c.title, "Title")}<div style="height:4px"></div>${inp(i, "org", c.org, "Organization")}</td>
         <td style="min-width:220px">${inp(i, "email", c.email, "email@example.com")}<div class="row" style="margin-top:5px;gap:5px"><span class="chip ${c.email_confidence === "found" ? "good" : c.email_confidence === "pattern" ? "warn" : ""}">${esc(c.email_confidence || "unknown")}</span>${c.email ? `<button class="btn sm ghost" data-act="copytext" data-text="${esc(c.email)}">copy</button>` : ""}</div></td>
@@ -616,7 +637,7 @@ function mountDocEditor(container, o) {
   container.innerHTML = `<div class="toolbar"><button class="btn primary" data-de="save">Save</button>
       ${["pdf", "docx", "md"].map((f) => `<button class="btn" data-de="exp" data-fmt="${f}">${I.dl} ${f.toUpperCase()}</button>`).join("")}
       <span class="muted small mono" id="destate"></span></div>
-    <div class="revise"><input type="text" id="de-rev" placeholder="Tell Claude how to change it, e.g. “add 3 questions about system design, shorten the company history”"><button class="btn ai" data-de="revise"><i class=i-ai></i> Revise with AI</button></div>
+    <div class="revise"><input type="text" id="de-rev" placeholder="Say how to change it, e.g. “add 3 questions about system design, shorten the company history”"><button class="btn ai" data-de="revise"><i class=i-ai></i> Revise with AI</button></div>
     <div class="editor"><textarea id="de-ed" spellcheck="true">${esc(o.text)}</textarea><div class="card md" id="de-pv" style="max-height:76vh;overflow:auto"></div></div>`;
   const ed = $("#de-ed", container), pv = $("#de-pv", container), st = $("#destate", container);
   const draw = () => (pv.innerHTML = md(ed.value));
@@ -648,7 +669,7 @@ function mountEditor(container, o) {
       ${(o.files || []).map((f) => `<button class="btn" data-ed="file" data-file="${f}">${I.dl} ${f.split(".").pop().toUpperCase()}</button>`).join("")}
       ${o.original ? `<button class="btn ghost" data-ed="revert">Revert to AI version</button>` : ""}${o.tools || ""}
       <span class="muted small mono" id="edstate"></span><span class="spacer"></span><span class="chip warn" id="overflow" style="display:none"><i class=i-warn></i> spills past one page</span></div>
-    ${o.leadId || o.reviseUrl ? `<div class="revise"><input type="text" id="revise-in" placeholder="Tell Claude how to change it, e.g. “lead with the data pipeline project, emphasize SQL, cut the retail job to one bullet”"><button class="btn ai" data-ed="revise"><i class=i-ai></i> Revise with AI</button></div>` : ""}
+    ${o.leadId || o.reviseUrl ? `<div class="revise"><input type="text" id="revise-in" placeholder="Say how to change it, e.g. “lead with the data pipeline project, emphasize SQL, cut the retail job to one bullet”"><button class="btn ai" data-ed="revise"><i class=i-ai></i> Revise with AI</button></div>` : ""}
     ${o.coverage ? `<div style="margin-bottom:12px">${covHtml(o.coverage)}</div>` : ""}
     <div class="editor"><textarea id="ed" spellcheck="true">${esc(o.text)}</textarea>
       <div class="preview-wrap" id="pvw"><div class="preview-box" id="pvb"><iframe id="pv" sandbox="allow-same-origin" title="preview"></iframe></div></div></div>`;
@@ -744,7 +765,7 @@ function leadQuestionsPanel(l) {
   const qs = l.questions || [], open = qs.filter((q) => q.status === "open"), answered = qs.filter((q) => q.status === "answered");
   if (!l.resume_md) return "";
   if (!qs.length) return `<div class="banner"><div class="small">No open questions for this application.</div><span class="spacer"></span>
-    <button class="btn sm" data-act="lead-gapq" title="Ask Claude what you could tell it that would make this resume stronger"><i class=i-question></i> Find gaps to ask me about</button></div>`;
+    <button class="btn sm" data-act="lead-gapq" title="Ask the AI what you could tell it that would make this resume stronger"><i class=i-question></i> Find gaps to ask me about</button></div>`;
   return `<div class="card lq" style="margin-bottom:14px"><div class="row" style="margin-bottom:6px"><h3 style="margin:0"><i class=i-question></i> Questions that could strengthen this resume</h3>
       <span class="muted small">Answers are saved to your profile, so every future application benefits.</span><span class="spacer"></span>
       ${answered.length ? `<button class="btn primary sm ai" data-act="lead-apply" title="Add your answers to your profile, then rework this resume with them"><i class=i-ai></i> Update this resume with my answers</button>` : ""}</div>
@@ -872,7 +893,7 @@ async function renderSources(cfgOverride) {
       ${S.meta.collectors.map(({ key, label }) => `<div class="src">${toggle(`data-path="sources.${key}.enabled" data-bool="1"`, src[key]?.enabled)}
         <div><div class="name">${esc(label)}</div><div class="desc">${esc(SRC_HELP[key] || "")}</div>${cfgFor[key] ? `<div class="cfg">${cfgFor[key]}</div>` : ""}<div id="tr-${key}"></div></div>
         <button class="btn sm" data-act="test-src" data-key="${key}">Test</button></div>`).join("")}</div>
-    <div class="card"><h3>AI hunt missions</h3><p class="muted small" style="margin-top:-4px">Each mission is a Claude agent with web search that digs where no API reaches: social posts, comment threads, insiders' LinkedIn posts, forums, niche boards, recruiters, labs, campus pipelines, local news, contract awards and events. Every mission reads your profile, so it searches for your roles in your locations. “AI hunt only” runs every mission; “Everything” rotates through them so each run fits your usage window. Edit freely or add your own.</p>
+    <div class="card"><h3>AI hunt missions</h3><p class="muted small" style="margin-top:-4px">Each mission is an AI agent with web tools that digs where no API reaches: social posts, comment threads, insiders' LinkedIn posts, forums, niche boards, recruiters, labs, campus pipelines, local news, contract awards and events. Every mission reads your profile, so it searches for your roles in your locations. “AI hunt only” runs every mission; “Everything” rotates through them so each run fits your usage window. Edit freely or add your own.</p>
       <div class="row" style="margin-bottom:12px">${toggle(`data-path="sources.ai_hunt.enabled" data-bool="1"`, src.ai_hunt.enabled)}<span class="small">AI hunting enabled</span>
         <label class="row small" style="gap:6px;margin-left:14px">Per “Everything” run <select data-path="sources.ai_hunt.missions_per_run" data-num="1" style="width:auto">${[[0, "all missions"], [4, "4 (rotate)"], [7, "7 (rotate)"], [10, "10 (rotate)"]].map(([v, l]) => `<option value="${v}" ${(+src.ai_hunt.missions_per_run || 0) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
         <label class="row small" style="gap:6px;margin-left:14px">Depth <select data-path="sources.ai_hunt.depth" style="width:auto">${[["deep", "Deep (30+ searches each)"], ["standard", "Standard (~15)"], ["quick", "Quick (~8)"]].map(([v, l]) => `<option value="${v}" ${(src.ai_hunt.depth || "standard") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label><span class="spacer"></span>
@@ -1012,8 +1033,14 @@ const STAGE_HELP = { prefill: "Reads your resume during setup to pre-fill the st
   hunt: "AI hunt missions: agents that search the web, social media and threads.", package: "Builds each application package: research, contacts, resume, cover letter, emails, prep.",
   revise: "‘Revise with AI’ edits in the editor.", profile: "Builds your profile from your resume and answers, adds new answers, and learns your writing voice.",
   analysis: "The Analysis tab: fit and interest per work genre, and what to build next." };
+function modelOptions(selected, emptyLabel) {
+  const list = [...new Set([...(S.models || []), ...(selected ? [selected] : [])])];
+  return `<option value="">${esc(emptyLabel)}</option>` + list.map((m) => `<option ${m === selected ? "selected" : ""}>${esc(m)}</option>`).join("");
+}
 async function renderSettings() {
   S.cfg = await api("/api/settings");
+  try { const st = await api("/api/ai/status"); S.state.ai = st; S.aiWeb = st.web_search; } catch (_) {}
+  S.models = aiReady() ? ((await api("/api/ai/models").catch(() => null)) || { models: [] }).models : [];
   const defaults = await api("/api/prompts/defaults");
   const c = S.cfg;
   const num = (path, label, step = 1) => `<label class="f"><span>${label}</span><input type="number" step="${step}" data-path="${path}" value="${esc(getPath(c, path))}"></label>`;
@@ -1021,14 +1048,17 @@ async function renderSettings() {
     <div class="row"><input type="text" placeholder="Add…" data-chipadd="${path}" style="max-width:320px"><button class="btn sm" data-act="add-chip" data-path="${path}">Add</button></div></div>`;
   const lines = (path, label, rows = 5) => `<label class="f"><span>${label}</span><textarea data-list="${path}" rows="${rows}">${esc((getPath(c, path) || []).join("\n"))}</textarea></label>`;
   main.innerHTML = `<div class="page"><div class="page-h"><h1>Settings</h1></div><div class="stack">
-    <div class="card"><h3>AI: models and effort per stage</h3><p class="muted small" style="margin-top:-4px">Runs on your Claude account through Claude Code. Bigger models and more effort give better output and use more of your plan.</p>
-      <table class="t"><tbody>${Object.entries(c.ai.stages).map(([k, v]) => `<tr><td style="width:120px" class="mono"><b>${k}</b></td>
-        <td style="width:150px"><select data-path="ai.stages.${k}.model">${S.meta.models.map((m) => `<option ${m === v.model ? "selected" : ""}>${m}</option>`).join("")}</select></td>
-        <td style="width:150px"><select data-path="ai.stages.${k}.effort">${S.meta.efforts.map((m) => `<option ${m === v.effort ? "selected" : ""}>${m}</option>`).join("")}</select></td>
+    <div class="card"><h3>AI: ChatGPT</h3>
+      <div class="row" style="margin-bottom:8px">${aiReady() ? `<span>Signed in as <b>${esc(S.state.ai.email || S.state.ai.name || "your account")}</b></span><span class="spacer"></span><button class="btn sm" data-act="ai-signout">Sign out</button>`
+        : `<span class="muted">Not signed in.</span><span class="spacer"></span><button class="btn sm primary" data-act="ai-signin">Continue with ChatGPT</button>`}</div>
+      <p class="muted small" style="margin-top:0">JobPortal's AI runs on your ChatGPT plan (Go, Plus or Pro). Usage counts against your plan. Set a weekly cap for JobPortal in ChatGPT settings.
+        Web search ${S.aiWeb === false ? "isn't available on your account, so agents read pages directly" : S.aiWeb ? "is available" : "is checked on the first web task"}.</p>
+      <label class="f" style="max-width:420px"><span>Default model</span><select data-path="ai.model">${modelOptions(c.ai.model, "First model your plan lists")}</select></label>
+      <table class="t" style="margin-top:10px"><tbody>${Object.entries(c.ai.stages).map(([k, v]) => `<tr><td style="width:110px" class="mono"><b>${k}</b></td>
+        <td style="width:220px"><select data-path="ai.stages.${k}.model">${modelOptions(v.model, "Default model")}</select></td>
+        <td style="width:130px"><select data-path="ai.stages.${k}.effort">${S.meta.efforts.map((m) => `<option ${m === v.effort ? "selected" : ""}>${m}</option>`).join("")}</select></td>
         <td class="muted small">${STAGE_HELP[k] || ""}</td></tr>`).join("")}</tbody></table>
-      <div class="grid3" style="margin-top:14px">${num("ai.max_parallel", "Parallel agents")}${num("ai.budget_per_call_usd", "Safety cap per call (API-equivalent $)", 0.5)}${num("ai.pause_at_5h_utilization", "Pause at 5-hour usage (0 to 1)", 0.01)}</div>
-      <label class="f" style="margin-top:12px"><span>Claude Code command or full path</span><input type="text" data-path="ai.claude_bin" value="${esc(c.ai.claude_bin || "claude")}"></label>
-      <div class="row" style="margin-top:12px">${toggle(`data-path="ai.strip_api_key" data-bool="1"`, c.ai.strip_api_key)}<span class="small">Always use my Claude subscription login (ignore ANTHROPIC_API_KEY)</span></div></div>
+      <div class="grid3" style="margin-top:14px">${num("ai.max_parallel", "Parallel agents")}</div></div>
     <div class="card"><h3>Runs</h3><div class="grid3">${num("run.min_score", "Min score to qualify (0 to 100)")}${num("run.max_triage", "Max candidates triaged per run")}${num("run.triage_batch", "Triage batch size")}
       ${num("run.max_packages", "Max packages per run")}${num("run.max_age_days", "Ignore postings older than (days)")}${num("run.auto_run_hours", "Auto-run every N hours (0 = off)", 0.5)}</div>
       <div class="row" style="margin-top:12px">${toggle(`data-path="run.package_web_research" data-bool="1"`, c.run.package_web_research)}<span class="small">Packages do live web research (verify posting, company news, find contacts)</span></div></div>
@@ -1047,7 +1077,8 @@ async function renderSettings() {
       <div class="row" style="margin-top:12px">${toggle(`data-path="filters.require_tech_title" data-bool="1"`, c.filters.require_tech_title)}<span class="small">Require a tech/science word in the title for job-board sources</span></div></div>
     <div class="card"><h3>Your data</h3><p class="muted small" style="margin-top:-4px">Everything JobPortal stores (database, imported resume, generated files) lives in one folder on this computer, never in the code folder. Delete the folder to start over from zero.</p>
       <div class="row"><span class="mono small" style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(S.meta.data_dir || "")}</span><button class="btn sm" data-act="open-data">Open folder</button></div>
-      <div class="muted small" style="margin-top:8px">JobPortal ${esc(S.meta.version || "")} on ${esc(S.meta.os || "")}. PDF export: ${S.meta.pdf_ready ? "ready" : "needs Chrome, Edge or Chromium"}. Claude Code: ${S.meta.claude_found ? "found" : "not found"}.</div></div>
+      ${desktop() ? "" : `<div class="row" style="margin-top:8px"><span class="muted small" style="flex:1">Closing this tab leaves JobPortal running so searches can finish. Quit stops it.</span><button class="btn sm" data-act="quit">Quit JobPortal</button></div>`}
+      <div class="muted small" style="margin-top:8px">JobPortal ${esc(S.meta.version || "")} on ${esc(S.meta.os || "")}. PDF export: ${S.meta.pdf_ready ? "ready" : "needs Chrome, Edge or Chromium"}. ChatGPT: ${aiReady() ? "signed in" : "not signed in"}.</div></div>
     <div class="card"><h3>Prompts (advanced)</h3><p class="muted small" style="margin-top:-4px">Override the system prompts. Leave blank to use the built-in default (shown greyed).</p>
       ${Object.keys(defaults).map((k) => `<label class="f" style="margin-bottom:12px"><span>${k}</span><textarea rows="5" data-path="prompts.${k}" placeholder="${esc(defaults[k])}">${esc(c.prompts?.[k] || "")}</textarea></label>`).join("")}</div>
     <div class="sticky-save"><button class="btn primary" data-act="save-cfg">Save settings</button></div></div></div>`;
@@ -1060,10 +1091,10 @@ async function renderRuns(id) {
   const runs = await api("/api/runs");
   const dur = (r) => r.finished_at ? Math.round((new Date(r.finished_at) - new Date(r.started_at)) / 60000) + " min" : "…";
   main.innerHTML = `<div class="page"><div class="page-h"><h1>Runs</h1><span class="sub">History of every mega search.</span></div>
-    <div class="card" style="margin-bottom:16px"><table class="t"><thead><tr><th>#</th><th>Started</th><th>Mode</th><th>Status</th><th>Duration</th><th>Found</th><th>Candidates</th><th>Triaged</th><th>Qualified</th><th>Packaged</th><th>≈ Cost</th></tr></thead><tbody>
+    <div class="card" style="margin-bottom:16px"><table class="t"><thead><tr><th>#</th><th>Started</th><th>Mode</th><th>Status</th><th>Duration</th><th>Found</th><th>Candidates</th><th>Triaged</th><th>Qualified</th><th>Packaged</th><th>Tokens</th></tr></thead><tbody>
     ${runs.map((r) => `<tr style="cursor:pointer" data-act="runlog" data-id="${r.id}"><td class="mono">${r.id}</td><td>${esc(new Date(r.started_at).toLocaleString())}</td><td>${esc(r.mode)}</td>
       <td><span class="chip ${r.status === "done" ? "good" : r.status === "running" ? "accent" : "warn"}">${esc(r.status)}</span></td><td>${dur(r)}</td>
-      <td>${r.stats.found ?? ""}</td><td>${r.stats.candidates ?? ""}</td><td>${r.stats.triaged ?? ""}</td><td>${r.stats.qualified ?? ""}</td><td>${r.stats.packaged ?? ""}</td><td>$${(+r.cost_usd || 0).toFixed(2)}</td></tr>`).join("") || `<tr><td colspan="11" class="muted">No runs yet.</td></tr>`}</tbody></table></div>
+      <td>${r.stats.found ?? ""}</td><td>${r.stats.candidates ?? ""}</td><td>${r.stats.triaged ?? ""}</td><td>${r.stats.qualified ?? ""}</td><td>${r.stats.packaged ?? ""}</td><td>${fmtTokens(+r.tokens || 0)}</td></tr>`).join("") || `<tr><td colspan="11" class="muted">No runs yet.</td></tr>`}</tbody></table></div>
     <div id="runlog"></div></div>`;
   if (id || runs[0]) showRunLog(id || runs[0].id, runs.find((r) => r.id === +(id || runs[0].id)));
 }
@@ -1165,6 +1196,14 @@ main.addEventListener("click", async (e) => {
       try { const r = await api("/api/profile/voice", { method: "POST" }); if (!r.ok) toast("Nothing to learn from yet", r.message, "error"); }
       catch (err) { toast("Couldn't learn your voice", err.message, "error"); }
       if (S.route[0] === "profile") renderProfile(S.ptab);
+    }
+    else if (a === "ai-signin") aiSignIn();
+    else if (a === "ai-signout") { await aiSignOut(); if (S.route[0] === "settings") renderSettings(); }
+    else if (a === "quit") {
+      if (S.state.running && !confirm("A search is running. Quitting stops it; progress so far is saved.")) return;
+      await api("/api/quit", { method: "POST" });
+      S.quit = true;
+      document.body.innerHTML = `<div class="empty" style="padding:64px"><b>JobPortal has quit</b>You can close this tab. Open JobPortal again to pick up where you left off.</div>`;
     }
     else if (a === "open-data") { const r = await api("/api/open-data-folder", { method: "POST" }); if (!r.ok) toast("Couldn't open the folder", r.path, "error"); }
     else if (a === "save-std-answers") {
@@ -1277,7 +1316,7 @@ window.addEventListener("beforeunload", (e) => { if (S.dirty || S.cfgDirty) { e.
   await refreshStats();
   S.state = S.stats.state;
   if (S.state.running) S.runStart = Date.now();
-  renderUsage(); renderAgents();
+  renderAI(); renderAgents();
   try { S.pstatus = await api("/api/profile/status"); } catch (_) { S.pstatus = {}; }
   renderProfilePill();
   try { S.questions = await api("/api/questions"); } catch (_) {}
@@ -1366,7 +1405,7 @@ async function renderAnalysis() {
   const steer = res?.search_steering || {};
   main.innerHTML = `<div class="page">
     <div class="page-h"><h1>Analysis</h1><span class="sub">Where you fit, where the market is, and what to build next.</span><span class="spacer"></span>
-      <span class="muted small mono">${latest ? `analyzed ${esc(fmtTs(latest.ts))}, about $${(+latest.cost_usd || 0).toFixed(2)}` : "not analyzed yet"}</span>
+      <span class="muted small mono">${latest ? `analyzed ${esc(fmtTs(latest.ts))}, ${fmtTokens(+latest.tokens || 0)} tokens` : "not analyzed yet"}</span>
       <button class="btn ${res ? "" : "primary"}" data-act="run-analysis" ${d.running ? "disabled" : ""}>${d.running ? `<span class="spin"></span> Analyzing` : res ? "<i class=i-refresh></i> Re-analyze" : "Run analysis"}</button></div>
     ${!res ? `<div class="banner accent"><div><b>Run the analysis</b> to score your fit and interest across ${rows.length} work genres against real market demand and get concrete moves. It re-runs automatically whenever your profile changes.</div></div>` : ""}
     <div class="cols" style="grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)">
@@ -1732,7 +1771,7 @@ async function libUseModal(itemId) {
     <label class="row small" style="gap:8px;margin-top:10px">${toggle(`id="lu-backup"`, false)}Save the lead's current resume to the collection first</label>
     <p class="muted small" style="margin:8px 0 0">The lead's resume is replaced. “Revert to AI version” in its editor still brings back the generated one.</p>
     <div class="row" style="margin-top:12px;justify-content:flex-end;gap:8px"><button class="btn ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" id="lu-asis" disabled>Use as-is</button><button class="btn primary ai" id="lu-tailor" disabled title="Claude re-angles it toward the job, then it gets the usual check and recruiter review"><i class=i-ai></i> Tailor to the job</button></div>`);
+      <button class="btn" id="lu-asis" disabled>Use as-is</button><button class="btn primary ai" id="lu-tailor" disabled title="The AI re-angles it toward the job, then it gets the usual check and recruiter review"><i class=i-ai></i> Tailor to the job</button></div>`);
   let pick = null;
   const load = async (q) => {
     const d = await api(`/api/leads?tab=${q ? "all" : "ready"}&q=${encodeURIComponent(q || "")}&limit=60`);
@@ -1816,7 +1855,7 @@ async function renderProfileOverview(b) {
           <div class="row"><span style="flex:1">Tell it about a project, skill or result that isn't on your resume</span><a class="btn sm" href="#/profile/questions">Add</a></div>
           <div class="row"><span style="flex:1">Import a newer resume when yours changes</span><a class="btn sm" href="#/profile/resume">Resume</a></div>
           <div class="row"><span style="flex:1">Change what you're looking for: roles, levels, locations</span><a class="btn sm" href="#/profile/answers">Answers</a></div></div></div>
-        <div class="card"><h3>History</h3>${(d.changelog || []).map((c) => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><div class="row small"><span class="chip ${c.mode === "build" ? "violet" : "blue"}">${esc(c.mode)}</span><span class="mono muted">${esc(fmtTs(c.ts))}</span><span class="muted">${esc(c.reason || "")}</span><span class="spacer"></span>${c.cost_usd ? `<span class="muted mono">about $${(+c.cost_usd).toFixed(2)}</span>` : ""}</div>
+        <div class="card"><h3>History</h3>${(d.changelog || []).map((c) => `<div style="padding:8px 0;border-bottom:1px solid var(--line)"><div class="row small"><span class="chip ${c.mode === "build" ? "violet" : "blue"}">${esc(c.mode)}</span><span class="mono muted">${esc(fmtTs(c.ts))}</span><span class="muted">${esc(c.reason || "")}</span><span class="spacer"></span>${c.tokens ? `<span class="muted mono">${fmtTokens(c.tokens)} tokens</span>` : ""}</div>
           <ul class="clean small" style="margin-top:6px">${(c.changes || []).slice(0, 6).map((x) => `<li>${esc(x)}</li>`).join("") || "<li class='muted'>no material changes</li>"}</ul></div>`).join("") || `<div class="muted small">Nothing yet.</div>`}</div></div>
       <div class="stack">
         <div class="card"><div class="row" style="margin-bottom:6px"><h3 style="margin:0">Voice</h3><span class="spacer"></span>
@@ -1827,7 +1866,7 @@ async function renderProfileOverview(b) {
 }
 
 // ================================================================ SETUP (resume -> standard questions -> profile)
-const SETUP_STEPS = [["resume", "Import your resume"], ["answers", "Answer the standard questions"], ["build", "Build your profile"]];
+const SETUP_STEPS = [["chatgpt", "Continue with ChatGPT"], ["resume", "Import your resume"], ["answers", "Answer the standard questions"], ["build", "Build your profile"]];
 function missingRequired(answers) {
   const req = (S.onb && S.onb.required) || [], labels = {};
   ((S.onb && S.onb.questions) || []).forEach((sec) => sec.fields.forEach((f) => (labels[f.id] = f.label)));
@@ -1902,16 +1941,25 @@ async function renderSetup(step) {
   const d = (S.onb = await api("/api/onboarding"));
   S.pstatus = d.status; renderProfilePill();
   if (step) S.setupStep = step;
-  if (!S.setupStep || !SETUP_STEPS.some(([k]) => k === S.setupStep)) S.setupStep = !d.resume ? "resume" : !d.answers_saved ? "answers" : "build";
-  const cur = S.setupStep, idx = SETUP_STEPS.findIndex(([k]) => k === cur);
-  const done = { resume: !!d.resume, answers: d.answers_saved, build: d.profile_built };
-  main.innerHTML = `<div class="page setup"><div class="page-h"><h1>Set up JobPortal</h1><span class="sub">Three steps. Your data stays on this computer; only what's needed for each AI task goes to Claude.</span></div>
+  try { S.state.ai = await api("/api/ai/status"); renderAI(); } catch (_) {}
+  if (!S.setupStep || !SETUP_STEPS.some(([k]) => k === S.setupStep)) S.setupStep = !aiReady() ? "chatgpt" : !d.resume ? "resume" : !d.answers_saved ? "answers" : "build";
+  const cur = S.setupStep;
+  const done = { chatgpt: aiReady(), resume: !!d.resume, answers: d.answers_saved, build: d.profile_built };
+  main.innerHTML = `<div class="page setup"><div class="page-h"><h1>Set up JobPortal</h1><span class="sub">Four steps. Your data stays on this computer. Each AI task sends OpenAI only what it needs, through your ChatGPT sign-in.</span></div>
     <div class="stepper">${SETUP_STEPS.map(([k, l], i) => `<a class="step ${k === cur ? "on" : ""} ${done[k] ? "done" : ""}" data-step="${k}"><span class="num">${done[k] && k !== cur ? "<i class=i-check></i>" : i + 1}</span>${esc(l)}</a>`).join("")}</div>
     <div id="setup-body"></div></div>`;
-  $$(".stepper .step").forEach((a) => (a.onclick = () => { if (a.dataset.step === "resume" || d.resume) renderSetup(a.dataset.step); }));
+  $$(".stepper .step").forEach((a) => (a.onclick = () => { if (["chatgpt", "resume"].includes(a.dataset.step) || d.resume) renderSetup(a.dataset.step); }));
   const body = $("#setup-body");
-  if (cur === "resume") {
-    body.innerHTML = `<div class="card"><h3>Step 1: your resume</h3>
+  if (cur === "chatgpt") {
+    const a = S.state.ai || {};
+    body.innerHTML = `<div class="card"><h3>Step 1: connect ChatGPT</h3>
+      <p style="margin-top:0">JobPortal's AI runs on your own ChatGPT plan. Sign in once, and it reads your resume, scores jobs and writes your applications. It needs a ChatGPT Go, Plus or Pro plan.</p>
+      <p class="muted small">ChatGPT shares only your name and email with JobPortal. Usage counts against your plan, and you can set a weekly cap for JobPortal in ChatGPT settings.</p>
+      ${a.signed_in ? `<div class="banner"><div><i class=i-check></i> Signed in as <b>${esc(a.email || a.name || "your account")}</b>.</div><span class="spacer"></span><button class="btn primary sm" data-go="resume">Continue</button></div>`
+        : `<button class="btn primary" data-act="ai-signin">Continue with ChatGPT</button>`}</div>`;
+    body.querySelector("[data-go]")?.addEventListener("click", () => renderSetup("resume"));
+  } else if (cur === "resume") {
+    body.innerHTML = `<div class="card"><h3>Step 2: your resume</h3>
       <p style="margin-top:0">JobPortal reads your resume to learn your experience, projects and skills. It's a source of facts, not a template: every resume it makes for a job is written fresh.</p>
       ${d.resume ? `<div class="banner"><div><i class=i-doc></i> Using <b>${esc(d.resume.filename)}</b>, imported ${esc(fmtTs(d.resume.imported_at))}.</div><span class="spacer"></span><button class="btn primary sm" data-go="answers">Keep it and continue</button></div>` : ""}
       ${resumeDropzone(d.accept, d.resume ? "Or import a different resume" : "Drop your resume here")}</div>`;
@@ -1925,7 +1973,7 @@ async function renderSetup(step) {
     const pre = { ...(d.prefill || {}), ...(S.prefill || {}) };
     const vals = { ...d.answers };
     if (!d.answers_saved) for (const [k, v] of Object.entries(pre)) { if (k.startsWith("_")) continue; const have = vals[k]; if (have == null || (Array.isArray(have) ? !have.length : !String(have).trim())) vals[k] = v; }
-    body.innerHTML = `<div class="card" style="margin-bottom:14px"><h3>Step 2: the standard questions</h3><p style="margin:0">These are the questions almost every application asks. Answer them once: JobPortal uses them to search (roles, levels, locations), to fill in every Application kit, and to keep your resumes truthful. Fields marked "from resume" were read from your resume, so check them.</p></div>
+    body.innerHTML = `<div class="card" style="margin-bottom:14px"><h3>Step 3: the standard questions</h3><p style="margin:0">These are the questions almost every application asks. Answer them once: JobPortal uses them to search (roles, levels, locations), to fill in every Application kit, and to keep your resumes truthful. Fields marked "from resume" were read from your resume, so check them.</p></div>
       <div id="qform">${answersForm(d.questions, vals, d.answers_saved ? {} : pre)}</div>
       <div class="sticky-save"><button class="btn ghost" data-go="resume">Back</button><span class="spacer"></span><span class="muted small" id="setup-state"></span><button class="btn primary" id="setup-save">Save and build my profile</button></div>`;
     body.querySelector("[data-go]").onclick = () => renderSetup("resume");
@@ -1948,14 +1996,14 @@ function setupStatusChanged() {
   const card = $("#build-card"); if (!card) return;
   const st = S.pstatus || {};
   if (st.busy || (!st.built && !st.error)) {
-    card.innerHTML = `<h3>Step 3: building your profile</h3><div class="row" style="margin:10px 0"><span class="spin"></span><b>${esc(st.phase || "Starting")}</b></div>
-      <p class="muted" style="margin:0">Claude is reading your resume and answers and writing your profile: your experience record, skills inventory, interview stories and search plan. This usually takes 1 to 4 minutes. You can leave this page; it keeps going.</p>`;
+    card.innerHTML = `<h3>Step 4: building your profile</h3><div class="row" style="margin:10px 0"><span class="spin"></span><b>${esc(st.phase || "Starting")}</b></div>
+      <p class="muted" style="margin:0">The AI is reading your resume and answers and writing your profile: your experience record, skills inventory, interview stories and search plan. This usually takes 1 to 4 minutes. You can leave this page; it keeps going.</p>`;
   } else if (st.error) {
-    card.innerHTML = `<h3>Step 3: building your profile</h3><div class="banner bad"><div><b>The build failed:</b> ${esc(st.error)}</div></div>
-      <p class="muted small">Check that Claude Code is installed and logged in (run <span class="mono">jobportal --doctor</span>), then try again.</p>
+    card.innerHTML = `<h3>Step 4: building your profile</h3><div class="banner bad"><div><b>The build failed:</b> ${esc(st.error)}</div></div>
+      <p class="muted small">Check that you're signed in with ChatGPT on a Go, Plus or Pro plan, then try again.</p>
       <div class="row"><button class="btn primary" data-act="profile-build">Try again</button><button class="btn ghost" data-act="setup-step" data-step="answers">Back to the questions</button></div>`;
   } else {
-    card.innerHTML = `<h3>Step 3: done</h3><div class="row" style="margin:6px 0 12px"><i class=i-check style="color:var(--good)"></i><b>Your profile is ready.</b></div>
+    card.innerHTML = `<h3>Step 4: done</h3><div class="row" style="margin:6px 0 12px"><i class=i-check style="color:var(--good)"></i><b>Your profile is ready.</b></div>
       <p style="margin-top:0">Run your first search: JobPortal sweeps job boards, company career sites, social media and comment threads, scores every job against your profile, and writes a tailored application package for the best ones.</p>
       ${st.open_questions ? `<div class="banner accent"><div><b>${st.open_questions} question${st.open_questions > 1 ? "s" : ""}</b> would make your applications stronger. Answer them any time; your profile updates on its own.</div><span class="spacer"></span><a class="btn sm" href="#/profile/questions">Answer now</a></div>` : ""}
       <div class="row" style="margin-top:12px"><a class="btn primary" href="#/leads">Go to Leads and run a search</a><a class="btn" href="#/profile">Review my profile</a><a class="btn ghost" href="#/settings">Settings</a></div>`;

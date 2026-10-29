@@ -29,8 +29,7 @@ WORKSPACE = DATA / "agent_workspace"  # empty working folder for the AI agents (
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("JOBPORTAL_PORT") or 8788)
 
-MODELS = ["fable", "opus", "sonnet", "haiku"]
-EFFORTS = ["low", "medium", "high", "xhigh", "max"]
+EFFORTS = ["low", "medium", "high"]  # reasoning effort per stage; models come from the signed-in ChatGPT account
 
 APP_STATUSES = ["new", "saved", "applied", "assessment", "interviewing", "offer",
                 "rejected", "ghosted", "withdrawn", "trashed"]
@@ -206,20 +205,17 @@ _INCLUDE, _EXCLUDE = title_filters(DEFAULT_LEVELS)
 
 DEFAULT_SETTINGS = {
     "ai": {
-        "stages": {
-            "prefill": {"model": "haiku", "effort": "low"},
-            "triage": {"model": "haiku", "effort": "low"},
-            "hunt": {"model": "sonnet", "effort": "high"},
-            "package": {"model": "opus", "effort": "high"},
-            "revise": {"model": "sonnet", "effort": "medium"},
-            "profile": {"model": "opus", "effort": "high"},
-            "analysis": {"model": "opus", "effort": "medium"},
+        "model": "",  # empty = the first model the signed-in ChatGPT account lists
+        "stages": {  # a stage's model overrides the default; "" uses it
+            "prefill": {"model": "", "effort": "low"},
+            "triage": {"model": "", "effort": "low"},
+            "hunt": {"model": "", "effort": "medium"},
+            "package": {"model": "", "effort": "high"},
+            "revise": {"model": "", "effort": "low"},
+            "profile": {"model": "", "effort": "medium"},
+            "analysis": {"model": "", "effort": "medium"},
         },
         "max_parallel": 3,
-        "budget_per_call_usd": 4.0,
-        "pause_at_5h_utilization": 0.92,
-        "strip_api_key": True,
-        "claude_bin": "claude",
     },
     "run": {
         "max_triage": 600,

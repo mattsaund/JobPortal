@@ -26,6 +26,27 @@ def test_refuses_foreign_host_headers(client):
     assert client.get("/api/meta", headers={"host": "localhost:8788"}).status_code == 200
 
 
+def test_refuses_changes_from_other_sites(client):
+    assert client.post("/api/run/stop", headers={"origin": "https://evil.example"}).status_code == 403
+    assert client.post("/api/run/stop", headers={"origin": "http://127.0.0.1:9999", "host": "127.0.0.1:8788"}).status_code == 403
+    assert client.post("/api/run/stop", headers={"origin": "http://127.0.0.1:8788", "host": "127.0.0.1:8788"}).status_code == 200
+    assert client.post("/api/run/stop").status_code == 200  # no Origin: not from a web page
+    assert client.get("/api/meta", headers={"origin": "https://evil.example"}).status_code == 200
+
+
+def test_quit_stops_the_server(client):
+    from jobportal.main import app
+    assert client.post("/api/quit").status_code == 409
+
+    class Server:
+        should_exit = False
+    app.state.server = server = Server()
+    try:
+        assert client.post("/api/quit").json() == {"ok": True} and server.should_exit
+    finally:
+        del app.state.server
+
+
 def test_fresh_install_is_empty(client):
     ob = client.get("/api/onboarding").json()
     assert ob["resume"] is None and not ob["complete"] and ob["questions"]
@@ -36,11 +57,11 @@ def test_fresh_install_is_empty(client):
     assert r.status_code == 409 and "resume" in r.json()["detail"]
 
 
-def test_setup_flow(client, fake_claude, sample_resume):
-    fake_claude.responses["onboarding-prefill"] = {"name": "Jordan Rivera", "target_roles": ["Software Engineer"], "levels": ["entry"]}
-    fake_claude.responses["library-import"] = {"resume_md": sample_resume, "suggested_name": "Jordan Rivera"}
-    fake_claude.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
-    fake_claude.responses["analysis"] = {"genres": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
+def test_setup_flow(client, fake_ai, sample_resume):
+    fake_ai.responses["onboarding-prefill"] = {"name": "Jordan Rivera", "target_roles": ["Software Engineer"], "levels": ["entry"]}
+    fake_ai.responses["library-import"] = {"resume_md": sample_resume, "suggested_name": "Jordan Rivera"}
+    fake_ai.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
+    fake_ai.responses["analysis"] = {"genres": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
                                          "search_steering": {"emphasize": [], "deemphasize": [], "add_queries": [], "add_companies": [], "notes": ""}}
     r = client.put("/api/onboarding/resume?filename=resume.md", content=sample_resume.encode())
     assert r.status_code == 200, r.text
@@ -71,3 +92,12 @@ def test_setup_flow(client, fake_claude, sample_resume):
 def test_resume_upload_errors(client):
     r = client.put("/api/onboarding/resume?filename=photo.png", content=b"\x89PNG" + b"0" * 300)
     assert r.status_code == 400 and "supported" in r.json()["detail"]
+
+
+def test_chatgpt_sign_in_endpoints(client):
+    assert client.get("/api/ai/status").json()["signed_in"] is False
+    url = client.post("/api/ai/signin").json()["url"]
+    assert url.startswith("https://auth.openai.com/api/accounts/authorize?") and "127.0.0.1%3A8788%2Fauth%2Fcallback" in url
+    page = client.get("/auth/callback?state=bogus&code=x")
+    assert page.status_code == 200 and "Sign-in didn" in page.text
+    assert client.get("/api/ai/models").status_code == 401

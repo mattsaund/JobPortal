@@ -12,17 +12,17 @@ def test_starts_with_zero_data():
     assert db.q("SELECT * FROM leads") == []
 
 
-def _setup(fake_claude, sample_resume):
-    fake_claude.responses["onboarding-prefill"] = {}
-    fake_claude.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
-    fake_claude.responses["analysis"] = {"genres": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
+def _setup(fake_ai, sample_resume):
+    fake_ai.responses["onboarding-prefill"] = {}
+    fake_ai.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
+    fake_ai.responses["analysis"] = {"genres": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
                                          "search_steering": {"emphasize": [], "deemphasize": [], "add_queries": [], "add_companies": [], "notes": ""}}
     asyncio.run(onboarding.import_resume("resume.md", data=sample_resume.encode()))
     onboarding.save_answers(STANDARD_ANSWERS)
 
 
-def test_build_from_resume_and_answers(fake_claude, sample_resume):
-    _setup(fake_claude, sample_resume)
+def test_build_from_resume_and_answers(fake_ai, sample_resume):
+    _setup(fake_ai, sample_resume)
     out = asyncio.run(profile.build("test"))
     assert out["ok"] and profile.is_built()
     assert profile.ready_to_search() == ""
@@ -31,16 +31,16 @@ def test_build_from_resume_and_answers(fake_claude, sample_resume):
     assert facts["skills"] == "Python, JavaScript, React, SQL"  # skills come from the build
     assert profile.get("search_plan")["queries"] == ["software engineer intern", "it support intern"]
     assert [q["question"] for q in profile.questions()] == ["How many people used the imaging script?"]
-    build_call = next(c for c in fake_claude.calls if c["purpose"] == "profile-build")
+    build_call = next(c for c in fake_ai.calls if c["purpose"] == "profile-build")
     assert "Budget Buddy" in build_call["prompt"] and "Gender" not in build_call["prompt"]
 
 
-def test_answers_update_only_what_changes(fake_claude, sample_resume):
-    _setup(fake_claude, sample_resume)
+def test_answers_update_only_what_changes(fake_ai, sample_resume):
+    _setup(fake_ai, sample_resume)
     asyncio.run(profile.build("test"))
     profile.answer_question("How many people used the imaging script?", "About 300 students a semester.")
     assert len(profile.unsynced()) == 1
-    fake_claude.responses["profile-update"] = {"project_bank": PROFILE_OUT["project_bank"] + "\n- about 300 students a semester",
+    fake_ai.responses["profile-update"] = {"project_bank": PROFILE_OUT["project_bank"] + "\n- about 300 students a semester",
                                                "changes": ["Added the imaging script's reach"], "open_questions": []}
     out = asyncio.run(profile.update_from_answers("test"))
     assert out["sections"] == ["project_bank"]
@@ -51,8 +51,8 @@ def test_answers_update_only_what_changes(fake_claude, sample_resume):
     assert "300 students" in profile.full_context()
 
 
-def test_full_context_never_includes_self_identification(fake_claude, sample_resume):
-    _setup(fake_claude, sample_resume)
+def test_full_context_never_includes_self_identification(fake_ai, sample_resume):
+    _setup(fake_ai, sample_resume)
     ctx = profile.full_context()
     assert "Disability" not in ctx and "Veteran" not in ctx
     assert "volunteer teaching Scratch" in ctx

@@ -54,8 +54,8 @@ def test_anywhere_and_remote_only_locations():
     assert onboarding.allowed_locations({"state": "Ohio", "work_modes": ["onsite"]}) == ["Ohio"]
 
 
-def test_import_resume_stores_file_and_prefills(fake_claude, sample_resume):
-    fake_claude.responses["onboarding-prefill"] = {"name": "Jordan Rivera", "city": "Columbus", "state": "OH",
+def test_import_resume_stores_file_and_prefills(fake_ai, sample_resume):
+    fake_ai.responses["onboarding-prefill"] = {"name": "Jordan Rivera", "city": "Columbus", "state": "OH",
                                                     "target_roles": ["Software Engineer"], "levels": ["entry"], "email": ""}
     out = asyncio.run(onboarding.import_resume("Jordan Rivera.md", data=sample_resume.encode()))
     assert out["prefill"]["city"] == "Columbus"
@@ -65,6 +65,6 @@ def test_import_resume_stores_file_and_prefills(fake_claude, sample_resume):
     assert any(RESUME_DIR.iterdir())
 
 
-def test_prefill_survives_ai_failure(fake_claude, sample_resume):
-    out = asyncio.run(onboarding.prefill(sample_resume))  # no fake response -> ClaudeError -> regex only
+def test_prefill_survives_ai_failure(fake_ai, sample_resume):
+    out = asyncio.run(onboarding.prefill(sample_resume))  # no fake response -> AIError -> regex only
     assert out["email"] == "jordan.rivera@example.com" and "_error" in out

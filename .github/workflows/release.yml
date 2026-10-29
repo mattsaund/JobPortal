@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[build]"
+      - name: Build the app
+        run: python -m PyInstaller --noconfirm --clean packaging/jobportal.spec
+      - name: Smoke test
+        shell: bash
+        env:
+          JOBPORTAL_HOME: ${{ runner.temp }}/jobportal-smoke
+        run: |
+          case "$RUNNER_OS" in
+            Windows) BIN=dist/JobPortal.exe ;;
+            macOS) BIN=dist/JobPortal.app/Contents/MacOS/JobPortal ;;
+            *) BIN=dist/JobPortal/JobPortal ;;
+          esac
+          "$BIN" --server --port 8795 &
+          for i in $(seq 1 90); do curl -sf http://127.0.0.1:8795/api/meta > /dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:8795/api/meta | grep -q '"version"'
+          curl -sf http://127.0.0.1:8795/ | grep -q JobPortal
+          "$BIN" --stop --port 8795 || true
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: mkdir -p out && cp dist/JobPortal.exe out/JobPortal-Windows.exe
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p out
+          hdiutil create -volname JobPortal -srcfolder dist/JobPortal.app -ov -format UDZO out/JobPortal-macOS.dmg
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p out JobPortal.AppDir/usr/bin
+          cp -r dist/JobPortal JobPortal.AppDir/usr/bin/
+          printf '#!/bin/sh\nHERE="$(dirname "$(readlink -f "$0")")"\nexec "$HERE/usr/bin/JobPortal/JobPortal" "$@"\n' > JobPortal.AppDir/AppRun
+          chmod +x JobPortal.AppDir/AppRun
+          cp packaging/icons/jobportal.png JobPortal.AppDir/jobportal.png
+          ln -s jobportal.png JobPortal.AppDir/.DirIcon
+          sed 's|@EXEC@|JobPortal|' packaging/linux/jobportal.desktop > JobPortal.AppDir/jobportal.desktop
+          curl -sfL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool JobPortal.AppDir out/JobPortal-Linux-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 ./out/JobPortal-Linux-x86_64.AppImage --version | grep -q JobPortal
+          tar -czf out/JobPortal-Linux-x86_64.tar.gz -C dist JobPortal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JobPortal-${{ runner.os }}
+          path: out/*
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "JobPortal ${GITHUB_REF_NAME#v}" --notes-file packaging/release-notes.md

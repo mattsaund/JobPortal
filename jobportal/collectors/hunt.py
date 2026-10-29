@@ -1,8 +1,8 @@
-"""AI hunt missions: Claude agents with WebSearch/WebFetch that dig for leads no API exposes."""
+"""AI hunt missions: agents with web search and page fetching that dig for leads no API exposes."""
 import asyncio
 from datetime import date
 
-from .. import claude, db, prompts
+from .. import ai, db, prompts
 from .. import profile as profile_mod
 from .. import settings as settings_mod
 from ..textutil import parse_date
@@ -31,12 +31,13 @@ async def run_mission(ctx: Ctx, m: dict) -> list[RawJob]:
 ALREADY KNOWN LEADS (skip unless you found something new):
 {_known_leads()}"""
     try:
-        out = await claude.run(prompt, system=system, schema=prompts.HUNT_SCHEMA, stage="hunt",
-                               purpose=f"hunt:{m['id']}", tools=["WebSearch", "WebFetch"], run_id=ctx.run_id,
-                               label=f"hunt: {m['name']}", timeout=1800)
-    except claude.UsageLimitError:
+        out = await ai.run(prompt, system=system, schema=prompts.HUNT_SCHEMA, stage="hunt", web=True,
+                           max_steps=prompts.HUNT_STEPS.get(cfg["sources"]["ai_hunt"].get("depth", "standard"), 30),
+                           purpose=f"hunt:{m['id']}", run_id=ctx.run_id,
+                           label=f"hunt: {m['name']}", timeout=1800)
+    except ai.UsageLimitError:
         raise
-    except claude.ClaudeError as e:
+    except ai.AIError as e:
         ctx.log("hunt", f"{m['name']}: {e}", "warn")
         return []
     jobs = []
@@ -52,7 +53,7 @@ ALREADY KNOWN LEADS (skip unless you found something new):
                            source_detail=f"AI hunt ({m['name']}): {l.get('where_found', '')}"[:300], strict_titles=False,
                            found_url=l.get("found_url") if str(l.get("found_url", "")).startswith("http") else l["url"]))
     t = out.get("_tools", {})
-    ctx.log("hunt", f"{m['name']}: {len(jobs)} leads from {t.get('WebSearch', 0)} searches / {t.get('WebFetch', 0)} pages read (≈${out.get('_cost_usd', 0):.2f})")
+    ctx.log("hunt", f"{m['name']}: {len(jobs)} leads from {t.get('searches', 0)} searches and {t.get('pages', 0)} pages read ({out.get('_tokens', 0):,} tokens)")
     return jobs
 
 

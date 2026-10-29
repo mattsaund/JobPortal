@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from datetime import date, timedelta
 
-from . import bus, claude, db, prompts, render
+from . import ai, bus, db, prompts, render
 from .genres import DEFAULT_INDUSTRIES, classify, classify_industry
 from . import profile as profile_mod
 from . import settings as settings_mod
@@ -17,7 +17,7 @@ from .textutil import LocationMatcher, age_days, coverage, extract_terms, finger
 
 LIST_FIELDS = ("id, title, company, location, kind, category, source, sources, source_detail, posted_at, deadline, score, "
                "verdict, stage, stage_error, app_status, dream, ats_coverage, url, apply_url, created_at, updated_at, "
-               "follow_up_at, applied_at, cost_usd, triage, found, industry, (COALESCE(resume_md, '') != '') AS has_resume")
+               "follow_up_at, applied_at, tokens, triage, found, industry, (COALESCE(resume_md, '') != '') AS has_resume")
 NO_TECH_GATE = {"ai_hunt", "hackernews", "mastodon", "reddit", "rss", "manual", "bluesky"}
 _current: "Pipeline | None" = None
 
@@ -70,9 +70,9 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
 
                       "description": (l.get("description") or "(no description available)")[:2200]} for k, l in enumerate(batch)]
             try:
-                out = await claude.run(json.dumps(items, indent=1), system=system, schema=prompts.TRIAGE_SCHEMA, stage="triage",
+                out = await ai.run(json.dumps(items, indent=1), system=system, schema=prompts.TRIAGE_SCHEMA, stage="triage",
                                        purpose="retriage", label=f"re-evaluate ×{len(batch)}", timeout=600)
-            except claude.ClaudeError as e:
+            except ai.AIError as e:
                 bus.publish("toast", {"title": "Re-evaluation stopped", "body": str(e)[:200], "level": "error"})
                 break
             by_id = {r["id"]: r for r in out.get("results", [])}
@@ -119,7 +119,7 @@ TAILORED RESUME:
 
 === CANDIDATE PROFILE ===
 {profile_mod.full_context()}"""
-    out = await claude.run(prompt, system=prompts.GAP_QUESTIONS_SYSTEM, schema=prompts.GAP_QUESTIONS_SCHEMA, stage="revise",
+    out = await ai.run(prompt, system=prompts.GAP_QUESTIONS_SYSTEM, schema=prompts.GAP_QUESTIONS_SCHEMA, stage="revise",
                            purpose="gap-questions", lead_id=lead_id, label=f"questions: {lead['company'][:24]}", timeout=600)
     n = sum(profile_mod.ask(q["question"], q["why"], q.get("field", ""), source=f"{lead['company'][:40]} application", lead_id=lead_id)
             for q in out.get("questions", [])[:3])
@@ -153,14 +153,14 @@ job (new skills, tools, metrics, experience), truthfully and only as far as the 
 
 CURRENT DOCUMENT:
 {lead.get('resume_md') or ''}"""
-    out = await claude.run(prompt, system=system, schema=prompts.REVISE_SCHEMA, stage="revise", purpose="apply-answers",
+    out = await ai.run(prompt, system=system, schema=prompts.REVISE_SCHEMA, stage="revise", purpose="apply-answers",
                            lead_id=lead_id, label=f"answers into resume: {lead['company'][:20]}", timeout=900)
     kws = pkg.get("keywords") or []
-    md, review, cost = await polish_resume(lead, out["text"], kws, pkg.get("resume_strategy") or {}, style, cfg, None, lead_id,
-                                           lambda *a, **k: None, out.get("_cost_usd", 0))
+    md, review, tokens = await polish_resume(lead, out["text"], kws, pkg.get("resume_strategy") or {}, style, cfg, None, lead_id,
+                                             lambda *a, **k: None, out.get("_tokens", 0))
     cov, hit, miss = coverage(kws, md)
     pkg.update(resume_review=review, resume_check=review.get("check"), coverage={"hit": hit, "miss": miss}, original_resume_md=md)
-    db.update_lead(lead_id, resume_md=md, package=pkg, ats_coverage=cov, cost_usd=(lead.get("cost_usd") or 0) + cost)
+    db.update_lead(lead_id, resume_md=md, package=pkg, ats_coverage=cov, tokens=(lead.get("tokens") or 0) + tokens)
     d = LEADS_DIR / str(lead_id)
     for f in ("resume.pdf", "resume.docx", "resume.fit"):
         (d / f).unlink(missing_ok=True)
@@ -184,7 +184,7 @@ async def use_saved_resume(lead_id: int, item: dict, tailor: bool) -> dict:
     pkg = lead.get("package") or {}
     style = {"theme": "classic", "max_pages": 1, **(item.get("style") or {})}
     kws = pkg.get("keywords") or []
-    md, cost, summary = item["md"], 0.0, ""
+    md, tokens, summary = item["md"], 0, ""
     if tailor:
         system = (prompts.system("revise", prompts.REVISE_SYSTEM) + f"\n\n{prompts.RESUME_FORMAT}\n\n=== RESUME PLAYBOOK ===\n"
                   f"{settings_mod.resume_playbook(cfg)}\n\n=== CANDIDATE PROFILE ===\n{profile_mod.full_context()}")
@@ -199,10 +199,10 @@ profile material where it fits better, and keep the page limit. Everything must 
 
 CURRENT DOCUMENT:
 {md}"""
-        out = await claude.run(prompt, system=system, schema=prompts.REVISE_SCHEMA, stage="revise", purpose="library-tailor",
+        out = await ai.run(prompt, system=system, schema=prompts.REVISE_SCHEMA, stage="revise", purpose="library-tailor",
                                lead_id=lead_id, label=f"tailor saved resume: {lead['company'][:20]}", timeout=900)
-        md, review, cost = await polish_resume(lead, out["text"], kws, pkg.get("resume_strategy") or {}, style, cfg, None, lead_id,
-                                               lambda *a, **k: None, out.get("_cost_usd", 0))
+        md, review, tokens = await polish_resume(lead, out["text"], kws, pkg.get("resume_strategy") or {}, style, cfg, None, lead_id,
+                                                 lambda *a, **k: None, out.get("_tokens", 0))
         summary = out.get("change_summary", "")
     else:
         chk = await check_resume(md, kws, style, (pkg.get("resume_strategy") or {}).get("archetype", ""))
@@ -210,7 +210,7 @@ CURRENT DOCUMENT:
     cov, hit, miss = coverage(kws, md)
     pkg.update(resume_style=style, resume_review=review, resume_check=review.get("check"), coverage={"hit": hit, "miss": miss},
                resume_from_library=item["id"])
-    db.update_lead(lead_id, resume_md=md, package=pkg, ats_coverage=cov, cost_usd=(lead.get("cost_usd") or 0) + cost)
+    db.update_lead(lead_id, resume_md=md, package=pkg, ats_coverage=cov, tokens=(lead.get("tokens") or 0) + tokens)
     d = LEADS_DIR / str(lead_id)
     for f in ("resume.pdf", "resume.docx", "resume.fit"):
         (d / f).unlink(missing_ok=True)
@@ -444,10 +444,10 @@ class Pipeline:
             await asyncio.gather(*(self.enrich(j) for _, j in batch))
             try:
                 await self.triage_batch(batch)
-            except claude.UsageLimitError as e:
-                self.pause(f"Claude usage limit: {e}")
+            except ai.UsageLimitError as e:
+                self.pause(f"ChatGPT usage cap: {e}")
                 return
-            except claude.ClaudeError as e:
+            except ai.AIError as e:
                 self.log("triage", f"batch failed: {e}", "error")
                 self.stats["triage errors"] += len(batch)
 
@@ -460,9 +460,9 @@ class Pipeline:
                           "description": (j.description or "(no description available)")[:1500]})
         industries = self.cfg.get("industries") or DEFAULT_INDUSTRIES
         system = triage_system(self.cfg)
-        out = await claude.run(json.dumps(items, indent=1), system=system, schema=prompts.TRIAGE_SCHEMA, stage="triage",
-                               purpose="triage", run_id=self.run_id, label=f"triage ×{len(batch)}", timeout=600)
-        cost_each = out.get("_cost_usd", 0) / max(1, len(batch))
+        out = await ai.run(json.dumps(items, indent=1), system=system, schema=prompts.TRIAGE_SCHEMA, stage="triage",
+                           purpose="triage", run_id=self.run_id, label=f"triage ×{len(batch)}", timeout=600)
+        tokens_each = int(out.get("_tokens", 0)) // max(1, len(batch))
         by_id = {r["id"]: r for r in out.get("results", [])}
         min_score = int(self.cfg["run"].get("min_score", 60))
         for i, (fp, j) in enumerate(batch):
@@ -476,7 +476,7 @@ class Pipeline:
             try:
                 lead_id = db.ex(
                     """INSERT INTO leads(fingerprint,url_key,url,apply_url,title,company,location,kind,category,source,sources,
-                       source_detail,posted_at,deadline,description,score,verdict,triage,stage,dream,cost_usd,run_id,created_at,updated_at,found,industry)
+                       source_detail,posted_at,deadline,description,score,verdict,triage,stage,dream,tokens,run_id,created_at,updated_at,found,industry)
                        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (fp, url_key(j.url), j.url, j.apply_url, j.title, j.company, j.location or " | ".join(j.locations), j.kind,
                      r.get("category") or j.category_hint, j.source, json.dumps([j.source]), j.source_detail, j.posted_at,
@@ -484,7 +484,7 @@ class Pipeline:
                      json.dumps({**{k: r.get(k) for k in ("summary", "reasons", "red_flags", "eligibility", "score")},
                                  "genres": [g for g in (r.get("genres") or []) if g in self.genre_ids][:3]
                                  or classify(j.title, j.description, self.genres)}),
-                     stage, 1 if j.dream else 0, cost_each, self.run_id, now, now,
+                     stage, 1 if j.dream else 0, tokens_each, self.run_id, now, now,
                      json.dumps(j.meta.get("found") or [j.where_found()]),
                      r.get("industry") if r.get("industry") in industries else classify_industry(j.company, j.title, j.description, industries)))
             except Exception as e:  # noqa: BLE001 (unique-constraint race with a parallel batch)
@@ -515,16 +515,16 @@ class Pipeline:
             try:
                 if self.cancel.is_set() or self.packages_started >= cap:
                     continue
-                if claude.usage_high(self.cfg):
-                    self.pause("Claude 5-hour usage is near the limit you set")
+                if ai.usage_high(self.cfg):
+                    self.pause("JobPortal reached its ChatGPT usage cap")
                     continue
                 self.packages_started += 1
                 self.inflight.add(lead_id)
                 try:
                     await build_package(lead_id, run_id=self.run_id, ctx=self.ctx, log=self.log)
                     self.stats["packaged"] += 1
-                except claude.UsageLimitError as e:
-                    self.pause(f"Claude usage limit: {e}")
+                except ai.UsageLimitError as e:
+                    self.pause(f"ChatGPT usage cap: {e}")
                 except Exception as e:  # noqa: BLE001
                     self.stats["package errors"] += 1
                     self.log("package", f"lead {lead_id}: {e}", "error")
@@ -559,13 +559,13 @@ class Pipeline:
     async def _run_hunt(self) -> None:
         try:
             await hunt.collect(self.ctx, on_batch=self.add_jobs, everything=self.mode == "hunt")
-        except claude.UsageLimitError as e:
-            self.pause(f"Claude usage limit: {e}")
+        except ai.UsageLimitError as e:
+            self.pause(f"ChatGPT usage cap: {e}")
         except Exception as e:  # noqa: BLE001
             self.log("hunt", f"failed: {type(e).__name__}: {e}", "error")
 
     async def run(self) -> None:
-        bus.set_state(running=True, run_id=self.run_id, mode=self.mode, phase="collecting", counts={}, cost_usd=0.0, started_at=db.now())
+        bus.set_state(running=True, run_id=self.run_id, mode=self.mode, phase="collecting", counts={}, run_tokens_start=bus.state.get("tokens", 0), started_at=db.now())
         self.log("run", f"run #{self.run_id} started ({self.mode})")
         backlog = db.q("SELECT id, score, deadline FROM leads WHERE stage='qualified' AND app_status!='trashed' ORDER BY score DESC")
         for r in backlog:
@@ -615,14 +615,14 @@ class Pipeline:
                 self.stats["backlog for next run"] = kept
                 self.pool.clear()
             if status == "stopped":
-                claude.kill_all()
+                ai.kill_all()
             await self.ctx.close()
             for lid in self.inflight:
                 db.ex("UPDATE leads SET stage='qualified' WHERE id=? AND stage='packaging'", (lid,))
-            cost = db.one("SELECT COALESCE(SUM(cost_usd),0) c FROM ai_calls WHERE run_id=?", (self.run_id,))["c"]
-            db.ex("UPDATE runs SET finished_at=?, status=?, stats=?, cost_usd=? WHERE id=?",
-                  (db.now(), status, json.dumps(dict(self.stats)), cost, self.run_id))
-            self.log("run", f"run #{self.run_id} {status}: {self.stats['qualified']} qualified, {self.stats['packaged']} packaged, ≈${cost:.2f} API-equivalent")
+            tokens = db.one("SELECT COALESCE(SUM(tokens),0) t FROM ai_calls WHERE run_id=?", (self.run_id,))["t"]
+            db.ex("UPDATE runs SET finished_at=?, status=?, stats=?, tokens=? WHERE id=?",
+                  (db.now(), status, json.dumps(dict(self.stats)), tokens, self.run_id))
+            self.log("run", f"run #{self.run_id} {status}: {self.stats['qualified']} qualified, {self.stats['packaged']} packaged, {tokens:,} AI tokens")
             bus.set_state(running=False, phase="idle", counts=dict(self.stats))
             bus.publish("run_done", {"run_id": self.run_id, "status": status, "stats": dict(self.stats)})
 
@@ -672,25 +672,25 @@ DESCRIPTION:
         if lead["kind"] in ("intel", "event", "program"):
             prompt += ("\n\nNOTE: this is a non-standard lead (" + lead["kind"] + "). Tailor the resume to the team/program, write the cover letter as a "
                        "speculative / program application letter, and make the emails the primary weapon (cold outreach to the best contact).")
-        out = await claude.run(prompt, system=system, schema=prompts.PACKAGE_SCHEMA, stage="package", purpose="package",
-                               tools=["WebSearch", "WebFetch"] if research else [], run_id=run_id, lead_id=lead_id,
+        out = await ai.run(prompt, system=system, schema=prompts.PACKAGE_SCHEMA, stage="package", purpose="package",
+                           web=research, max_steps=24, run_id=run_id, lead_id=lead_id,
                                label=f"package: {lead['company'][:30]}", timeout=1800)
         resume_md, cover_md = out.pop("resume_md", ""), out.pop("cover_letter_md", "")
-        cost = out.pop("_cost_usd", 0)
+        tokens = out.pop("_tokens", 0)
         out.pop("_tools", None)
         kws = out.get("keywords") or extract_terms(lead.get("description") or "")
         strat = out.get("resume_strategy") or {}
         theme = strat.get("theme") if strat.get("theme") in render.THEMES else "classic"
         max_pages = 2 if strat.get("archetype") == "federal_usajobs" or int(strat.get("max_pages") or 1) >= 2 else 1
         out["resume_style"] = {"theme": theme, "max_pages": max_pages}
-        resume_md, review, cost = await polish_resume(lead, resume_md, kws, strat, out["resume_style"], cfg, run_id, lead_id, log, cost)
+        resume_md, review, tokens = await polish_resume(lead, resume_md, kws, strat, out["resume_style"], cfg, run_id, lead_id, log, tokens)
         out["resume_review"] = review
         out["resume_check"] = review.get("check")
         out["original_resume_md"], out["original_cover_md"] = resume_md, cover_md  # for "revert to AI version"
         cov, hit, miss = coverage(kws, resume_md)
         out["coverage"] = {"hit": hit, "miss": miss}
         fields = {"package": out, "resume_md": resume_md, "cover_md": cover_md, "ats_coverage": cov,
-                  "cost_usd": (lead.get("cost_usd") or 0) + cost,
+                  "tokens": (lead.get("tokens") or 0) + tokens,
                   "score": int(out.get("fit", {}).get("score") or lead.get("score") or 0)}
         for k in ("title", "company", "location"):
             if out.get(k) and (not lead.get(k) or lead.get(k) in ("Opening (see comment)",) or lead["source"] in ("manual", "mastodon", "reddit", "rss", "bluesky", "hackernews")):
@@ -713,9 +713,9 @@ DESCRIPTION:
         bus.publish("lead", summary)
         if stage == "ready":
             bus.publish("toast", {"title": f"New lead ready (fit {summary['score']})", "body": f"{summary['company']}: {summary['title']}", "lead_id": lead_id})
-        log("package", f"ready {summary['score']}: {summary['company']}, {summary['title']} ({stage}, about ${cost:.2f})")
+        log("package", f"ready {summary['score']}: {summary['company']}, {summary['title']} ({stage}, {tokens:,} tokens)")
         return summary
-    except claude.UsageLimitError:
+    except ai.UsageLimitError:
         db.update_lead(lead_id, stage="qualified")
         bus.publish("lead", lead_summary(lead_id))
         raise
@@ -741,12 +741,12 @@ async def check_resume(md: str, keywords: list[str], style: dict, archetype: str
                              max_pages=style.get("max_pages", 1), archetype=archetype, gpa=profile_mod.get("facts").get("gpa", ""))
 
 
-async def polish_resume(lead, resume_md, kws, strat, style, cfg, run_id, lead_id, log, cost):
+async def polish_resume(lead, resume_md, kws, strat, style, cfg, run_id, lead_id, log, tokens):
     """Automated check → recruiter-critic revision (truthful, playbook-driven) → re-check."""
     before = await check_resume(resume_md, kws, style, strat.get("archetype", ""))
     review = {"before_score": before["score"], "changes": [], "check": before}
     if not cfg["run"].get("resume_review", True):
-        return resume_md, review, cost
+        return resume_md, review, tokens
     issues = "\n".join(f"- [{i['level']}] {i['text']}" for i in before["issues"]) or "- none"
     _, _, miss = coverage(kws, resume_md)
     system = (prompts.system("resume_review", prompts.RESUME_REVIEW_SYSTEM) + f"\n\n{prompts.RESUME_FORMAT}"
@@ -763,19 +763,19 @@ JOB DESCRIPTION (excerpt):
 RESUME TO REVIEW:
 {resume_md}"""
     try:
-        r = await claude.run(prompt, system=system, schema=prompts.RESUME_REVIEW_SCHEMA, stage="revise", purpose="resume-review",
+        r = await ai.run(prompt, system=system, schema=prompts.RESUME_REVIEW_SCHEMA, stage="revise", purpose="resume-review",
                              run_id=run_id, lead_id=lead_id, label=f"resume critic: {lead['company'][:24]}", timeout=900)
-    except claude.UsageLimitError:
+    except ai.UsageLimitError:
         raise
-    except claude.ClaudeError as e:
+    except ai.AIError as e:
         log("package", f"resume review skipped: {e}", "warn")
-        return resume_md, review, cost
-    cost += r.get("_cost_usd", 0)
+        return resume_md, review, tokens
+    tokens += r.get("_tokens", 0)
     after = await check_resume(r["resume_md"], kws, style, strat.get("archetype", ""))
     if after["score"] >= before["score"] - 5:  # keep the critic's version unless it clearly made things worse
         resume_md = r["resume_md"]
         review.update(changes=r.get("changes", []), after_score=after["score"], check=after)
-    return resume_md, review, cost
+    return resume_md, review, tokens
 
 
 async def render_files(lead_id: int) -> dict:
@@ -827,5 +827,5 @@ async def stop() -> None:
     p = _current
     if p:
         p.cancel.set()
-        claude.kill_all()
+        ai.kill_all()
         p.task.cancel()

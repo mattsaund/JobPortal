@@ -5,7 +5,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from . import bus, claude, db, extract
+from . import ai, bus, db, extract
 from . import profile as profile_mod
 from . import settings as settings_mod
 from .config import RESUME_DIR
@@ -178,9 +178,9 @@ def regex_prefill(text: str) -> dict:
 async def prefill(text: str) -> dict:
     base = regex_prefill(text)
     try:
-        out = await claude.run(f"RESUME:\n{text[:30000]}", system=PREFILL_SYSTEM, schema=PREFILL_SCHEMA, stage="prefill",
+        out = await ai.run(f"RESUME:\n{text[:30000]}", system=PREFILL_SYSTEM, schema=PREFILL_SCHEMA, stage="prefill",
                                purpose="onboarding-prefill", label="setup: read resume", timeout=300)
-    except claude.ClaudeError as e:
+    except ai.AIError as e:
         return {**base, "_error": str(e)[:300]}
     out = {k: v for k, v in out.items() if not k.startswith("_") and _filled(v)}
     for k in ("linkedin", "github", "website"):

@@ -2,104 +2,99 @@
 
 JobPortal finds jobs for you and prepares every application. You give it three things:
 
-1. **Your resume.** Import a PDF, Word, ODT, RTF, Markdown or text file (or paste it).
-2. **Answers to the standard job questions.** The ones almost every application asks: contact details, work authorization,
-   education, the roles and levels you want, where you can work. Most of them are pre-filled from your resume.
-3. **Answers to questions it asks along the way.** When a posting wants a skill your profile doesn't show, or a bullet would
-   be stronger with a number, JobPortal asks. Every answer makes your profile, and every future application, better.
+1. **Your resume.** Import a PDF, Word, ODT, RTF, Markdown or text file, or paste it.
+2. **Answers to the standard job questions.** Contact details, work authorization, education, the roles and levels you want,
+   and where you can work. Most are pre-filled from your resume.
+3. **Answers to questions it asks along the way.** When a posting wants something your profile doesn't show, JobPortal asks.
+   Each answer improves your profile and every future application.
 
-From that, it builds your profile and hunts through every avenue it can reach: LinkedIn, company career sites, community job
-lists, Hacker News, Reddit, Mastodon, Bluesky, RSS feeds, USAJobs, and AI agents that search social media, comment threads,
-recruiters, local news and contract awards. Every job is scored against your profile, and the best ones get a full
-application package: a resume written for that job, a cover letter, outreach emails, contacts, interview prep and a company
-brief.
+JobPortal then searches LinkedIn, company career sites, job lists, Hacker News, Reddit, Mastodon, Bluesky, RSS feeds and
+USAJobs. AI agents also search social media, comment threads, recruiters and local news. Every job is scored against your
+profile. The best ones get a full package: a tailored resume, cover letter, outreach emails, contacts, interview prep and a
+company brief.
 
-It runs on your own computer (Windows, macOS or Linux) and starts with zero data. Nothing is sent, posted or applied for
-without you.
+It runs on your computer (Windows, macOS or Linux) and starts with zero data. Its AI runs on your own ChatGPT plan through
+Sign in with ChatGPT. Nothing is sent, posted or applied for without you.
 
 Built as the capstone project for **CMSC 495 7304**.
 
-## Requirements
+## Download
 
-| What | Why | Get it |
+Get the latest version from the [Releases page](https://github.com/mattsaund/JobPortal/releases).
+
+| System | File | First run |
 |---|---|---|
-| Python 3.11 or newer | runs JobPortal | [python.org/downloads](https://www.python.org/downloads/) (Windows: tick "Add python.exe to PATH") |
-| Claude Code, logged in | the AI behind profiles, scoring, research and writing | [claude.com/claude-code](https://claude.com/claude-code), then run `claude` once to log in |
-| Chrome, Edge or Chromium | turns resumes and cover letters into PDFs | Edge comes with Windows; most Macs and Linux desktops have Chrome or Chromium |
-| LibreOffice (optional) | only for importing old `.doc` resumes | [libreoffice.org](https://www.libreoffice.org/) |
+| Windows 10 or 11 | `JobPortal-Windows.exe` | If SmartScreen warns, click More info, then Run anyway. |
+| macOS (Apple Silicon) | `JobPortal-macOS.dmg` | Drag JobPortal to Applications and open it. If macOS blocks it, open System Settings, Privacy & Security, and click Open Anyway. |
+| Linux (x86_64) | `JobPortal-Linux-x86_64.AppImage` | Make it executable (`chmod +x`), then run it. It opens in your browser. |
 
-JobPortal uses your Claude subscription through Claude Code, so there is no API key to set up.
+When JobPortal runs in a browser tab, closing the tab leaves it running so searches can finish. Settings, Your data has a
+Quit button.
 
-## Install and run
+The apps aren't code-signed yet, which is why each system warns the first time.
 
-Clone the repository, then start it with the script for your system. The first run creates a virtual environment in `.venv`
-and installs everything; later runs start right away.
+## What you need
 
-**Windows:** double-click `run.bat`, or in PowerShell:
+| What | Why |
+|---|---|
+| A ChatGPT Go, Plus or Pro plan | the AI behind profiles, scoring, research and writing |
+| Chrome, Edge or Chromium | turning resumes and cover letters into PDFs |
+| LibreOffice (optional) | importing old `.doc` resumes |
+
+## Using it
+
+1. **Set up.** The first screen walks you through four steps: Continue with ChatGPT, import your resume, check the pre-filled
+   questions, and build your profile.
+2. **Run a search.** Leads appear live as they qualify.
+3. **Open a lead.** See the fit, edit the tailored resume and cover letter, export PDF or DOCX, and copy answers for the form.
+4. **Answer questions** in Profile, Questions. Answers are added to your profile automatically.
+5. **Apply** with the lead's Apply button. The tracker keeps follow-ups on schedule.
+
+Other pages: **Equity mining** ranks your best next moves. **Tracker** is a board from Saved to Offer. **Resumes** keeps
+resumes you want to reuse. **Analysis** compares your fit with market demand. **Dream list** flags the companies and roles you
+care about. **Sources** controls every search source and AI mission.
+
+## ChatGPT usage
+
+- Sign in from the setup screen, the sidebar or Settings. Your browser opens OpenAI's sign-in page, then returns to JobPortal.
+- ChatGPT shares only your name and email with JobPortal.
+- AI usage counts against your ChatGPT plan. JobPortal shows the tokens it uses.
+- You can set a weekly cap for JobPortal in ChatGPT settings. When the cap is reached, runs pause and queued leads wait.
+- Settings lets you pick the model and the reasoning effort for each kind of task.
+
+## Run from source
+
+You need Python 3.11 or newer. Clone the repository, then run the start script. The first run creates `.venv` and installs
+everything.
+
+```bash
+./run.sh            # macOS and Linux
+```
 
 ```powershell
-.\run.ps1
+.\run.ps1           # Windows (or double-click run.bat)
 ```
 
-**macOS and Linux:**
-
-```bash
-./run.sh
-```
-
-JobPortal opens in its own window (Edge WebView2 on Windows, WebKit on macOS, GTK or Qt on Linux). If no window toolkit is
-available it opens in your default browser instead; everything works the same there.
-
-Prefer to manage Python yourself? `pip install -e .` gives you a `jobportal` command on every system.
-
-Check your setup at any time:
-
-```bash
-./run.sh --doctor        # Windows: .\run.ps1 --doctor
-```
-
-### Command line
+Or install it yourself with `pip install -e .` to get a `jobportal` command.
 
 | Command | Does |
 |---|---|
 | `jobportal` | open the app |
 | `jobportal --browser` | open it in your browser instead of a window |
-| `jobportal --server` | run only the server in this terminal (the dashboard is at http://127.0.0.1:8788) |
-| `jobportal --background` | run the server detached, so searches keep going with the window closed |
+| `jobportal --server` | run only the server (the dashboard is at http://127.0.0.1:8788) |
+| `jobportal --background` | run the server detached, so searches continue with the window closed |
 | `jobportal --stop` | stop a server started with `--server` or `--background` |
-| `jobportal --doctor` | check Python, Claude Code, the PDF browser and the window toolkit |
+| `jobportal --doctor` | check Python, the ChatGPT sign-in, the PDF browser and the window toolkit |
 | `--port 8790` | use another port (or set `JOBPORTAL_PORT`) |
 | `--data-dir PATH` | keep the data somewhere else (or set `JOBPORTAL_HOME`) |
 
-The scripts pass these through: `./run.sh --browser`, `.\run.ps1 --doctor`.
-
-### Linux: native window
-
-On Linux the window needs GTK WebKit or Qt WebEngine. Install your distribution's packages for PyGObject and WebKit2GTK 4.1
-(Debian and Ubuntu: `python3-gi gir1.2-webkit2-4.1`; Fedora: `python3-gobject webkit2gtk4.1`; Arch: `python-gobject
-webkit2gtk-4.1`) and `run.sh` picks them up automatically. Or use Qt: `.venv/bin/pip install "pywebview[qt]"`.
-To add JobPortal to your app menu, run `packaging/linux/install-desktop-entry.sh`.
-
-## Using it
-
-1. **Set up.** The first screen walks you through importing your resume, checking the pre-filled standard questions, and
-   building your profile (a few minutes).
-2. **Run a search.** Leads appear live as they qualify. "Everything" runs every source; you can also run just the job boards,
-   just the AI hunt, or just the package queue.
-3. **Open a lead** to see the fit, the tailored resume and cover letter (edit them, revise with AI, export PDF or DOCX), emails,
-   contacts, company intel, interview prep and copy-ready answers for the application form.
-4. **Answer questions** in Profile, Questions. Answers are added to your profile automatically, and any lead can be reworked
-   with them in one click.
-5. **Apply** through the lead's Apply button. The tracker keeps follow-ups on schedule.
-
-Other pages: **Equity mining** ranks your best next moves, **Tracker** is a drag-and-drop board from Saved to Offer,
-**Resumes** keeps resumes you want to reuse, **Analysis** compares your fit with market demand across work types,
-**Dream list** flags companies and roles you care most about, and **Sources** controls every search source and AI mission.
+On Linux, a window of its own needs GTK WebKit or Qt WebEngine. Install your distribution's PyGObject and WebKit2GTK 4.1
+packages and `run.sh` uses them. Otherwise JobPortal opens in your browser. `packaging/linux/install-desktop-entry.sh` adds it
+to your app menu.
 
 ## Where your data lives
 
-JobPortal never stores your data in the code folder. Everything (database, imported resume, generated documents) goes in one
-folder:
+Your data never goes in the program folder. Everything is kept in one place:
 
 | System | Folder |
 |---|---|
@@ -107,27 +102,18 @@ folder:
 | macOS | `~/Library/Application Support/JobPortal` |
 | Linux | `~/.local/share/JobPortal` |
 
-Settings, Your data shows the exact path with a button that opens it. To start over from zero, quit JobPortal and delete that
-folder. To keep a separate profile (for testing, or a second person), use `--data-dir` or `JOBPORTAL_HOME`.
+Settings, Your data shows the exact path. To start over, quit JobPortal and delete that folder.
 
 ## Privacy and safety
 
-- The server listens on 127.0.0.1 only and refuses requests addressed to any other host name.
-- Your data stays on your computer. Each AI task sends Claude only what it needs, through your own Claude Code login.
-  Voluntary self-identification answers (gender, race, veteran and disability status) are never sent to the AI; they only
-  fill in the Application kit for copying.
-- The AI agents get web search and web fetch only: no shell and no file access. Text on web pages is treated as data, never
-  as instructions. Everything from the web is escaped in the dashboard.
-- Tailoring may reorder, rephrase and choose what to show. It may not invent experience, dates, metrics or skills, and gaps
-  become questions for you instead of guesses.
+- The server listens on 127.0.0.1 only and refuses requests for any other host name.
+- Each AI task sends OpenAI only what it needs. Voluntary self-identification answers (gender, race, veteran and disability
+  status) are never sent. They only fill in the Application kit for copying.
+- ChatGPT tokens stay in the data folder. They never reach the dashboard, logs or URLs.
+- AI agents can only return results, fetch public web pages and use OpenAI's web search when your account allows it. They
+  can't reach your computer or local network. Text on web pages is treated as data, never as instructions.
+- Tailoring may reorder, rephrase and choose what to show. It may not invent experience, dates, metrics or skills.
 - Nothing is ever sent, posted or submitted automatically.
-
-## Cost and usage
-
-The sidebar shows your Claude 5-hour and 7-day usage. Runs pause on their own near the 5-hour limit (configurable), and queued
-leads wait for the next run. Each stage's model and effort are in Settings. Rough API-equivalent costs (covered by a Claude
-subscription): a profile build about $0.50, one application package with research about $1, triage about $0.10 per 20
-jobs, one AI hunt mission $1 to $3.
 
 ## Project layout
 
@@ -138,21 +124,24 @@ jobportal/            the Python package
   profile.py          the profile: build, updates from answers, questions, voice
   pipeline.py         a search run: collect, filter, triage, build packages
   collectors/         one module per source family, plus the AI hunt
+  ai.py               every AI request (OpenAI Responses API)
+  openai_auth.py      Sign in with ChatGPT
   prompts.py          every AI prompt and output schema
   render.py           resumes and cover letters to HTML, PDF and DOCX
   extract.py          text from PDF, DOCX, ODT, RTF and text files
   osutil.py           everything that differs between Windows, macOS and Linux
   desktop.py, cli.py  the app window and the command line
   static/             the dashboard (vanilla JavaScript, no build step)
+packaging/            app icons, the PyInstaller spec and Linux desktop files
 tests/                pytest suite (runs on all three systems in CI)
-run.sh, run.ps1, run.bat   start scripts
+run.sh, run.ps1, run.bat   start scripts for running from source
 ```
 
-More detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests and the few rules that keep JobPortal working on every system.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

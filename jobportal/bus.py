@@ -9,8 +9,8 @@ state = {
     "mode": None,
     "phase": "idle",
     "counts": {},
-    "cost_usd": 0.0,
-    "usage": None,  # latest Claude subscription utilization snapshot
+    "tokens": 0,  # AI tokens used since JobPortal started
+    "ai": None,  # ChatGPT sign-in status
     "active_agents": {},  # id -> label
 }
 

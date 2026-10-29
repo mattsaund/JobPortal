@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "mattsaund" }]
-keywords = ["jobs", "resume", "job-search", "claude", "fastapi"]
+keywords = ["jobs", "resume", "job-search", "chatgpt", "fastapi"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: Microsoft :: Windows",
@@ -32,6 +32,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+build = ["pyinstaller>=6.10"]
 qt = ["pywebview[qt]>=5.0"]
 
 [project.scripts]

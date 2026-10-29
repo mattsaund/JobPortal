@@ -5,7 +5,7 @@ import json
 from collections import Counter, defaultdict
 from statistics import mean
 
-from . import bus, claude, db, prompts
+from . import ai, bus, db, prompts
 from . import profile as profile_mod
 from . import settings as settings_mod
 from .genres import classify
@@ -159,14 +159,14 @@ MOST-REQUESTED SKILLS THE TAILORED RESUMES COULDN'T SHOW: {gaps_txt}
 
 === SEARCH PLAN ===
 {json.dumps(profile_mod.get('search_plan'), indent=1)}"""
-            out = await claude.run(prompt, system=prompts.system("analysis", prompts.ANALYSIS_SYSTEM), schema=prompts.ANALYSIS_SCHEMA,
+            out = await ai.run(prompt, system=prompts.system("analysis", prompts.ANALYSIS_SYSTEM), schema=prompts.ANALYSIS_SCHEMA,
                                    stage="analysis", purpose="analysis", label="analysis: fit radar", timeout=1200)
             ids = {g["id"] for g in gs}
             out["genres"] = [{**g, "fit": max(0, min(100, int(g["fit"]))), "interest": max(0, min(100, int(g["interest"])))}
                              for g in out.get("genres", []) if g.get("id") in ids]
-            cost = out.pop("_cost_usd", 0)
+            tokens = out.pop("_tokens", 0)
             out.pop("_tools", None)
-            latest = {"ts": db.now(), "reason": reason, "result": out, "cost_usd": round(cost, 3),
+            latest = {"ts": db.now(), "reason": reason, "result": out, "tokens": tokens,
                       "demand": {g["id"]: g["demand_index"] for g in m["genres"]}}
             db.kv_set("analysis.latest", latest)
             hist = db.kv_get("analysis.history") or []

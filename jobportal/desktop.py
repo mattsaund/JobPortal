@@ -75,11 +75,21 @@ class Bridge:
         osutil.notify(title, body, ICON if osutil.IS_LINUX else None)
 
 
+def make_server() -> uvicorn.Server:
+    """The app object is passed directly (not an import string) and optional speedups are off, so a packaged build needs
+    nothing beyond what it bundles. The app keeps a handle so the dashboard's Quit button can stop it."""
+    from .main import app
+    server = uvicorn.Server(uvicorn.Config(app, host=HOST, port=PORT, log_level="warning", timeout_graceful_shutdown=5,
+                                           loop="asyncio", http="h11", ws="none"))
+    app.state.server = server
+    return server
+
+
 def start_server() -> tuple[uvicorn.Server | None, threading.Thread | None]:
     """Run the server on a background thread unless one is already listening on the port."""
     if up():
         return None, None
-    server = uvicorn.Server(uvicorn.Config("jobportal.main:app", host=HOST, port=PORT, log_level="warning", timeout_graceful_shutdown=5))
+    server = make_server()
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     for _ in range(120):
@@ -102,7 +112,7 @@ def open_in_browser(server, thread) -> None:
     if not server:
         print(f"JobPortal is already running at {BASE}. Opened it in your browser.")
         return
-    print(f"JobPortal is running at {BASE} (opened in your browser). Press Ctrl+C here to quit.")
+    print(f"JobPortal is running at {BASE} (opened in your browser). Quit it from Settings, or press Ctrl+C here.")
     try:
         while thread.is_alive():
             time.sleep(0.5)
@@ -144,8 +154,7 @@ def main(browser: bool = False) -> None:
         return open_in_browser(server, thread)
     gui = _gui()
     if osutil.IS_LINUX and gui is None:
-        print("No native window toolkit found (GTK WebKit or Qt WebEngine). Opening JobPortal in your browser instead.\n"
-              "For a window of its own, see 'Linux: native window' in the README.")
+        print("No native window toolkit found (GTK WebKit or Qt WebEngine). Opening JobPortal in your browser instead.")
         return open_in_browser(server, thread)
     if gui == "gtk":
         try:

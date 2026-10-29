@@ -1,8 +1,8 @@
 # How JobPortal works
 
 JobPortal is a local web app: a FastAPI server on 127.0.0.1 with a vanilla JavaScript dashboard, shown in a native window
-(pywebview) or the browser. Data lives in SQLite in the user's app-data folder. All AI work runs through the Claude Code CLI
-(`claude -p`) on the user's own account.
+(pywebview) or the browser. Data lives in SQLite in the user's app-data folder. All AI work runs through OpenAI's Responses API
+on the user's own ChatGPT plan, authorized with Sign in with ChatGPT.
 
 ```
              resume + standard answers + answers along the way
@@ -62,21 +62,31 @@ experience levels, title filters (`levels.py`), allowed locations, dream compani
 The AI hunt (`collectors/hunt.py`) runs web-search agents from `prompts.DEFAULT_MISSIONS`; each one reads the profile, so the
 same missions work for anyone.
 
+## Sign in with ChatGPT
+
+`openai_auth.py` registers JobPortal as an open-source local client (`dynamic_agent_client` with a stable host id). The
+dashboard opens OpenAI's authorize page in the system browser. OpenAI redirects back to `http://127.0.0.1:<port>/auth/callback`
+on JobPortal's own server, which exchanges the code (PKCE), checks the ID token claims and stores the tokens in the data folder.
+Access tokens last an hour and are refreshed near expiry. Refresh tokens rotate, so refreshes are serialized.
+
 ## AI calls
 
-`claude.py` is the only place that starts Claude Code. Each call picks a model and effort by stage (prefill, triage, hunt,
-package, revise, profile, analysis; see Settings), passes the system prompt through a temporary file and the prompt through
-stdin, asks for structured output with a JSON schema, and allows only WebSearch and WebFetch. Every call is logged in the
-`ai_calls` table with its cost.
+`ai.py` is the only place that talks to OpenAI. Each call picks a model and reasoning effort by stage (prefill, triage, hunt,
+package, revise, profile, analysis; see Settings) and streams one stateless Responses request (`store: false`). The model
+returns its result by calling `submit_result`, whose parameters are the task's JSON schema. Web tasks also get `fetch_url`
+(run by JobPortal, public addresses only) and OpenAI's hosted web search when the account allows it. Tool calls loop until
+`submit_result` arrives or the step budget runs out. Every call is logged in the `ai_calls` table with its token count. A
+usage-cap error pauses the current run.
 
 ## Cross-platform pieces
 
 - `config.py` picks the data and cache folders with `platformdirs` (overridable with `JOBPORTAL_HOME`).
-- `osutil.py` opens files and links, sends notifications, and finds Chrome or Edge, LibreOffice and Claude Code on each system.
+- `osutil.py` opens files and links, sends notifications, and finds Chrome or Edge and LibreOffice on each system.
 - `extract.py` reads PDF, DOCX, ODT and RTF in pure Python (pypdf, python-docx).
 - `render.py` prints PDFs with whichever Chromium browser is installed.
 - `desktop.py` picks the window toolkit and falls back to the browser; `cli.py` handles the server modes with a PID file
   instead of system tools.
+- `packaging/jobportal.spec` builds the standalone apps with PyInstaller; `.github/workflows/release.yml` runs it on each OS.
 
 ## The dashboard
 

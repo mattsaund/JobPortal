@@ -15,7 +15,7 @@
   --text2: #c3c7ce;
   --muted: #868d99;
   /* color = meaning. Each hue has exactly one job:
-     act (orange): things you do next; info (blue): links, sources, in-flight applications; ai (violet): your profile and Claude at work;
+     act (orange): things you do next; info (blue): links, sources, in-flight applications; ai (violet): your profile and the AI at work;
      good / warn / bad: health and state only */
   --act: #ff7a1a;
   --info: #5aa9ff;

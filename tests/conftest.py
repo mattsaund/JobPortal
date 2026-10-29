@@ -1,5 +1,5 @@
 """Test setup. Every test starts from zero data: an empty data folder and database, exactly like a fresh install.
-Claude Code is never called; tests that need AI output use the fake_claude fixture."""
+OpenAI is never called; tests that need AI output use the fake_ai fixture."""
 import os
 import shutil
 import tempfile
@@ -17,7 +17,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture(autouse=True)
 def zero_data():
-    from jobportal import bus, config, db, profile
+    from jobportal import ai, bus, config, db, openai_auth, profile
     db.close()
     for p in config.DATA.glob("*"):
         if p.is_dir():
@@ -25,7 +25,10 @@ def zero_data():
         else:
             p.unlink(missing_ok=True)
     profile.status.update(busy=False, phase="", error=None)
-    bus.state.update(running=False, active_agents={})
+    bus.state.update(running=False, active_agents={}, tokens=0)
+    ai.web_search_ok, ai._limit_hit_at = None, 0.0
+    ai._models.update(at=0.0, ids=[])
+    openai_auth._pending.clear()
     yield
     db.close()
 
@@ -39,7 +42,7 @@ def sample_resume() -> str:
     return (FIXTURES / "sample_resume.md").read_text(encoding="utf-8")
 
 
-class FakeClaude:
+class FakeAI:
     def __init__(self):
         self.calls: list[dict] = []
         self.responses: dict = {}
@@ -50,16 +53,16 @@ class FakeClaude:
         if callable(out):
             out = out(prompt)
         if out is None:
-            from jobportal.claude import ClaudeError
-            raise ClaudeError(f"no fake response for {purpose}")
-        return {**out, "_cost_usd": 0.0, "_tools": {}}
+            from jobportal.ai import AIError
+            raise AIError(f"no fake response for {purpose}")
+        return {**out, "_tokens": 0, "_tools": {}}
 
 
 @pytest.fixture
-def fake_claude(monkeypatch) -> FakeClaude:
-    from jobportal import claude
-    fake = FakeClaude()
-    monkeypatch.setattr(claude, "run", fake.run)
+def fake_ai(monkeypatch) -> FakeAI:
+    from jobportal import ai
+    fake = FakeAI()
+    monkeypatch.setattr(ai, "run", fake.run)
     return fake
 
 

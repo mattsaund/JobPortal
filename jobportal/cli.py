@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--server", action="store_true", help="run only the server in this terminal")
     mode.add_argument("--background", action="store_true", help="run only the server, detached from this terminal")
     mode.add_argument("--stop", action="store_true", help="stop a running server")
-    mode.add_argument("--doctor", action="store_true", help="check Python, Claude Code, the PDF browser and the window toolkit")
+    mode.add_argument("--doctor", action="store_true", help="check Python, the ChatGPT sign-in, the PDF browser and the window toolkit")
     p.add_argument("--port", type=int, help="port for the local server (default 8788, or JOBPORTAL_PORT)")
     p.add_argument("--data-dir", help="keep the database and files here instead of the default app-data folder (or JOBPORTAL_HOME)")
     p.add_argument("--version", action="version", version=f"JobPortal {__version__}")
@@ -38,17 +38,22 @@ def _pid_file() -> Path:
 
 
 def serve() -> int:
-    import uvicorn
     from .config import CACHE, HOST, PORT
+    from .desktop import make_server
     CACHE.mkdir(parents=True, exist_ok=True)
     pid = _pid_file()
     pid.write_text(str(os.getpid()), encoding="utf-8")
     print(f"JobPortal server on http://{HOST}:{PORT} (Ctrl+C stops it)")
     try:
-        uvicorn.run("jobportal.main:app", host=HOST, port=PORT, log_level="warning", timeout_graceful_shutdown=5)
+        make_server().run()
     finally:
         pid.unlink(missing_ok=True)
     return 0
+
+
+def _self_command() -> list[str]:
+    """How to start JobPortal again: the packaged executable itself, or this Python running the package."""
+    return [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "jobportal"]
 
 
 def background() -> int:
@@ -66,7 +71,7 @@ def background() -> int:
         kw["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
     else:
         kw["start_new_session"] = True
-    subprocess.Popen([sys.executable, "-m", "jobportal", "--server", "--port", str(PORT)], env=dict(os.environ), **kw)
+    subprocess.Popen([*_self_command(), "--server", "--port", str(PORT)], env=dict(os.environ), **kw)
     for _ in range(60):
         if up():
             print(f"JobPortal server running at {url} (log: {CACHE / 'server.log'})")

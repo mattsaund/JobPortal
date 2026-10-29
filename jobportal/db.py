@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS leads (
   notes TEXT DEFAULT '',
   dream INTEGER DEFAULT 0,
   cost_usd REAL DEFAULT 0,
+  tokens INTEGER DEFAULT 0,
   run_id INTEGER,
   created_at TEXT, updated_at TEXT
 );
@@ -45,7 +46,7 @@ CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, lead_id INTEGER, ts T
 CREATE INDEX IF NOT EXISTS events_lead ON events(lead_id);
 CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY, started_at TEXT, finished_at TEXT, mode TEXT, status TEXT,
-  stats TEXT DEFAULT '{}', cost_usd REAL DEFAULT 0
+  stats TEXT DEFAULT '{}', cost_usd REAL DEFAULT 0, tokens INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS run_log (id INTEGER PRIMARY KEY, run_id INTEGER, ts TEXT, level TEXT, source TEXT, msg TEXT);
 CREATE INDEX IF NOT EXISTS run_log_run ON run_log(run_id);
@@ -54,7 +55,7 @@ CREATE TABLE IF NOT EXISTS candidates (
 );
 CREATE TABLE IF NOT EXISTS ai_calls (
   id INTEGER PRIMARY KEY, ts TEXT, run_id INTEGER, lead_id INTEGER, purpose TEXT, model TEXT, effort TEXT,
-  cost_usd REAL, duration_ms INTEGER, ok INTEGER, error TEXT
+  cost_usd REAL, tokens INTEGER DEFAULT 0, duration_ms INTEGER, ok INTEGER, error TEXT
 );
 """
 
@@ -77,7 +78,12 @@ def conn() -> sqlite3.Connection:
 
 
 def _migrate(c: sqlite3.Connection) -> None:
+    for table in ("runs", "ai_calls"):
+        if "tokens" not in {r[1] for r in c.execute(f"PRAGMA table_info({table})")}:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN tokens INTEGER DEFAULT 0")
     cols = {r[1] for r in c.execute("PRAGMA table_info(leads)")}
+    if "tokens" not in cols:
+        c.execute("ALTER TABLE leads ADD COLUMN tokens INTEGER DEFAULT 0")
     if "found" not in cols:
         # Where each lead was discovered: [{source, label, url}], one entry per place it was seen.
         c.execute("ALTER TABLE leads ADD COLUMN found TEXT DEFAULT '[]'")

@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
-from . import claude, db, extract, prompts
+from . import ai, db, extract, prompts
 from .config import DATA
 
 LIB_DIR = DATA / "library"
@@ -85,7 +85,7 @@ async def import_text(text: str, filename: str = "resume.txt", name: str = "") -
     if text.lstrip().startswith("# ") and "\n## " in text:
         md, suggested = text, Path(filename).stem  # already in our markdown format
     else:
-        out = await claude.run(f"{prompts.RESUME_FORMAT}\n\nFILE NAME: {filename}\n\nEXTRACTED TEXT:\n{text[:30000]}",
+        out = await ai.run(f"{prompts.RESUME_FORMAT}\n\nFILE NAME: {filename}\n\nEXTRACTED TEXT:\n{text[:30000]}",
                                system=IMPORT_SYSTEM, schema=IMPORT_SCHEMA, stage="revise", purpose="library-import",
                                label=f"import resume: {filename[:30]}", timeout=600)
         md, suggested = out["resume_md"], out.get("suggested_name") or Path(filename).stem
