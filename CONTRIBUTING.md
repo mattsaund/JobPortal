@@ -111,6 +111,7 @@ JobPortal/
 │   │   └── library.py          saved resumes (storage only, they never feed the profile)
 │   ├── search/                 finding jobs
 │   │   ├── pipeline.py         a search run: collect, filter, score with AI, queue packages
+│   │   ├── packages.py         work on one lead: build its package, rework its resume, add a job by hand
 │   │   ├── plan.py             what to search for: levels, roles, queries, dream companies
 │   │   ├── sources.py          the checks on the Sources page
 │   │   └── collectors/         one file per kind of source (LinkedIn, company boards, feeds, GitHub lists, AI hunt)
@@ -173,6 +174,7 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 | `test_extract.py`, `test_render.py` | reading resume files, rendering resumes, PDF export |
 | `test_core.py` | config, settings, the database, live updates, location matching and other text helpers |
 | `test_levels.py` | experience levels and title filters |
+| `test_search.py` | the rule filters (levels, locations, the Dream list), dedupe, triage and building packages |
 | `test_platform.py` | cross-platform pieces: the command line, the app window, the PDF engine lookup |
 
 Add or update a test with every bug fix and every feature.

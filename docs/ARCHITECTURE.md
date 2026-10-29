@@ -26,7 +26,7 @@ the user's own ChatGPT plan, authorized with Sign in with ChatGPT.
 | `ai/` | the Responses API client, Sign in with ChatGPT, every prompt | `core` |
 | `documents/` | reading imported files, rendering resumes, resume checks, downloads, AI edits | `core`, `ai`, `candidate` |
 | `candidate/` | setup, the profile, questions along the way, saved resumes | `core`, `ai`, `documents` |
-| `search/` | the search run, what to search for, the collectors, the Sources page checks | everything above |
+| `search/` | the search run, work on one lead (`packages.py`), what to search for, the collectors, the Sources page checks | everything above |
 | `insights/` | the Analysis and Equity mining pages | `core`, `ai`, `candidate` |
 | `web/` | the FastAPI app, the routes, the dashboard files | everything above |
 | `app/` | the command line, the app window, `--doctor` | `web`, `core` |
@@ -89,8 +89,9 @@ search plan. Then:
 2. **Dedupe** merges jobs seen before, by fingerprint and by URL.
 3. **AI triage** scores candidates in batches against `profile.digest()` (stage `triage`). Candidates the per-run cap
    doesn't reach are saved to a backlog and triaged first next time.
-4. **Packages** are built for qualified leads, best first, with deadlines jumping the line (stage `package`). Each resume then
-   goes through deterministic checks (`documents/resumecheck.py`) and a recruiter-critic AI pass.
+4. **Packages** are built for qualified leads, best first, with deadlines jumping the line (stage `package`). The work on a
+   single lead lives in `search/packages.py`, which the lead page also uses to rebuild a package or rework a resume. Each
+   resume then goes through deterministic checks (`documents/resumecheck.py`) and a recruiter-critic AI pass.
 
 The AI hunt (`search/collectors/hunt.py`) runs web-search agents from the missions in `ai/prompts.py`. Each mission reads the
 profile, so the same missions work for anyone.
