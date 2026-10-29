@@ -22,13 +22,13 @@ the user's own ChatGPT plan, authorized with Sign in with ChatGPT.
 
 | Package | What it holds | Uses |
 |---|---|---|
-| `core/` | config and settings, the database, live updates (`bus.py`), OS differences, text helpers, levels and genres | nothing else in JobPortal |
+| `core/` | config and settings, the database, live updates (`bus.py`), background tasks, OS differences, text helpers, levels and genres | nothing else in JobPortal |
 | `ai/` | the Responses API client, Sign in with ChatGPT, every prompt | `core` |
 | `documents/` | reading imported files, rendering resumes, resume checks, downloads, AI edits | `core`, `ai`, `candidate` |
 | `candidate/` | setup, the profile, questions along the way, saved resumes | `core`, `ai`, `documents` |
 | `search/` | the search run, what to search for, the collectors, the Sources page checks | everything above |
 | `insights/` | the Analysis and Equity mining pages | `core`, `ai`, `candidate` |
-| `web/` | the FastAPI app, the routes, background tasks, the dashboard files | everything above |
+| `web/` | the FastAPI app, the routes, the dashboard files | everything above |
 | `app/` | the command line, the app window, `--doctor` | `web`, `core` |
 
 Lower packages never import higher ones at module level. When a lower module needs a higher one (for example, the profile
@@ -40,7 +40,7 @@ asking the search run to re-score leads), it imports inside the function. That k
 2. `web/server.py` checks every request twice. The Host must be this computer, which blocks DNS rebinding. A change (not a
    GET) must come from the dashboard's own origin, so another website can't send one.
 3. The route in `web/routes/<area>.py` checks the input and calls the package that does the work.
-4. Long jobs (building a package, rebuilding the profile, an AI analysis) start with `web/background.py` and return right
+4. Long jobs (building a package, rebuilding the profile, an AI analysis) start with `core/background.py` and return right
    away. Their progress and results go out as live events: `core/bus.py` publishes, `/api/events` streams them
    (Server-Sent Events), and `js/live.js` updates the open page.
 

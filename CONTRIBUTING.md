@@ -100,7 +100,6 @@ JobPortal/
 │   ├── web/                    the local web server
 │   │   ├── server.py           the FastAPI app: startup, the two safety checks, the dashboard files
 │   │   ├── routes/             the HTTP API, one file per area (leads, candidate, documents, library, search, ...)
-│   │   ├── background.py       background work started by a request (packages, profile builds)
 │   │   ├── common.py           helpers the routes share
 │   │   └── static/             the dashboard
 │   │       ├── index.html      the page shell and the list of scripts, in load order
@@ -127,6 +126,7 @@ JobPortal/
 │   │   └── revise.py           AI edits by instruction
 │   ├── insights/               the Analysis (analysis.py) and Equity mining (crm.py) pages
 │   ├── core/                   shared building blocks
+│   │   ├── background.py       background work (package builds, profile updates) and stopping it at shutdown
 │   │   ├── config.py           folders, the port and every default setting
 │   │   ├── settings.py         reading and saving settings
 │   │   ├── db.py               the SQLite database
@@ -171,6 +171,7 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 | `test_profile.py` | building and updating the profile, and that only the resume and answers feed it |
 | `test_onboarding.py` | resume import, pre-filling the questions, saving answers |
 | `test_extract.py`, `test_render.py` | reading resume files, rendering resumes, PDF export |
+| `test_core.py` | config, settings, the database, live updates, location matching and other text helpers |
 | `test_levels.py` | experience levels and title filters |
 | `test_platform.py` | cross-platform pieces: the command line, the app window, the PDF engine lookup |
 
@@ -219,7 +220,7 @@ Add or update a test with every bug fix and every feature.
 | change what the AI writes | the prompt in `ai/prompts.py` |
 | add a job source | a collector in `search/collectors/`, listed in `search/collectors/__init__.py`, with defaults in `core/config.py` |
 | add a company job board | the Sources page, or `ATS_BOARDS` in `core/config.py` |
-| change resume layouts | `THEMES` in `documents/render.py` and the playbook in `resources/resume_playbook.md` |
+| change resume layouts | `RESUME_THEMES` and `_DOCX_THEMES` in `documents/render.py` (keep `FIT_SCALES` in step with the copy in `web/static/js/pages/lead.js`), and the playbook in `resources/resume_playbook.md` |
 | add an API endpoint | the matching file in `web/routes/` |
 | change a dashboard page | its file in `web/static/js/pages/` |
 | add something that differs by operating system | `core/osutil.py` |
