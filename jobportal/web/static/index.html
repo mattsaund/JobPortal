@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<!-- The sidebar is filled in by js/layout.js; every page draws itself inside <main>. -->
 <div class="shell">
   <aside class="side">
     <div class="logo"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="12" r="6.5" fill="#ff7a1a"/><circle cx="15" cy="12" r="6.5" fill="none" stroke="#a98bff" stroke-width="2" stroke-dasharray="3 2.2"/></svg>JobPortal</div>
@@ -21,11 +22,15 @@
 </div>
 <div class="toasts" id="toasts"></div>
 <div id="modal"></div>
+<!-- Plain scripts that share one global scope, loaded in this order. Code that runs at load time may only use names from
+     files above it; calls inside functions can reach any file. main.js starts the app, so it stays last. -->
 <script src="/static/js/core.js"></script>
 <script src="/static/js/live.js"></script>
 <script src="/static/js/layout.js"></script>
 <script src="/static/js/components/search-area.js"></script>
 <script src="/static/js/components/file-drops.js"></script>
+<script src="/static/js/components/answers-form.js"></script>
+<script src="/static/js/components/settings-form.js"></script>
 <script src="/static/js/pages/leads.js"></script>
 <script src="/static/js/pages/lead.js"></script>
 <script src="/static/js/pages/tracker.js"></script>
