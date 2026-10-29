@@ -1,9 +1,13 @@
+"""Tests for jobportal/core/levels.py: the title filters, board search words and post regexes each experience level
+implies."""
 import re
 
 from jobportal.core import levels
 
 
 def passes(title: str, lv, roles=None) -> bool:
+    """Whether a title gets through the title filters for these levels and roles. An empty include list lets any title
+    through, as the Settings page promises ("blank = any title")."""
     inc, exc = levels.title_filters(lv, roles)
     t = title.lower()
     ok_inc = not inc or re.search("|".join(f"(?:{p})" for p in inc), t, re.I)
@@ -38,6 +42,12 @@ def test_target_roles_keep_their_own_words():
     assert passes("Associate Product Manager", ["entry"], roles=["Associate Product Manager"])
 
 
+def test_filters_have_no_repeats():
+    inc, exc = levels.title_filters(["senior", "lead"], ["SWE", "swe"])
+    assert inc.count("principal") == 1 and inc.count("swe") == 1  # senior and lead both mark "principal"
+    assert len(exc) == len(set(exc))
+
+
 def test_board_filters_and_terms():
     assert levels.linkedin_experience(["internship", "entry"]) == "1,2"
     assert levels.linkedin_experience(["mid"]) == "3,4"
@@ -45,6 +55,13 @@ def test_board_filters_and_terms():
     assert "intern" in levels.ats_search_terms(["internship"])
     assert levels.ats_search_terms(["mid"], ["data engineer", "analytics engineer"])[:2] == ["data engineer", "analytics engineer"]
     assert levels.clean(["bogus"]) == levels.DEFAULT_LEVELS
+
+
+def test_ats_terms_are_capped():
+    queries = [f"query {i}" for i in range(12)]
+    terms = levels.ats_search_terms(["internship", "entry", "mid"], ["Intern"] + queries)
+    assert len(terms) == 8 and terms[:3] == ["intern", "co-op", "student"]  # level words first, "Intern" is a repeat
+    assert levels.ats_search_terms(["senior"], queries) == queries[:8]
 
 
 def test_posting_regex():

@@ -1,8 +1,20 @@
-"""Work-type genres (the spokes of the Analysis radar) and a keyword classifier for postings.
-Genres are editable in Settings → analysis.genres; ids must stay stable so history lines up."""
+"""Two ways of sorting jobs, each with a keyword classifier: work-type genres and employer industries.
+
+Genres describe the work itself (software, data, cybersecurity, ...). They are the spokes of the Analysis page's radar
+(insights/analysis.py). AI triage tags each lead with up to three, and classify() is the keyword fallback.
+search/pipeline.py also uses classify() to count demand per genre and to mix work types when it picks what to triage
+next. The list is the "analysis.genres" setting, which no page edits. Keep each genre's id the same, or the Analysis
+history stops lining up.
+
+Industries describe what the employer does (Space & Aerospace, Fintech & Finance, ...). The list is the "industries"
+setting (Settings page, "Industries"). AI triage normally picks a lead's industry, and classify_industry() is the
+fallback when it doesn't, and the way db.py fills in leads stored before industries existed.
+
+Both classifiers are plain keyword matching: fast, free, and good enough to sort by. They never call the AI."""
 import re
 from functools import lru_cache
 
+# id: stable key stored with leads and history. label: shown in the dashboard. keywords: a case-insensitive regex.
 DEFAULT_GENRES = [
     {"id": "swe", "label": "Software Engineering",
      "keywords": r"software (engineer|develop)|\bswe\b|developer|programmer|full[- ]?stack|back[- ]?end|application develop|platform engineer"},
@@ -17,7 +29,8 @@ DEFAULT_GENRES = [
     {"id": "cyber", "label": "Cybersecurity",
      "keywords": r"cyber|security|infosec|penetration|\bsoc\b|vulnerab|threat|incident response|\bgrc\b|identity and access"},
     {"id": "it_support", "label": "IT & Technical Support",
-     "keywords": r"\bit\b (support|specialist|technician|analyst)|help ?desk|desktop support|sysadmin|system administrator|network (admin|technician)|technical support"},
+     "keywords": r"\bit\b (support|specialist|technician|analyst)|help ?desk|desktop support|sysadmin|system administrator|"
+                 r"network (admin|technician)|technical support"},
     {"id": "embedded_hw", "label": "Embedded & Hardware",
      "keywords": r"embedded|firmware|\bfpga\b|microcontroller|\brtos\b|hardware engineer|electrical engineer|\bpcb\b|circuit|electronics|verilog|vhdl"},
     {"id": "robotics", "label": "Robotics & Autonomy",
@@ -33,8 +46,10 @@ DEFAULT_GENRES = [
 ]
 
 
-@lru_cache(maxsize=64)
+@lru_cache(maxsize=64)  # the same few dozen patterns are used for every job, so compile each one once
 def _compiled(pattern: str) -> re.Pattern:
+    """A pattern compiled case-insensitively. A pattern that isn't a valid regex (a typo in an edited list) is matched as
+    plain text instead of raising."""
     try:
         return re.compile(pattern, re.I)
     except re.error:
@@ -42,15 +57,20 @@ def _compiled(pattern: str) -> re.Pattern:
 
 
 def classify(title: str, description: str = "", genres: list[dict] | None = None, top: int = 3) -> list[str]:
-    """Best-matching genre ids for a posting. Title hits weigh 3×, description hits 1× (capped)."""
+    """The ids of the genres that best fit a posting, best first, at most `top` of them. `genres` defaults to
+    DEFAULT_GENRES; a genre without keywords is matched by its label.
+
+    Score: 3 points per keyword hit in the title, plus 1 per hit in the first 3000 characters of the description, capped
+    at 4. A genre needs 2 points to count, so one stray word in a long description isn't enough. When there's no
+    description, any title hit counts. Equal scores are ordered by id, from Z to A."""
     genres = genres or DEFAULT_GENRES
     t, d = title or "", (description or "")[:3000]
     scored = []
     for g in genres:
         pat = _compiled(g.get("keywords") or re.escape(g["label"]))
-        s = 3 * len(pat.findall(t)) + min(4, len(pat.findall(d)))
-        if s >= 2 or (s and not d):
-            scored.append((s, g["id"]))
+        score = 3 * len(pat.findall(t)) + min(4, len(pat.findall(d)))
+        if score >= 2 or (score and not d):
+            scored.append((score, g["id"]))
     scored.sort(reverse=True)
     return [gid for _, gid in scored[:top]]
 
@@ -64,6 +84,8 @@ DEFAULT_INDUSTRIES = [
     "Consulting & IT Services", "Nonprofit", "Other",
 ]
 
+# (industry, regex) pairs, tried in this order. The first match wins, so specific industries come before broad ones, and
+# "Software & SaaS" comes last. Each regex looks for company names and telling words.
 _INDUSTRY_HINTS = [
     ("Space & Aerospace", r"\b(nasa|jpl|spacex|blue origin|rocket ?lab|firefly|intuitive machines|space|aerospace|satellite|orbital|"
                           r"launch|astra\b|varda|vast|astranis|planet labs|spire|blacksky|hawkeye|sierra space|axiom|relativity|ursa major|"
@@ -94,7 +116,12 @@ _INDUSTRY_HINTS = [
 
 
 def classify_industry(company: str, title: str = "", description: str = "", industries: list[str] | None = None) -> str:
-    """Keyword fallback when the AI didn't tag one: company name first, then the posting text."""
+    """A best guess at the employer's industry, from keywords. Only names in `industries` (default: DEFAULT_INDUSTRIES)
+    are returned.
+
+    The company name is checked first, since it's the strongest clue. Then the title and the first 1500 characters of the
+    description. When nothing matches, the answer is "Other" (or the list's last name, if "Other" isn't in it). An
+    industry the user added in Settings has no hint in _INDUSTRY_HINTS, so only AI triage can pick it."""
     allowed = set(industries or DEFAULT_INDUSTRIES)
     for text in (company or "", f"{title} {(description or '')[:1500]}"):
         for name, pat in _INDUSTRY_HINTS:

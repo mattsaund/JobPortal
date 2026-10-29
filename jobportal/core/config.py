@@ -1,10 +1,20 @@
-"""Paths and default settings. Everything here is editable from the dashboard; stored settings are deep-merged over these
-defaults so new keys show up after updates.
+"""Where JobPortal keeps things, how the server is reached, and the default value of every setting.
 
-Your data never lives in the code folder. It goes in the platform's app-data folder (override with JOBPORTAL_HOME):
+The rest of the app imports these values: db.py opens DB_PATH, the web server serves STATIC on HOST:PORT, and settings.py
+merges the user's saved settings over DEFAULT_SETTINGS. This module only defines values. It never writes anything.
+
+Your data never lives in the code folder. It goes in the platform's app-data folder:
   Windows  %LOCALAPPDATA%\\JobPortal
   macOS    ~/Library/Application Support/JobPortal
-  Linux    ~/.local/share/JobPortal"""
+  Linux    ~/.local/share/JobPortal
+Two environment variables change that, and both are read once, when this module is first imported:
+  JOBPORTAL_HOME  use this folder for all data instead (tests use it to start from an empty folder)
+  JOBPORTAL_PORT  serve on this port instead of 8788
+
+Key ideas for DEFAULT_SETTINGS:
+- The dashboard reads and writes settings by key name (web/static/js), so renaming or removing a key breaks a page.
+- Stored settings are merged over these defaults (see settings.py). A key added here shows up for existing users with its
+  default value. A stored list replaces the default list as a whole."""
 import os
 from pathlib import Path
 
@@ -22,18 +32,24 @@ _home_env = os.environ.get("JOBPORTAL_HOME")
 DATA = Path(_home_env).expanduser().resolve() if _home_env else Path(user_data_dir(APP_NAME, appauthor=False))
 # With JOBPORTAL_HOME set (tests, a second profile) the cache lives inside it too, so instances never share anything.
 CACHE = DATA / "cache" if _home_env else Path(user_cache_dir(APP_NAME, appauthor=False))
-DB_PATH = DATA / "jobportal.db"
-LEADS_DIR = DATA / "leads"
-RESUME_DIR = DATA / "resume"
-HOST = "127.0.0.1"
+DB_PATH = DATA / "jobportal.db"  # the SQLite database (see db.py)
+LEADS_DIR = DATA / "leads"  # one folder per lead, named by its id: rendered resumes, cover letters and exports
+RESUME_DIR = DATA / "resume"  # the resume file the user imported during setup
+HOST = "127.0.0.1"  # the server only listens on this computer, never on the network
 PORT = int(os.environ.get("JOBPORTAL_PORT") or 8788)
 
-EFFORTS = ["low", "medium", "high"]  # reasoning effort per stage; models come from the signed-in ChatGPT account
+# Reasoning effort choices for each AI stage (Settings, "AI: ChatGPT"). Models come from the signed-in ChatGPT account.
+EFFORTS = ["low", "medium", "high"]
 
+# Where the user is with each application (the status menu on a lead's page). "new" is every lead's starting status, and
+# "trashed" moves a lead to the Leads page's Trash tab, out of every other list.
 APP_STATUSES = ["new", "saved", "applied", "assessment", "interviewing", "offer",
                 "rejected", "ghosted", "withdrawn", "trashed"]
 
-# Company job boards with public JSON APIs (verified live in October 2026). Add any company from Sources by pasting its careers URL.
+# Company job boards searched by default (verified live in October 2026). Each entry has a name and an "ats", the hiring
+# system the board runs on. Greenhouse, Lever and Ashby boards are found by "slug" (the company's id in that system's
+# public API). Workday, UKG and iCIMS boards are found by "url". The Sources page adds "enabled" and "dream" switches to
+# an entry, and adds any company from a pasted careers URL.
 ATS_BOARDS = [
     # Space, defense and deep tech (Greenhouse)
     {"name": "SpaceX", "ats": "greenhouse", "slug": "spacex"},
@@ -187,6 +203,9 @@ ATS_BOARDS = [
     {"name": "General Dynamics Mission Systems", "ats": "icims", "url": "https://careers-gdms.icims.com"},
 ]
 
+# The tech-role gate (filters.require_tech_title): a job-board title must contain one of these to pass. They are
+# case-insensitive regexes. Most are word stems ("comput" matches computer and computing). \b marks a word edge, so
+# r"\bit\b" matches "IT Specialist" but not "Digital".
 TECH_TITLE = [
     r"software", r"engineer", r"develop", r"programm", r"\bdata\b", r"machine learning", r"\bml\b", r"\bai\b",
     r"artificial intelligence", r"computer", r"comput", r"cyber", r"security", r"\bit\b", r"information technology",
@@ -200,75 +219,103 @@ TECH_TITLE = [
     r"automation", r"integration", r"product development", r"r&d", r"lab\b",
 ]
 
-_INCLUDE, _EXCLUDE = title_filters(DEFAULT_LEVELS)
+# The title filters for the default levels (internship and entry level), used until the user saves the standard answers.
+_TITLE_INCLUDE, _TITLE_EXCLUDE = title_filters(DEFAULT_LEVELS)
 
+# Every setting and its default. settings.get() returns these merged with what the user saved. Comments name the page
+# where each setting is edited. Settings with no page keep their default unless code changes them.
 DEFAULT_SETTINGS = {
+    # Settings page, "AI: ChatGPT". Every AI request names a stage, and the stage picks the model and reasoning effort.
     "ai": {
-        "model": "",  # empty = the first model the signed-in ChatGPT account lists
-        "stages": {  # a stage's model overrides the default; "" uses it
-            "prefill": {"model": "", "effort": "low"},
-            "triage": {"model": "", "effort": "low"},
-            "hunt": {"model": "", "effort": "medium"},
-            "package": {"model": "", "effort": "high"},
-            "revise": {"model": "", "effort": "low"},
-            "profile": {"model": "", "effort": "medium"},
-            "analysis": {"model": "", "effort": "medium"},
+        "model": "",  # the default model; "" means the first model the signed-in ChatGPT account lists
+        "stages": {  # per stage: "model" ("" uses the default above) and "effort" (one of EFFORTS)
+            "prefill": {"model": "", "effort": "low"},  # setup: reads the resume to pre-fill the standard questions
+            "triage": {"model": "", "effort": "low"},  # scores every job that passes the rule filters, in batches
+            "hunt": {"model": "", "effort": "medium"},  # AI hunt missions: agents that search the web
+            "package": {"model": "", "effort": "high"},  # builds application packages (research, resume, cover letter)
+            "revise": {"model": "", "effort": "low"},  # "Revise with AI", resume reviews and other document edits
+            "profile": {"model": "", "effort": "medium"},  # builds and updates the profile, learns the writing voice
+            "analysis": {"model": "", "effort": "medium"},  # the Analysis page's assessment
         },
-        "max_parallel": 3,
+        "max_parallel": 3,  # "Parallel agents": how many AI requests may run at the same time
     },
+    # Settings page, "Runs" (and "Resumes" for resume_review). How much one search run does.
     "run": {
-        "max_triage": 600,
-        "triage_batch": 20,
-        "min_score": 60,
-        "max_packages": 12,
-        "package_web_research": True,
-        "resume_review": True,
-        "max_age_days": 90,
-        "auto_run_hours": 0,
+        "max_triage": 600,  # most jobs the AI scores per run; the rest wait in a backlog for the next run
+        "triage_batch": 20,  # jobs per AI triage request
+        "min_score": 60,  # the fit score (0 to 100) a job needs to qualify for an application package
+        "max_packages": 12,  # most application packages built per run
+        "package_web_research": True,  # packages research the web live: check the posting, company news, contacts
+        "resume_review": True,  # a recruiter-style AI review pass on every tailored resume
+        "max_age_days": 90,  # postings older than this are dropped
+        "auto_run_hours": 0,  # start a full run every N hours (0 = off); web/server.py checks once a minute
     },
+    # The search area: where jobs may be. Filled in from the standard answers, then edited in the search area editor (the
+    # Leads page header, or Settings, "Search area"). search/pipeline.py checks every job with textutil.LocationMatcher.
     "locations": {
-        "allowed": [],  # filled in from your standard answers (or Settings -> Search area)
-        "dream_bypass": True,
-        "dream_jobs_bypass": False,
-        "unknown_policy": "ai",
+        "allowed": [],  # plain text: states ("Ohio" or "OH"), cities ("Pittsburgh, PA"), "Remote", "Anywhere in the US"
+        "dream_bypass": True,  # dream companies skip the search area (search area editor and Dream list page)
+        "dream_jobs_bypass": False,  # dream job titles skip it too (Dream list page)
+        "unknown_policy": "ai",  # a job whose location can't be told: "ai" lets AI triage decide, "drop" removes it
     },
+    # Settings page, "Filters": the rule filters every job passes before any AI sees it (search/pipeline.py).
     "filters": {
-        "title_include": _INCLUDE,
-        "title_exclude": _EXCLUDE,
-        "require_tech_title": True,
-        "tech_title": TECH_TITLE,
-        "exclude_companies": [],
-        "exclude_keywords": [],
+        # Regexes for job-board titles. A title must match one include pattern ([] = any title) and no exclude pattern.
+        # Saving the standard answers rebuilds both from the levels and target roles (levels.title_filters).
+        "title_include": _TITLE_INCLUDE,
+        "title_exclude": _TITLE_EXCLUDE,
+        "require_tech_title": True,  # job-board titles must contain a tech or science word from tech_title
+        "tech_title": TECH_TITLE,  # no page edits this list
+        "exclude_companies": [],  # "Never show these companies"
+        "exclude_keywords": [],  # "Drop if description contains" (saving the standard answers adds clearance phrases)
     },
-    "search": {"queries": [], "use_profile_plan": True, "levels": list(DEFAULT_LEVELS)},
-    "profile": {"auto_sync_answers": True, "sync_delay_sec": 60, "auto_analyze": True, "retriage_on_change": True},
+    "search": {
+        "queries": [],  # Sources page, "Your extra queries": search terms for LinkedIn, The Muse and the aggregators
+        "use_profile_plan": True,  # Sources page: also search the queries and dream companies the profile derived
+        "levels": list(DEFAULT_LEVELS),  # experience levels to search, from the standard answers (levels.py)
+    },
+    # How the profile keeps itself current (candidate/profile.py). No page edits these.
+    "profile": {
+        "auto_sync_answers": True,  # add answers to questions asked along the way to the profile automatically...
+        "sync_delay_sec": 60,  # ...once the newest answer is this many seconds old
+        "auto_analyze": True,  # re-run the Analysis after every profile update
+        "retriage_on_change": True,  # re-score queued and filtered leads after the profile changes
+    },
+    # Work-type genres: the spokes of the Analysis radar, also tagged on every lead. No page edits them (genres.py).
     "analysis": {"genres": DEFAULT_GENRES},
-    "industries": DEFAULT_INDUSTRIES,
-    "dream_companies": [],
-    "dream_jobs": [],
-    "dream_exclude": [],
+    "industries": DEFAULT_INDUSTRIES,  # Settings page, "Industries": the list every lead is tagged from (genres.py)
+    # The Dream list page. Leads that match get the dream flag, which never changes their score.
+    "dream_companies": [],  # companies the user added (saving the standard answers sets it to their dream companies)
+    "dream_jobs": [],  # title phrases that make a job a dream job at any company
+    "dream_exclude": [],  # profile-suggested dream companies the user removed
+    # The Sources page: every job source, each with an "enabled" switch. search/collectors/ reads these.
     "sources": {
-        "github_lists": {"enabled": True, "urls": [
+        "github_lists": {"enabled": True, "urls": [  # community internship and new-grad lists (skipped above entry level)
             "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
             "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json",
             "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json",
         ]},
-        "ats_boards": {"enabled": True, "boards": ATS_BOARDS},
-        "linkedin": {"enabled": True, "max_requests": 100, "time_window": "r2592000", "experience": ""},  # "" = from your levels
-        "hackernews": {"enabled": True, "threads": 2},
-        "themuse": {"enabled": True, "pages": 8},
-        "usajobs": {"enabled": True, "api_key": "", "email": ""},
-        "adzuna": {"enabled": False, "app_id": "", "app_key": ""},
-        "serpapi": {"enabled": False, "api_key": ""},
-        "remote_boards": {"enabled": True},
+        "ats_boards": {"enabled": True, "boards": ATS_BOARDS},  # company job boards (see ATS_BOARDS above)
+        # time_window is LinkedIn's "posted within" filter in seconds ("r2592000" = 30 days). experience is LinkedIn's
+        # experience filter ("1,2" = internship and entry level); "" picks it from the levels (levels.linkedin_experience).
+        "linkedin": {"enabled": True, "max_requests": 100, "time_window": "r2592000", "experience": ""},
+        "hackernews": {"enabled": True, "threads": 2},  # how many monthly "Who is hiring?" threads to read
+        "themuse": {"enabled": True, "pages": 8},  # result pages per run
+        "usajobs": {"enabled": True, "api_key": "", "email": ""},  # free key from developer.usajobs.gov
+        "adzuna": {"enabled": False, "app_id": "", "app_key": ""},  # needs a free key, so off by default
+        "serpapi": {"enabled": False, "api_key": ""},  # Google Jobs through SerpAPI, needs a key
+        "remote_boards": {"enabled": True},  # Remotive and RemoteOK, used only when "Remote" is an allowed location
         "reddit": {"enabled": True, "subreddits": ["forhire", "jobbit", "hiring", "cscareerquestions", "internships",
                                                     "EngineeringStudents", "remotejs", "techjobs"]},
         "mastodon": {"enabled": True,
                      "instances": ["mastodon.social", "hachyderm.io", "fosstodon.org"],
                      "tags": ["hiring", "internship", "internships", "getfedihired", "fedihired", "techjobs", "jobs"]},
-        "rss": {"enabled": True, "feeds": []},
-        "bluesky": {"enabled": False, "handle": "", "app_password": ""},
-        "ai_hunt": {"enabled": True, "depth": "standard", "missions_per_run": 7, "missions": []},  # filled from prompts.DEFAULT_MISSIONS on first load
+        "rss": {"enabled": True, "feeds": []},  # any RSS or Atom feeds: [{"name": ..., "url": ...}]
+        "bluesky": {"enabled": False, "handle": "", "app_password": ""},  # needs the user's handle and an app password
+        # AI hunt missions. depth is "quick", "standard" or "deep"; missions_per_run is how many missions an "Everything"
+        # run rotates through (0 = all). An empty missions list is filled from ai/prompts.DEFAULT_MISSIONS by settings.get().
+        "ai_hunt": {"enabled": True, "depth": "standard", "missions_per_run": 7, "missions": []},
     },
-    "prompts": {},
+    "prompts": {},  # Settings page, "Prompts (advanced)": system prompt overrides by name ("triage", "package", ...)
+    "resume_playbook": "",  # Settings page, "Resumes": the user's own playbook; "" uses resources/resume_playbook.md
 }

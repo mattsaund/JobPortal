@@ -1,83 +1,122 @@
-"""Settings live in the kv table and are deep-merged over config.DEFAULT_SETTINGS."""
+"""The user's settings: read them, save them, reset a section, and add new built-in defaults after an update.
+
+All settings are one JSON document in the database's kv table, under the key "settings". config.DEFAULT_SETTINGS holds
+every setting with its default value, and get() lays what is stored on top of it.
+
+Key ideas:
+- Dictionaries merge key by key, so a setting added in a new version appears with its default value, even for people who
+  saved their settings long ago.
+- A stored list replaces the default list as a whole. That keeps deletions: a company board the user removed stays
+  removed. The catch is that boards and AI missions added in later versions would never reach anyone who saved their
+  settings, so migrate_defaults() adds those once, at startup.
+- The dashboard always saves the whole document (it loads GET /api/settings, edits it, and sends it back with PUT), so
+  save() replaces what is stored instead of merging.
+
+Who calls it: almost every package reads settings with get(). web/routes/settings.py saves and resets them for the
+Settings and Sources pages, and web/server.py runs migrate_defaults() at startup."""
 import copy
 
 from jobportal.core import db
-from jobportal.core.config import DEFAULT_SETTINGS
+from jobportal.core.config import DEFAULT_SETTINGS, RESOURCES
 
 
 def _merge(base, over):
+    """`over` laid on top of `base`. Dictionaries merge key by key, all the way down. Anything else in `over` (a list, a
+    number, a string) replaces what `base` has. Neither argument is changed, but the result can share nested values with
+    them, which is why get() passes in fresh copies."""
     if isinstance(base, dict) and isinstance(over, dict):
-        out = dict(base)
-        for k, v in over.items():
-            out[k] = _merge(base.get(k), v) if k in base else v
-        return out
+        merged = dict(base)
+        for key, value in over.items():
+            merged[key] = _merge(base[key], value) if key in base else value
+        return merged
     return copy.deepcopy(over)
 
 
 def get() -> dict:
+    """The current settings: what the user saved, merged over config.DEFAULT_SETTINGS.
+
+    Returns a new dict on every call, so callers may change it (for example to save it back). An empty AI hunt mission
+    list is filled with the built-in missions, so the Sources page always has missions to show."""
+    # Imported here, not at the top of the file: ai/prompts.py imports this module, so a top-level import would be a loop.
     from jobportal.ai.prompts import DEFAULT_MISSIONS
-    s = _merge(copy.deepcopy(DEFAULT_SETTINGS), db.kv_get("settings", {}))
-    if not s["sources"]["ai_hunt"].get("missions"):
-        s["sources"]["ai_hunt"]["missions"] = copy.deepcopy(DEFAULT_MISSIONS)
-    return s
+    merged = _merge(copy.deepcopy(DEFAULT_SETTINGS), db.kv_get("settings", {}))
+    hunt = merged["sources"]["ai_hunt"]
+    if not hunt.get("missions"):
+        hunt["missions"] = copy.deepcopy(DEFAULT_MISSIONS)
+    return merged
 
 
 def save(new: dict) -> dict:
+    """Store `new` as the whole settings document, replacing what was there, and return get(). Writes the kv table."""
     db.kv_set("settings", new)
     return get()
 
 
 def reset_section(path: str) -> dict:
-    """Reset a dotted section (e.g. 'sources.ats_boards') back to its default."""
+    """Put one part of the settings back to its default and return get().
+
+    `path` is a dotted key, for example "sources.ai_hunt.missions" (the Sources page's "Reset to defaults" button). The
+    key is deleted from the stored settings, so the default shows through again. A path that isn't stored changes nothing."""
     stored = db.kv_get("settings", {})
+    *parents, last = path.split(".")
     node = stored
-    parts = path.split(".")
-    for p in parts[:-1]:
-        node = node.get(p, {})
-    node.pop(parts[-1], None)
+    for key in parents:
+        node = node.get(key, {})
+    node.pop(last, None)
     db.kv_set("settings", stored)
     return get()
 
 
 def default_playbook() -> str:
-    from jobportal.core.config import RESOURCES
+    """The built-in resume playbook (resources/resume_playbook.md): researched resume practices the AI follows when it
+    writes or reviews a resume."""
     return (RESOURCES / "resume_playbook.md").read_text(encoding="utf-8")
 
 
 def resume_playbook(cfg: dict | None = None) -> str:
-    """The researched resume playbook (Settings -> Resume playbook overrides the built-in one)."""
+    """The resume playbook in use: the user's own text from Settings, "Resumes" when they saved one, otherwise the
+    built-in playbook. Pass the settings as `cfg` when you already have them, to skip reading them again."""
     cfg = cfg or get()
     return (cfg.get("resume_playbook") or "").strip() or default_playbook()
 
 
 def migrate_defaults() -> list[str]:
-    """Merge NEW built-in company boards and AI missions into stored settings (stored lists replace defaults wholesale,
-    which would otherwise freeze them). Remembers what it has offered so anything you delete stays deleted."""
-    from jobportal.ai.prompts import DEFAULT_MISSIONS
-    from jobportal.core.config import DEFAULT_SETTINGS
+    """Add the built-in company boards and AI hunt missions this user hasn't been offered yet. web/server.py calls it at
+    every startup.
+
+    Each default is offered only once. Its key ("board:<slug or url>" or "mission:<id>") goes into the stored
+    "_defaults_seen" list, so a board or mission the user deletes is never added back. Returns a short note for each
+    item added, such as "board SpaceX". Side effect: rewrites the stored settings. Does nothing until the user has saved
+    settings at least once, because until then the defaults apply anyway."""
+    from jobportal.ai.prompts import DEFAULT_MISSIONS  # inside the function for the same reason as in get()
     stored = db.kv_get("settings", {})
     if not stored:
         return []
     seen = set(stored.get("_defaults_seen", []))
-    notes = []
+    added = []
     boards = stored.get("sources", {}).get("ats_boards", {}).get("boards")
     if boards is not None:
-        have = {b.get("slug") or b.get("url") for b in boards}
-        for b in DEFAULT_SETTINGS["sources"]["ats_boards"]["boards"]:
-            key = "board:" + (b.get("slug") or b.get("url"))
-            if (b.get("slug") or b.get("url")) not in have and key not in seen:
-                boards.append(dict(b))
-                notes.append(f"board {b['name']}")
+        have = {_board_id(b) for b in boards}
+        for board in DEFAULT_SETTINGS["sources"]["ats_boards"]["boards"]:
+            key = "board:" + _board_id(board)
+            if _board_id(board) not in have and key not in seen:
+                boards.append(dict(board))
+                added.append(f"board {board['name']}")
             seen.add(key)
     missions = stored.get("sources", {}).get("ai_hunt", {}).get("missions")
-    if missions:
+    if missions:  # an empty list needs nothing: get() fills it with every built-in mission
         have = {m.get("id") for m in missions}
-        for m in DEFAULT_MISSIONS:
-            key = "mission:" + m["id"]
-            if m["id"] not in have and key not in seen:
-                missions.append(dict(m))
-                notes.append(f"mission {m['name']}")
+        for mission in DEFAULT_MISSIONS:
+            key = "mission:" + mission["id"]
+            if mission["id"] not in have and key not in seen:
+                missions.append(dict(mission))
+                added.append(f"mission {mission['name']}")
             seen.add(key)
     stored["_defaults_seen"] = sorted(seen)
     db.kv_set("settings", stored)
-    return notes
+    return added
+
+
+def _board_id(board: dict) -> str | None:
+    """What identifies a company board: its slug (Greenhouse, Lever, Ashby) or its URL (Workday, UKG, iCIMS)."""
+    return board.get("slug") or board.get("url")
