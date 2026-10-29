@@ -104,9 +104,10 @@ _Coming soon._
       Facebook groups) and more job boards (Indeed, Handshake, ZipRecruiter)
 - [ ] Make it ready for people outside the team: clearer first-run help, a plan for people without a ChatGPT plan (an API
       key option or a clear message), an Intel Mac build, and code signing so Windows and macOS stop warning (maybe)
-- [ ] Make it for everyone, not just tech: cover all job types, job genres and school levels (high school, trades,
-      college, graduate), adapt to each person the way the Analysis page does, and add sources for every kind of job. Today
-      the filters, keywords, default companies and some sources lean toward computer science, space and tech.
+- [ ] Make it work for anyone, from an arts degree to a computer science degree. Tech stays fully supported, and every
+      other job type, genre and school level gets the same depth (high school, trades, college, graduate). It should adapt
+      to each person the way the Analysis page does, with sources for every kind of job. Today the filters, keywords,
+      default companies and some sources assume a tech job seeker.
 - [ ] Make job search type as broad as possible covering all types of jobs.
 - [ ] Try the whole flow on a few classmates' resumes: ranked jobs in their areas, tailored resumes and cover letters,
       recruiter contacts and email templates for each match
