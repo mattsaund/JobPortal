@@ -1,100 +1,101 @@
 # JobPortal
 
-JobPortal finds jobs for you and prepares every application. You give it three things:
+JobPortal is our capstone project for **CMSC 495 7304**. It's a desktop app that finds jobs for you and gets every
+application ready to send.
 
-1. **Your resume.** Import a PDF, Word, ODT, RTF, Markdown or text file, or paste it.
-2. **Answers to the standard job questions.** Contact details, work authorization, education, the roles and levels you want,
-   and where you can work. Most are pre-filled from your resume.
-3. **Answers to questions it asks along the way.** When a posting wants something your profile doesn't show, JobPortal asks.
-   Each answer improves your profile and every future application.
+> This README is a work in progress. We'll keep updating it as the project moves along.
 
-JobPortal then searches LinkedIn, company career sites, job lists, Hacker News, Reddit, Mastodon, Bluesky, RSS feeds and
-USAJobs. AI agents also search social media, comment threads, recruiters and local news. Every job is scored against your
-profile. The best ones get a full package: a tailored resume, cover letter, outreach emails, contacts, interview prep and a
-company brief.
+## Why we built it
 
-It runs on your computer (Windows, macOS or Linux) and starts with zero data. Its AI runs on your own ChatGPT plan through
-Sign in with ChatGPT. Nothing is sent, posted or applied for without you.
+Looking for a job as a student takes forever. You check ten different sites, read the same posting twice, and rewrite your
+resume for every application. We wanted one app that handles the boring parts, so you can spend your time on the
+applications that are actually worth it.
 
-Built as the capstone project for **CMSC 495 7304**.
+## How it works
+
+You give JobPortal three things:
+
+1. **Your resume.** PDF, Word, ODT, RTF, Markdown or plain text. You can also paste it in.
+2. **Answers to the standard job questions.** Contact info, work authorization, education, the roles and levels you want,
+   and where you want to work. Most of these fill in from your resume.
+3. **Answers to questions it asks along the way.** When a job wants something your profile doesn't show, JobPortal asks
+   you about it. Your answer makes every application after that better.
+
+That's all it learns from. JobPortal doesn't read anything else about you.
+
+Then it searches LinkedIn, company career sites, job lists, Hacker News, Reddit, Mastodon, Bluesky, RSS feeds and USAJobs
+in the locations you pick: specific states and cities, remote, or nationwide. AI agents also dig through places normal job
+boards miss. Every job gets scored against your profile, and the best ones get a full package:
+
+- a resume tailored to that job
+- a cover letter
+- outreach emails and the people to send them to
+- interview prep and a company brief
+
+Nothing is ever sent, posted or applied for without you.
 
 ## Download
 
-Get the latest version from the [Releases page](https://github.com/mattsaund/JobPortal/releases).
+Get the newest version from the [Releases page](https://github.com/mattsaund/JobPortal/releases). There's nothing else to
+install.
 
-| System | File | First run |
+| System | File | How to install |
 |---|---|---|
-| Windows 10 or 11 | `JobPortal-Windows-Setup.exe` | Run the installer. If SmartScreen warns, click More info, then Run anyway. It adds Start menu and desktop shortcuts. |
-| macOS (Apple Silicon) | `JobPortal-macOS.dmg` | Drag JobPortal to Applications and open it. If macOS blocks it, open System Settings, Privacy & Security, and click Open Anyway. |
+| Windows 10 or 11 | `JobPortal-Windows-Setup.exe` | Double-click it. It installs JobPortal, adds Start menu and desktop shortcuts, and opens it. If SmartScreen warns, click More info, then Run anyway. |
+| macOS (Apple Silicon) | `JobPortal-macOS.dmg` | Open it and drag JobPortal into Applications. If macOS blocks it, open System Settings, Privacy & Security, and click Open Anyway. |
 | Linux (x86_64) | `JobPortal-Linux-x86_64.AppImage` | Make it executable (`chmod +x`), then run it. The first run adds it to your app menu. |
 
-JobPortal opens in a window of its own. On Linux that needs Chrome, Edge, Chromium or Brave, whose app mode gives it a
-plain window. Without one it opens in a browser tab, and Settings, Your data has a Quit button.
+The only thing you need is a ChatGPT Go, Plus or Pro plan. JobPortal signs in with your ChatGPT account, so there's no API
+key to set up.
 
-The apps aren't code-signed yet, which is why each system warns the first time.
-
-## What you need
-
-| What | Why |
-|---|---|
-| A ChatGPT Go, Plus or Pro plan | the AI behind profiles, scoring, research and writing |
-| Chrome, Edge or Chromium | turning resumes and cover letters into PDFs |
-| LibreOffice (optional) | importing old `.doc` resumes |
+The apps aren't code-signed yet. That's why Windows and macOS warn you the first time you open them.
 
 ## Using it
 
-1. **Set up.** The first screen walks you through four steps: Continue with ChatGPT, import your resume, check the pre-filled
-   questions, and build your profile.
-2. **Run a search.** Leads appear live as they qualify.
-3. **Open a lead.** See the fit, edit the tailored resume and cover letter, export PDF or DOCX, and copy answers for the form.
-4. **Answer questions** in Profile, Questions. Answers are added to your profile automatically.
-5. **Apply** with the lead's Apply button. The tracker keeps follow-ups on schedule.
+1. **Set up.** Continue with ChatGPT, import your resume, check the pre-filled questions, and build your profile.
+2. **Pick where to search.** States, cities, remote or nationwide.
+3. **Run a search.** Leads show up live as they qualify.
+4. **Open a lead.** See why it fits, edit the resume and cover letter, and download PDF or Word files.
+5. **Apply.** Use the lead's Apply button. The tracker reminds you when to follow up.
 
-Other pages: **Equity mining** ranks your best next moves. **Tracker** is a board from Saved to Offer. **Resumes** keeps
-resumes you want to reuse. **Analysis** compares your fit with market demand. **Dream list** flags the companies and roles you
-care about. **Sources** controls every search source and AI mission.
+There's more in the sidebar:
 
-## ChatGPT usage
-
-- Sign in from the setup screen, the sidebar or Settings. Your browser opens OpenAI's sign-in page, then returns to JobPortal.
-- ChatGPT shares only your name and email with JobPortal.
-- AI usage counts against your ChatGPT plan. JobPortal shows the tokens it uses.
-- You can set a weekly cap for JobPortal in ChatGPT settings. When the cap is reached, runs pause and queued leads wait.
-- Settings lets you pick the model and the reasoning effort for each kind of task.
-
-## Run from source
-
-You need Python 3.11 or newer. Clone the repository, then run the start script. The first run creates `.venv` and installs
-everything.
-
-```bash
-./run.sh            # macOS and Linux
-```
-
-```powershell
-.\run.ps1           # Windows (or double-click run.bat)
-```
-
-Or install it yourself with `pip install -e .` to get a `jobportal` command.
-
-| Command | Does |
+| Page | What it's for |
 |---|---|
-| `jobportal` | open the app |
-| `jobportal --browser` | open it in your browser instead of a window |
-| `jobportal --server` | run only the server (the dashboard is at http://127.0.0.1:8788) |
-| `jobportal --background` | run the server detached, so searches continue with the window closed |
-| `jobportal --stop` | stop a server started with `--server` or `--background` |
-| `jobportal --doctor` | check Python, the ChatGPT sign-in, the PDF browser and the window toolkit |
-| `--port 8790` | use another port (or set `JOBPORTAL_PORT`) |
-| `--data-dir PATH` | keep the data somewhere else (or set `JOBPORTAL_HOME`) |
+| Tracker | your applications on a board, from Saved to Offer |
+| Resumes | resume versions you want to keep and reuse |
+| Analysis | how your fit compares with what the market wants |
+| Dream list | the companies and roles you care most about |
+| Equity mining | your most valuable next moves, ranked |
+| Sources | every place JobPortal searches, which you can turn on or off |
+| Settings | AI models, filters, the resume playbook and your data |
 
-On Linux, a window of its own needs GTK WebKit or Qt WebEngine. Install your distribution's PyGObject and WebKit2GTK 4.1
-packages and `run.sh` uses them. Otherwise it uses Chrome, Edge, Chromium or Brave in app mode, or a browser tab. `packaging/linux/install-desktop-entry.sh` adds it
-to your app menu.
+## Screenshots
 
-## Where your data lives
+_Coming soon._
 
-Your data never goes in the program folder. Everything is kept in one place:
+## Project status
+
+- [x] Resume import and the standard job questions
+- [x] Job search across boards, feeds and AI agents, in the locations you choose
+- [x] Tailored resumes, cover letters and full application packages
+- [x] Sign in with ChatGPT
+- [x] One-click apps for Windows, macOS and Linux
+- [ ] User testing with classmates
+- [ ] Screenshots and a demo video
+- [ ] Final presentation
+
+## Built with
+
+- **Python** and **FastAPI** for the local server
+- **Plain JavaScript, HTML and CSS** for the dashboard (no build step)
+- **SQLite** for storage
+- **OpenAI's Responses API** through Sign in with ChatGPT
+- **pywebview** for the app window and **PyInstaller** for the release apps
+
+## Your data
+
+Everything stays on your computer, in one folder:
 
 | System | Folder |
 |---|---|
@@ -104,45 +105,16 @@ Your data never goes in the program folder. Everything is kept in one place:
 
 Settings, Your data shows the exact path. To start over, quit JobPortal and delete that folder.
 
-## Privacy and safety
+- The app's server only talks to your own computer. Other websites can't change anything in it.
+- Each AI task sends OpenAI only what it needs. Your answers about gender, race, veteran status and disability are never
+  sent. They only fill in the copy-and-paste kit for application forms.
+- Tailored resumes can reorder and reword things, but they never make up experience, dates, numbers or skills.
 
-- The server listens on 127.0.0.1 only. It refuses requests for any other host name and changes sent from other websites.
-- Each AI task sends OpenAI only what it needs. Voluntary self-identification answers (gender, race, veteran and disability
-  status) are never sent. They only fill in the Application kit for copying.
-- ChatGPT tokens stay in the data folder. They never reach the dashboard, logs or URLs.
-- AI agents can only return results, fetch public web pages and use OpenAI's web search when your account allows it. They
-  can't reach your computer or local network. Text on web pages is treated as data, never as instructions.
-- Tailoring may reorder, rephrase and choose what to show. It may not invent experience, dates, metrics or skills.
-- Nothing is ever sent, posted or submitted automatically.
+## Working on JobPortal
 
-## Project layout
-
-```
-jobportal/            the Python package
-  main.py             HTTP API and dashboard server (FastAPI)
-  onboarding.py       setup: resume import, the standard questions, pre-fill
-  profile.py          the profile: build, updates from answers, questions, voice
-  pipeline.py         a search run: collect, filter, triage, build packages
-  collectors/         one module per source family, plus the AI hunt
-  ai.py               every AI request (OpenAI Responses API)
-  openai_auth.py      Sign in with ChatGPT
-  prompts.py          every AI prompt and output schema
-  render.py           resumes and cover letters to HTML, PDF and DOCX
-  extract.py          text from PDF, DOCX, ODT, RTF and text files
-  osutil.py           everything that differs between Windows, macOS and Linux
-  desktop.py, cli.py  the app window and the command line
-  static/             the dashboard (vanilla JavaScript, no build step)
-packaging/            app icons, the PyInstaller spec and Linux desktop files
-tests/                pytest suite (runs on all three systems in CI)
-run.sh, run.ps1, run.bat   start scripts for running from source
-```
-
-More detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+Start with [CONTRIBUTING.md](CONTRIBUTING.md). It has the team list, what to install, a map of the code and how to run the
+tests. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the pieces work together.
 
 ## License
 
-[MIT](LICENSE)
+MIT. See [LICENSE](LICENSE).

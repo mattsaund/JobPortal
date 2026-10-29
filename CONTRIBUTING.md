@@ -1,83 +1,240 @@
 # Contributing to JobPortal
 
-Thanks for helping. This page covers getting set up, running the tests, and the rules that keep JobPortal working on
-Windows, macOS and Linux.
+Welcome to the team. This is the guide for everyone working on JobPortal for CMSC 495 7304: who's doing what, what to
+install, how the code is laid out, how to test it, and the rules we agreed on. If something here is wrong or missing, fix it
+in a pull request like any other change.
 
-## Set up
+## The team
 
-1. Install Python 3.11 or newer. For PDF export you need Chrome, Edge or Chromium. AI features need a ChatGPT Go, Plus or Pro
-   plan; sign in from inside the app.
-2. Clone the repository and install it in editable mode with the development tools:
+| Name | Role |
+|---|---|
+| `<NAME>` | `<ROLE>` |
+| `<NAME>` | `<ROLE>` |
+| `<NAME>` | `<ROLE>` |
+| `<NAME>` | `<ROLE>` |
+| `<NAME>` | `<ROLE>` |
+| `<NAME>` | `<ROLE>` |
+| `<NAME>` | `<ROLE>` |
+| `<NAME>` | `<ROLE>` |
+
+## What you need to install
+
+People who just use JobPortal install nothing (the release apps bring everything). To work on the code, you need:
+
+| What | Why | Where to get it |
+|---|---|---|
+| Git | version control | [git-scm.com](https://git-scm.com/downloads) |
+| Python 3.11 or newer (3.12 matches the release builds) | runs JobPortal | [python.org](https://www.python.org/downloads/). On Windows, check "Add python.exe to PATH". |
+| A code editor | VS Code with the Python extension works well | [code.visualstudio.com](https://code.visualstudio.com/) |
+| A GitHub account with access to this repo | the repo is private | ask the repo owner to add you |
+| Google Chrome, Microsoft Edge or Chromium | PDF export when running from source | Windows already has Edge |
+
+Optional:
+
+| What | Why |
+|---|---|
+| A ChatGPT Go, Plus or Pro plan | trying the real AI by hand. The automated tests never need it. |
+| LibreOffice | importing old `.doc` resumes |
+| [uv](https://docs.astral.sh/uv/) | faster Python environments |
+| Linux only: your distribution's PyGObject and WebKit2GTK 4.1 packages | a native app window when running from source |
+
+Everything else (FastAPI, pywebview, pypdf, python-docx and the rest) installs automatically.
+
+## Get it running
+
+1. Clone the repo:
 
    ```bash
-   python -m venv .venv
-   .venv/bin/pip install -e ".[dev]"          # Windows: .venv\Scripts\pip install -e ".[dev]"
+   git clone https://github.com/mattsaund/JobPortal.git
+   cd JobPortal
    ```
 
-   (`./run.sh` or `.\run.ps1` does the same and then starts the app.)
-3. Run `jobportal --doctor` to confirm everything is found.
+2. Start JobPortal. The first run creates a Python environment in `.venv` and installs everything into it.
 
-Use a throwaway data folder while developing so you never mix test data with your own job search:
+   ```bash
+   ./run.sh            # macOS and Linux
+   ```
+
+   ```powershell
+   .\run.ps1           # Windows (or double-click run.bat)
+   ```
+
+3. Install the developer tools (pytest and ruff) into the same environment:
+
+   ```bash
+   .venv/bin/pip install -e ".[dev]"            # Windows: .venv\Scripts\pip install -e ".[dev]"
+   ```
+
+4. Run `jobportal --doctor` (or `./run.sh --doctor`) to check that everything is found.
+
+Use a throwaway data folder while you develop, so test data never mixes with a real job search:
 
 ```bash
-jobportal --data-dir ./dev-data --browser    # dev-data/ is ignored by git
+jobportal --data-dir ./dev-data --port 8790 --browser     # dev-data/ is ignored by git
 ```
 
-The repository includes a fictional resume at `tests/fixtures/sample_resume.md` for trying the setup flow.
+The command line:
 
-## Run the tests
+| Command | What it does |
+|---|---|
+| `jobportal` | open the app |
+| `jobportal --browser` | open it in your browser instead of a window |
+| `jobportal --server` | run only the server (the dashboard is at http://127.0.0.1:8788) |
+| `jobportal --background` | run the server detached, so searches keep going with the window closed |
+| `jobportal --stop` | stop a server started with `--server` or `--background` |
+| `jobportal --doctor` | check Python, the ChatGPT sign-in, the PDF engine and the window toolkit |
+| `--port 8790` | use another port (or set `JOBPORTAL_PORT`) |
+| `--data-dir PATH` | keep the data somewhere else (or set `JOBPORTAL_HOME`) |
+
+## Project map
+
+```
+JobPortal/
+├── jobportal/                  the app, as a Python package
+│   ├── __init__.py             the version number
+│   ├── __main__.py             makes "python -m jobportal" work
+│   ├── app/                    starting the program
+│   │   ├── cli.py              command line options (--server, --stop, --doctor, ...)
+│   │   ├── desktop.py          the app window (native, browser app mode or a tab) and the Linux app menu entry
+│   │   └── doctor.py           the --doctor check
+│   ├── web/                    the local web server
+│   │   ├── server.py           the FastAPI app: startup, the two safety checks, the dashboard files
+│   │   ├── routes/             the HTTP API, one file per area (leads, candidate, documents, library, search, ...)
+│   │   ├── background.py       background work started by a request (packages, profile builds)
+│   │   ├── common.py           helpers the routes share
+│   │   └── static/             the dashboard
+│   │       ├── index.html      the page shell and the list of scripts, in load order
+│   │       ├── style.css       all the styles
+│   │       └── js/             core.js, live.js, layout.js, components/, pages/ (one file per page) and main.js
+│   ├── candidate/              what JobPortal knows about the user
+│   │   ├── onboarding.py       setup: importing the resume and the standard questions
+│   │   ├── profile.py          the profile: building it, updating it, questions along the way, writing voice
+│   │   └── library.py          saved resumes (storage only, they never feed the profile)
+│   ├── search/                 finding jobs
+│   │   ├── pipeline.py         a search run: collect, filter, score with AI, queue packages
+│   │   ├── plan.py             what to search for: levels, roles, queries, dream companies
+│   │   ├── sources.py          the checks on the Sources page
+│   │   └── collectors/         one file per kind of source (LinkedIn, company boards, feeds, GitHub lists, AI hunt)
+│   ├── ai/                     ChatGPT
+│   │   ├── client.py           every AI request (OpenAI's Responses API)
+│   │   ├── signin.py           Sign in with ChatGPT
+│   │   └── prompts.py          every prompt and the shape of each AI answer
+│   ├── documents/              resumes and other files
+│   │   ├── extract.py          reading imported files (PDF, DOCX, ODT, RTF, text)
+│   │   ├── render.py           resumes and cover letters to HTML, PDF and DOCX
+│   │   ├── resumecheck.py      resume checks: format, length, keywords, truthful skills
+│   │   ├── exports.py          downloads: single files, the package zip, emails
+│   │   └── revise.py           AI edits by instruction
+│   ├── insights/               the Analysis (analysis.py) and Equity mining (crm.py) pages
+│   ├── core/                   shared building blocks
+│   │   ├── config.py           folders, the port and every default setting
+│   │   ├── settings.py         reading and saving settings
+│   │   ├── db.py               the SQLite database
+│   │   ├── bus.py              live updates to the dashboard
+│   │   ├── osutil.py           everything that differs between Windows, macOS and Linux
+│   │   ├── textutil.py         text helpers, including location matching
+│   │   ├── levels.py           experience levels and the title filters they create
+│   │   └── genres.py           work genres and industries
+│   └── resources/              files read at run time (the resume playbook, the Linux desktop entry)
+├── tests/                      pytest tests and a fictional sample resume
+├── packaging/                  how the release apps are built: PyInstaller spec, Windows installer, PDF engine, icons
+├── docs/ARCHITECTURE.md        how the pieces work together
+├── .github/workflows/          CI (tests on every push) and Release (builds the apps when a version tag is pushed)
+└── run.sh, run.ps1, run.bat    start scripts for running from source
+```
+
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) walks through how a request, a search run and a profile build move through
+these files.
+
+## Testing
+
+### The automated tests
 
 ```bash
-python -m ruff check .
-python -m pytest
+python -m pytest                     # every test, about 3 seconds
+python -m pytest tests/test_api.py   # one file
+python -m pytest -k downloads        # tests whose name contains "downloads"
+python -m ruff check .               # lint, including import order
+python -m ruff check . --fix         # fix what ruff can fix by itself
 ```
 
-Tests never call OpenAI. They use the `fake_ai` fixture in `tests/conftest.py` or the mock server in `tests/test_ai.py`.
-Every test starts from an empty data folder. CI runs lint, tests, `jobportal --doctor`, a server smoke test and the start scripts on Ubuntu, macOS and Windows for
-every push and pull request.
+- Tests never talk to OpenAI. They use the `fake_ai` fixture in `tests/conftest.py` or the mock OpenAI in `tests/test_ai.py`.
+- Every test starts from an empty data folder, exactly like a fresh install.
+- Tests use fictional people only (Jordan Rivera, `example.com`). `tests/fixtures/sample_resume.md` is a fake resume.
+- CI runs the lint, the tests, `jobportal --doctor`, a server smoke test and the start scripts on Ubuntu, macOS and Windows
+  for every push and pull request. A red CI blocks merging.
 
-## Workflow
+| Test file | What it covers |
+|---|---|
+| `test_api.py` | the HTTP API: setup, downloads, leads, the Dream list, sources, security checks, Quit |
+| `test_ai.py` | Sign in with ChatGPT and the AI request loop, against a mock OpenAI |
+| `test_profile.py` | building and updating the profile, and that only the resume and answers feed it |
+| `test_onboarding.py` | resume import, pre-filling the questions, saving answers |
+| `test_extract.py`, `test_render.py` | reading resume files, rendering resumes, PDF export |
+| `test_levels.py` | experience levels and title filters |
+| `test_platform.py` | cross-platform pieces: the command line, the app window, the PDF engine lookup |
 
-- Branch from `main` (for example `feature/onboarding-tooltips` or `fix/pdf-timeout`), keep pull requests focused, and fill in
-  the pull request template.
-- CI must pass before merging. Ask a teammate to review anything that changes prompts, the database or the setup flow.
-- Describe user-facing changes in plain language in the pull request.
+Add or update a test with every bug fix and every feature.
+
+### Testing by hand
+
+- Run with a scratch data folder and another port: `jobportal --data-dir ./dev-data --port 8790 --browser`.
+- Import `tests/fixtures/sample_resume.md` to try setup without using your own resume.
+- Without signing in to ChatGPT, anything that needs AI shows a "Sign in with ChatGPT first" error. That's expected. To try
+  the AI, sign in with your own ChatGPT account.
+- After changing the dashboard, click through every page you touched with the browser's developer console open (F12). Any
+  red error there is a bug.
+
+## How we work
+
+- Pull `main` before you start. Make a branch for each change, like `feature/interview-tips` or `fix/pdf-timeout`.
+- Keep pull requests small and focused, and fill in the pull request template.
+- CI must be green, and one teammate reviews before merging. Ask for a second review on anything that changes prompts, the
+  database or the setup flow.
+- Commit messages are short and say what changed, like "Add a deadline filter to the Leads page".
 
 ## Rules
 
-**No personal data in the repository.** JobPortal starts with zero data, and the repository must never contain a real
-resume, database, generated document or anyone's contact details. Tests and examples use fictional people and
-`example.com` addresses. `.gitignore` blocks databases, PDFs and DOCX files, but check `git status` before you commit.
+1. **No personal data in the repo.** JobPortal starts empty. Never commit a real resume, a database, generated documents or
+   anyone's contact details. `.gitignore` blocks databases, PDFs and Word files, but check `git status` before you commit.
+2. **Only the resume and the questions teach JobPortal about the user.** That means the imported resume, the standard
+   questions and the questions asked along the way. Don't add other ways to feed the profile.
+3. **Keep it cross-platform.** Anything that touches the operating system (opening files and links, notifications, finding
+   programs) goes through `jobportal/core/osutil.py`. Use `pathlib` for paths and pass `encoding="utf-8"` whenever you read
+   or write text. Keep `run.sh` and `run.ps1` doing the same thing.
+4. **Keep the AI truthful.** Prompts may let the AI choose, reorder and rephrase, but never invent. If the profile is
+   missing something, the fix is a question for the user (`profile.ask`), not a guess.
+5. **Keep it safe.** The server only answers requests from this computer. Don't add endpoints that run commands or read
+   arbitrary files. ChatGPT tokens never leave the data folder.
+6. **Write plainly.** In UI text, comments and docs: short sentences, American English, no em dashes and no middle dots as
+   separators.
+7. **Match the code around you.** Absolute imports (`from jobportal.core import db`), the existing naming, and comments that
+   explain why. The dashboard is plain JavaScript with no build step: each page registers its own buttons with `onAction()`.
 
-**Keep it cross-platform.**
-- Anything that touches the operating system goes through `jobportal/osutil.py` (opening files and links, notifications,
-  finding Chrome or LibreOffice). Don't call `xdg-open`, `open`, `start` or other system commands directly.
-- Use `pathlib` for paths and pass `encoding="utf-8"` to every `read_text`, `write_text` and `open` (Windows defaults to a
-  different encoding).
-- No shell-specific commands in Python, and no `strftime` codes that only exist on some systems (such as `%-d`).
-- Every AI request goes through `jobportal/ai.py`. ChatGPT tokens stay in `openai_auth.py` and the data folder.
-- Keep `run.sh` and `run.ps1` in step with each other.
+## Common changes
 
-**Keep the AI truthful.** Prompts may let the model choose, reorder and rephrase, never invent. If the profile is missing
-something, the answer is a question for the user (`profile.ask`), not a guess.
-
-**Match the surrounding code.** The backend is plain FastAPI and SQLite; the dashboard is vanilla JavaScript with no build
-step. Follow the existing style for naming, comments and structure. In anything user-facing, write plainly: no em dashes,
-and no middle dots as separators.
+| To | Edit |
+|---|---|
+| change or add a standard question | `QUESTIONS` in `candidate/onboarding.py` |
+| change what the AI writes | the prompt in `ai/prompts.py` |
+| add a job source | a collector in `search/collectors/`, listed in `search/collectors/__init__.py`, with defaults in `core/config.py` |
+| add a company job board | the Sources page, or `ATS_BOARDS` in `core/config.py` |
+| change resume layouts | `THEMES` in `documents/render.py` and the playbook in `resources/resume_playbook.md` |
+| add an API endpoint | the matching file in `web/routes/` |
+| change a dashboard page | its file in `web/static/js/pages/` |
+| add something that differs by operating system | `core/osutil.py` |
 
 ## Releases
 
-Push a version tag (for example `v0.2.0`) to `main`. The Release workflow builds the Windows, macOS and Linux apps, tests that
-each one starts, and publishes them on the Releases page. Bump `__version__` in `jobportal/__init__.py` first. The Windows
-installer comes from `packaging/windows/jobportal.iss` (Inno Setup).
+1. Bump `__version__` in `jobportal/__init__.py`.
+2. Commit, then push a version tag: `git tag v0.3.0 && git push origin v0.3.0`.
+3. The Release workflow builds the Windows installer, the macOS disk image and the Linux AppImage, checks that each one
+   starts and prints a PDF, and publishes them on the Releases page.
 
-To build the app for your own system:
+The macOS and Linux apps carry their own PDF engine (`packaging/fetch_pdf_engine.py`). The Windows installer is built with
+Inno Setup from `packaging/windows/jobportal.iss`. To build the app for your own system:
 
 ```bash
 pip install -e ".[build]"
-pyinstaller --noconfirm packaging/jobportal.spec   # the app lands in dist/
+pyinstaller --noconfirm packaging/jobportal.spec     # the app lands in dist/
 ```
-
-## Where things are
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together and where to make common changes.

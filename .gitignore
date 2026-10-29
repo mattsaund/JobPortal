@@ -27,9 +27,10 @@ dev-data/
 !tests/fixtures/*.docx
 .env
 
-# Editors and OS files
+# Editors, tools and OS files
 .vscode/
 .idea/
+.claude/
 *.swp
 .DS_Store
 ._*
