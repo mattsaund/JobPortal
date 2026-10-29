@@ -114,7 +114,8 @@ JobPortal/
 │   │   └── static/             the dashboard
 │   │       ├── index.html      the page shell and the list of scripts, in load order
 │   │       ├── style.css       all the styles
-│   │       └── js/             core.js, live.js, layout.js, components/, pages/ (one file per page) and main.js
+│   │       └── js/             core.js, live.js, layout.js, pages/ (one file per page), main.js, and components/ for
+│   │                           pieces several pages share (search area, answers form, settings form, file drops)
 │   ├── candidate/              what JobPortal knows about the user
 │   │   ├── onboarding.py       setup: importing the resume and the standard questions
 │   │   ├── profile.py          the profile: building it, updating it, questions along the way, writing voice
@@ -256,7 +257,7 @@ Add or update a test with every bug fix and every feature.
 
 ## Releases
 
-1. Bump `__version__` in `jobportal/__init__.py`.
+1. Bump `__version__` in `jobportal/__init__.py`, and update "What's new" in `packaging/release-notes.md`.
 2. Commit, then push a version tag: `git tag v0.3.0 && git push origin v0.3.0`.
 3. The Release workflow builds the Windows installer, the macOS disk image and the Linux AppImage, checks that each one
    starts and prints a PDF, and publishes them on the Releases page.

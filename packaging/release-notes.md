@@ -1,3 +1,13 @@
+## What's new
+
+- JobPortal opens in a window of its own on every system, and comes with shortcuts: a one-click Windows installer with Start
+  menu and desktop shortcuts, and an app menu entry on Linux.
+- PDF export works out of the box on macOS and Linux too. The apps bring their own PDF engine.
+- Location search keeps jobs it used to drop: hybrid jobs on a US-wide search, remote jobs open to the U.S. and Canada, and
+  places written like "Columbus, OH, on-site".
+- Saving your standard answers again no longer resets the search area or the Dream list.
+- Dozens of fixes found during a full cleanup, from LinkedIn results getting lost to times showing in the wrong time zone.
+
 Download the file for your system and open it. There's nothing else to install.
 
 | System | File | How to install |
