@@ -261,3 +261,23 @@ def test_fetch_refuses_local_private_and_malformed_addresses():
     for url in urls:
         text = asyncio.run(ai.fetch_public(url))  # always a reply for the model, never an exception
         assert any(s in text for s in ("can't be fetched", "Only public", "isn't a valid URL")), url
+
+
+def test_fetch_connects_to_the_address_it_checked(monkeypatch):
+    """The name is looked up once. The request goes to that address, with the real name as Host and for TLS, so a DNS
+    server can't swap in a private address between the check and the connection."""
+    lookups, seen = [], {}
+
+    def getaddrinfo(host, port):
+        lookups.append(host)
+        return [(None, None, None, "", ("93.184.215.14", 0))]
+    monkeypatch.setattr(ai.socket, "getaddrinfo", getaddrinfo)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(url=str(request.url), host=request.headers["host"], sni=request.extensions.get("sni_hostname"))
+        return httpx.Response(200, headers={"content-type": "text/html"}, content=b"<p>Software Engineering Intern</p>")
+    real = httpx.AsyncClient
+    monkeypatch.setattr(ai.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    text = asyncio.run(ai.fetch_public("https://jobs.example.com/apply?id=7"))
+    assert "Software Engineering Intern" in text and lookups == ["jobs.example.com"]
+    assert seen == {"url": "https://93.184.215.14/apply?id=7", "host": "jobs.example.com", "sni": "jobs.example.com"}

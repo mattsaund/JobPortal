@@ -185,13 +185,16 @@ async def fetch_public(url: str) -> str:
     Redirects are followed by hand, so every hop passes the same check. HTML is turned into plain text, and the text is
     cut to FETCH_LIMIT characters. Network call."""
     headers = {"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"}
-    async with httpx.AsyncClient(timeout=25, headers=headers) as client:
+    # No pooled connections: each request connects to its own checked address (see _pinned), so a connection opened for
+    # one host name must never be reused for another one on the same address.
+    async with httpx.AsyncClient(timeout=25, headers=headers, limits=httpx.Limits(max_keepalive_connections=0)) as client:
         for _ in range(MAX_REDIRECTS + 1):
-            refusal = await _fetch_refusal(url)
+            refusal, target = await _check_url(url)
             if refusal:
                 return refusal
             try:
-                async with client.stream("GET", url, follow_redirects=False) as response:
+                async with client.stream("GET", target["url"], headers={"Host": target["host"]}, follow_redirects=False,
+                                         extensions={"sni_hostname": target["sni"]}) as response:
                     location = response.headers.get("location")
                     if response.is_redirect and location:
                         url = urljoin(url, location)
@@ -202,36 +205,43 @@ async def fetch_public(url: str) -> str:
     return "Too many redirects."
 
 
-async def _fetch_refusal(url: str) -> str:
-    """Why fetch_url won't fetch `url`, or "" when it may."""
+async def _check_url(url: str) -> tuple[str, dict]:
+    """Decide whether fetch_url may fetch `url`. Returns (why not, {}) for a refusal, or ("", target) where target says how
+    to connect: "url" is the address with the host name swapped for the checked IP, "host" is the Host header to send,
+    and "sni" is the name TLS presents and checks the certificate against.
+
+    Connecting to the IP that passed the check closes a gap: if httpx looked the name up again, a hostile DNS server could
+    answer with a public address for the check and a private one for the connection (DNS rebinding)."""
     try:
         parts = urlparse(url or "")
-        _ = parts.port  # reading the port raises ValueError when it isn't a number from 0 to 65535
+        port = parts.port  # raises ValueError when the port isn't a number from 0 to 65535
     except ValueError:
-        return "That isn't a valid URL."
+        return "That isn't a valid URL.", {}
     if parts.scheme not in ("http", "https") or not parts.hostname:
-        return "Only public http(s) pages can be fetched."
-    if not await _is_public(parts.hostname):
-        return "That address isn't on the public internet, so it can't be fetched."
-    return ""
+        return "Only public http(s) pages can be fetched.", {}
+    ip = await _public_address(parts.hostname)
+    if not ip:
+        return "That address isn't on the public internet, so it can't be fetched.", {}
+    host = parts.hostname + (f":{port}" if port else "")
+    ip_host = f"[{ip}]" if ":" in ip else ip  # IPv6 addresses go in brackets inside a URL
+    pinned = parts._replace(netloc=ip_host + (f":{port}" if port else "")).geturl()
+    return "", {"url": pinned, "host": host, "sni": parts.hostname}
 
 
-async def _is_public(host: str) -> bool:
-    """True if every address `host` resolves to is on the public internet. Names that don't resolve, and loopback,
-    private, link-local and other special addresses, are not public.
-
-    One limit to know: httpx looks the name up again when it connects, so a hostile DNS server could answer differently
-    the second time (DNS rebinding). JobPortal's own API is still safe, because web/server.py refuses any request whose
-    Host header isn't 127.0.0.1 or localhost."""
+async def _public_address(host: str) -> str | None:
+    """One address to connect to for `host`, or None unless every address it resolves to is on the public internet.
+    Names that don't resolve, and loopback, private, link-local and other special addresses, are not public."""
     try:
         # getaddrinfo blocks, so it runs in a worker thread. It raises ValueError (UnicodeError) for names that can't be
         # encoded, such as one with a label longer than 63 characters.
         infos = await asyncio.to_thread(socket.getaddrinfo, host, None)
     except (OSError, ValueError):
-        return False
-    addresses = {info[4][0] for info in infos}
+        return None
     # split("%") drops an IPv6 zone id such as "%eth0" before the address is parsed.
-    return bool(addresses) and all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses)
+    addresses = [info[4][0].split("%")[0] for info in infos]
+    if not addresses or not all(ipaddress.ip_address(a).is_global for a in addresses):
+        return None
+    return addresses[0]
 
 
 async def _page_text(response: httpx.Response, url: str) -> str:
