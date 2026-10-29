@@ -54,6 +54,31 @@ def test_answers_update_only_what_changes(fake_ai, sample_resume):
     assert "300 students" in profile.full_context()
 
 
+def test_answers_given_during_an_update_wait_for_the_next_one(fake_ai, sample_resume):
+    _setup(fake_ai, sample_resume)
+    asyncio.run(profile.build("test"))
+    profile.answer_question("How many people used the imaging script?", "About 300 students a semester.")
+
+    def update(prompt):  # the user answers another question while the AI is still working
+        profile.answer_question("Do you have a driver's license?", "Yes.")
+        return {"changes": ["Added the imaging script's reach"], "open_questions": []}
+
+    fake_ai.responses["profile-update"] = update
+    asyncio.run(profile.update_from_answers("test"))
+    assert [q["question"] for q in profile.unsynced()] == ["Do you have a driver's license?"]
+
+
+def test_builds_keep_questions_raised_by_applications(fake_ai, sample_resume):
+    _setup(fake_ai, sample_resume)
+    profile.ask("How many people used the imaging script?", "The posting asks about scale.", source="Example Robotics application",
+                lead_id=3)
+    asyncio.run(profile.build("test"))  # PROFILE_OUT asks the same question
+    assert profile.open_counts_by_lead() == {3: 1}
+    fake_ai.responses["profile-build"] = {**copy.deepcopy(PROFILE_OUT), "open_questions": []}
+    asyncio.run(profile.build("test"))
+    assert [q["source"] for q in profile.questions()] == ["Example Robotics application"]
+
+
 def test_full_context_never_includes_self_identification(fake_ai, sample_resume):
     _setup(fake_ai, sample_resume)
     ctx = profile.full_context()

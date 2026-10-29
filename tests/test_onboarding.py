@@ -46,7 +46,7 @@ def test_answers_drive_settings_facts_and_kit():
     qa = profile.get("qa")
     assert {"q": "Are you legally authorized to work in the United States?", "a": "Yes"} in qa
     assert all(x.get("eeo") for x in qa if x["q"] in ("Gender", "Disability status"))
-    prompt_text = onboarding.answers_for_prompt()
+    prompt_text = onboarding.answers_for_prompt(profile.standard_answers())
     assert "Gender" not in prompt_text and "Software Engineer" in prompt_text
 
 
