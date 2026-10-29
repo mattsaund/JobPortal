@@ -7,9 +7,9 @@ If you're not sure where something goes, put it here and mention it in the group
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | how the code works: the packages, a request from start to finish, the profile, a search run |
 | [school/](school/) | CMSC 495 7304 work: the proposal, reports, presentations, meeting notes and the final submission |
-| [design/logos/](design/logos/) | logo ideas and sketches |
-| [design/colors/](design/colors/) | color scheme ideas |
-| [design/fonts/](design/fonts/) | font ideas and font files we might use |
+| [design/logos/](design/logos/) | logo ideas and sketches. The app's logo today is a placeholder in `jobportal/web/static/icon.svg`, and the app icons in `packaging/icons/` are made from it. |
+| [design/colors/](design/colors/) | color scheme ideas, as images or hex codes like `#ff7a1a`. The dashboard's colors are set at the top of `jobportal/web/static/style.css`. |
+| [design/fonts/](design/fonts/) | font ideas and font files. Check that the license lets us ship the font. The dashboard uses JetBrains Mono today, from `jobportal/web/static/fonts/`. |
 
 The README and CONTRIBUTING guide stay at the top of the repo, because GitHub shows them from there.
 
