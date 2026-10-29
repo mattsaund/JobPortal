@@ -36,7 +36,7 @@ Optional:
 | A ChatGPT Go, Plus or Pro plan | trying the real AI by hand. The automated tests never need it. |
 | LibreOffice | importing old `.doc` resumes |
 | [uv](https://docs.astral.sh/uv/) | faster Python environments |
-| Linux only: your distribution's PyGObject and WebKit2GTK 4.1 packages | a native app window when running from source |
+| Linux only: PyGObject and WebKit2GTK 4.1 (Arch: `python-gobject webkit2gtk-4.1`, Debian and Ubuntu: `python3-gi gir1.2-webkit2-4.1`, Fedora: `python3-gobject webkit2gtk4.1`) | a native app window when running from source. Without them it opens in a Chromium browser's app mode or a tab. |
 
 Everything else (FastAPI, pywebview, pypdf, python-docx and the rest) installs automatically.
 
@@ -161,8 +161,8 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 - Tests never talk to OpenAI. They use the `fake_ai` fixture in `tests/conftest.py` or the mock OpenAI in `tests/test_ai.py`.
 - Every test starts from an empty data folder, exactly like a fresh install.
 - Tests use fictional people only (Jordan Rivera, `example.com`). `tests/fixtures/sample_resume.md` is a fake resume.
-- CI runs the lint, the tests, `jobportal --doctor`, a server smoke test and the start scripts on Ubuntu, macOS and Windows
-  for every push and pull request. A red CI blocks merging.
+- CI runs the lint, the tests, `jobportal --doctor`, a server smoke test and the start scripts on Linux, macOS and Windows
+  for every push and pull request, with Python 3.11, 3.13 and 3.14. A red CI blocks merging.
 
 | Test file | What it covers |
 |---|---|
