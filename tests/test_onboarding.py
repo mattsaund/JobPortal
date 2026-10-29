@@ -69,3 +69,19 @@ def test_import_resume_stores_file_and_prefills(fake_ai, sample_resume):
 def test_prefill_survives_ai_failure(fake_ai, sample_resume):
     out = asyncio.run(onboarding.prefill(sample_resume))  # no fake response -> AIError -> regex only
     assert out["email"] == "jordan.rivera@example.com" and "_error" in out
+
+
+def test_saving_answers_again_keeps_edits_made_on_other_pages():
+    from jobportal.core import settings
+    onboarding.save_answers(STANDARD_ANSWERS)
+    cfg = settings.get()
+    cfg["dream_companies"].append("Example Labs")  # added on the Dream list page
+    cfg["locations"]["allowed"] = ["Ohio", "Remote"]  # changed in the search area editor
+    settings.save(cfg)
+    onboarding.save_answers({**STANDARD_ANSWERS, "phone": "(555) 010-0123"})  # an unrelated fix
+    cfg = settings.get()
+    assert cfg["dream_companies"] == ["Example Robotics", "Example Labs"] and cfg["locations"]["allowed"] == ["Ohio", "Remote"]
+    onboarding.save_answers({**STANDARD_ANSWERS, "dream_companies": ["Example Aerospace"], "locations": ["Texas"]})
+    cfg = settings.get()
+    assert cfg["dream_companies"] == ["Example Labs", "Example Aerospace"]  # the answers' swap applied, the page's addition kept
+    assert cfg["locations"]["allowed"] == ["Texas", "Remote"]  # the location answers changed, so the area follows them

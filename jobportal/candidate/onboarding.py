@@ -353,22 +353,47 @@ def allowed_locations(a: dict) -> list[str]:
     return allowed
 
 
-def apply_to_settings(a: dict) -> dict:
+# The answers allowed_locations() reads. The search area only follows the answers when one of these changed.
+LOCATION_ANSWERS = ("locations", "anywhere_us", "work_modes", "state")
+
+
+def _apply_list_change(current: list[str], old: list[str], new: list[str]) -> list[str]:
+    """`current` with the change from `old` to `new` applied: what `new` added is appended and what it dropped is removed,
+    ignoring case. Everything else in `current` stays, so items added on another page survive."""
+    key = lambda item: str(item).strip().lower()  # noqa: E731
+    dropped = {key(x) for x in old} - {key(x) for x in new}
+    out = [x for x in current if key(x) not in dropped]
+    for item in new:
+        if key(item) not in {key(x) for x in out}:
+            out.append(item)
+    return out
+
+
+def apply_to_settings(a: dict, previous: dict | None = None) -> dict:
     """Point the search at the standard answers. Saves the settings and returns them.
 
+    `previous` is the answers as they were before this save. Each setting changes only when the answers it comes from
+    changed (or on the first save), so an edit made on another page (the search area on the Leads page, the Dream list,
+    the title filters in Settings) survives saving the answers again for an unrelated fix.
     - search.levels: the experience levels to search. They also set the job-title filters (core/levels.title_filters),
       and the target roles always pass those filters.
     - locations.allowed: the search area (see allowed_locations()).
-    - dream_companies: the companies named in the answers.
+    - dream_companies: companies added to the answers join the Dream list, and ones removed from the answers leave it.
+      Companies added on the Dream list page stay.
     - filters.exclude_keywords: without an active clearance, postings that require one on day one are filtered out.
-    Saving the answers again overwrites these settings, including edits made since on other pages. Other settings, and
-    excluded keywords the user added, are left alone."""
+      Excluded keywords the user added are left alone."""
+    previous = previous or {}
+    changed = lambda *keys: not previous or any(a.get(k) != previous.get(k) for k in keys)  # noqa: E731
     cfg = settings_mod.get()
-    levels = a.get("levels") or cfg["search"].get("levels")
-    cfg["search"]["levels"] = levels
-    cfg["filters"]["title_include"], cfg["filters"]["title_exclude"] = title_filters(levels, a.get("target_roles"))
-    cfg["locations"]["allowed"] = allowed_locations(a)
-    cfg["dream_companies"] = list(a.get("dream_companies") or [])
+    if changed("levels", "target_roles"):
+        levels = a.get("levels") or cfg["search"].get("levels")
+        cfg["search"]["levels"] = levels
+        cfg["filters"]["title_include"], cfg["filters"]["title_exclude"] = title_filters(levels, a.get("target_roles"))
+    if changed(*LOCATION_ANSWERS):
+        cfg["locations"]["allowed"] = allowed_locations(a)
+    if changed("dream_companies"):
+        cfg["dream_companies"] = _apply_list_change(cfg.get("dream_companies") or [], previous.get("dream_companies") or [],
+                                                    a.get("dream_companies") or [])
     keywords = [k for k in cfg["filters"].get("exclude_keywords", []) if k not in CLEARANCE_PHRASES]
     if a.get("clearance") in ("none", "eligible", ""):
         keywords += CLEARANCE_PHRASES  # a role that needs a clearance on day one can't be won without one
@@ -395,10 +420,11 @@ def save_answers(raw: dict) -> dict:
     missing = missing_required(answers)
     if missing:
         raise ValueError("Please answer: " + "; ".join(missing))
+    previous = db.kv_get("profile.answers", {})
     answers["_saved_at"] = db.now()
     db.kv_set("profile.answers", answers)
     apply_to_profile(answers)
-    apply_to_settings(answers)
+    apply_to_settings(answers, previous)
     profile_mod.publish_status()
     bus.publish("profile", {"ts": db.now(), "mode": "answers"})
     return answers
