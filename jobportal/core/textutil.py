@@ -66,13 +66,13 @@ CITY_STATE = {
     "portland": "OR", "raleigh": "NC", "durham": "NC", "nashville": "TN", "miami": "FL", "tampa": "FL",
 }
 # Text that names another country or region (EMEA, APAC, LATAM), or a Canadian province code after a comma ("Toronto,
-# ON"). Case-insensitive, so ", on-site" also reads as Ontario.
+# ON"). Country names are case-insensitive. Province codes must be uppercase, so ", on-site" isn't read as Ontario.
 FOREIGN_RE = re.compile(
     r"\b(uk|u\.k\.|united kingdom|england|scotland|wales|ireland|canada|germany|france|spain|italy|netherlands|"
     r"switzerland|sweden|norway|denmark|finland|poland|india|china|japan|korea|singapore|australia|new zealand|"
     r"israel|mexico|brazil|argentina|uae|united arab emirates|dubai|philippines|vietnam|taiwan|hong kong|portugal|"
     r"belgium|austria|czech|romania|ukraine|luxembourg|estonia|emea|apac|latam)\b"
-    r"|,\s*(ON|QC|BC|AB|MB|SK|NS|NB|NL|PE)\b", re.I)
+    r"|,\s*(?-i:ON|QC|BC|AB|MB|SK|NS|NB|NL|PE)\b", re.I)
 # Location text that says nothing useful about where a job is: blank, "N/A", "TBD", "Various", "Multiple locations",
 # "3 locations", or only the country ("United States", "USA", "Nationwide", "North America").
 UNKNOWN_LOC = re.compile(r"^\s*(|n/?a|tbd|various|multiple( locations)?|\d+ locations?|united states( of america)?|usa?|"
@@ -81,9 +81,11 @@ UNKNOWN_LOC = re.compile(r"^\s*(|n/?a|tbd|various|multiple( locations)?|\d+ loca
 REMOTE_RE = re.compile(r"\b(remote|anywhere|work from home|wfh|virtual|telework|teleworking|distributed)\b", re.I)
 # Text that names the US. Case-sensitive on purpose, so the word "us" in "join us" doesn't count.
 _US_RE = re.compile(r"\b(US|USA|United States)\b")
-# The same plus "U.S.", used only by LocationMatcher's remote check. Because of the closing \b, "U.S." counts only when a
-# letter or digit follows its last dot, so "Remote - U.S. & Canada" still reads as foreign.
-_US_OR_DOTTED_RE = re.compile(r"\b(US|USA|United States|U\.S\.)\b")
+# The same plus "U.S." and "U.S.A.", used only by LocationMatcher's remote check, so "Remote - U.S. & Canada" counts as
+# open to the US. state_of() keeps using _US_RE, because job fingerprints are built from it.
+_US_OR_DOTTED_RE = re.compile(r"\b(?:US|USA|United States)\b|\bU\.S\.(?:A\.)?")
+# A hybrid listing: part remote, part on-site at the place it names.
+_HYBRID_RE = re.compile(r"\bhybrid\b", re.I)
 # An allowed-location entry that means "anywhere in the US", matched against the whole entry in lowercase. Keep it in
 # step with NATIONWIDE_RE in web/static/js/components/search-area.js, which reads the same entries.
 _NATIONWIDE_RE = re.compile(r"(anywhere( in the)?( us| usa| united states)?|nationwide|united states|usa|us)")
@@ -313,13 +315,15 @@ class LocationMatcher:
         if UNKNOWN_LOC.match(loc):
             return True if self.anywhere_us and _SAYS_US_RE.search(loc) else None
 
-        # 2. A nationwide search takes any US state. A US remote job passes only if Remote is allowed as well, and the
-        #    answer is final even when the text also names a city (a hybrid listing).
+        # 2. A nationwide search takes any US state. A hybrid job that names a US place ("Hybrid Remote - Austin, TX") is
+        #    partly on-site there, so it passes too. A fully remote US job passes only if Remote is allowed as well.
         if self.anywhere_us:
             where = state_of(loc)
             if where and where not in ("FOREIGN", "REMOTE"):
                 return True
             if where == "REMOTE" and not _names_foreign_place(loc):
+                if _HYBRID_RE.search(loc) and state_of(REMOTE_RE.sub("", loc)) not in (None, "FOREIGN", "REMOTE"):
+                    return True
                 return self.allow_remote
 
         # 3. A remote job passes when Remote is allowed, unless it's tied to another country ("Remote, Canada").

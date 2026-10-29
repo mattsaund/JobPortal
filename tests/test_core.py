@@ -270,3 +270,14 @@ def test_a_missing_chrome_override_falls_back_to_the_bundled_engine(tmp_path, mo
 def test_quoting_for_notifications():
     assert osutil._ps_str("Jordan's offer") == "'Jordan''s offer'"
     assert osutil._applescript_str('Say "hi" \\ bye') == '"Say \\"hi\\" \\\\ bye"'
+
+
+def test_location_edge_cases_that_used_to_drop_good_jobs():
+    from jobportal.core.textutil import LocationMatcher, state_of
+    nationwide = LocationMatcher(["Anywhere in the US"])
+    assert nationwide.match_one("Hybrid Remote - Austin, TX") is True  # partly on-site in Texas
+    assert nationwide.match_one("Remote (US)") is False  # fully remote still needs Remote allowed
+    assert LocationMatcher(["Remote"]).match_one("Remote - U.S. & Canada") is True
+    assert LocationMatcher(["Remote"]).match_one("Remote, Canada") is False
+    assert state_of("Columbus, OH, on-site") == "OH" and LocationMatcher(["Ohio"]).match_one("Columbus, OH, on-site") is True
+    assert state_of("Toronto, ON") == "FOREIGN"  # real province codes are still foreign
