@@ -103,7 +103,6 @@ jobs:
           chmod +x appimagetool
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool JobPortal.AppDir out/JobPortal-Linux-x86_64.AppImage
           APPIMAGE_EXTRACT_AND_RUN=1 ./out/JobPortal-Linux-x86_64.AppImage --version | grep -q JobPortal
-          tar -czf out/JobPortal-Linux-x86_64.tar.gz -C dist JobPortal
       - uses: actions/upload-artifact@v4
         with:
           name: JobPortal-${{ runner.os }}
