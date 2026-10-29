@@ -1,5 +1,6 @@
 """Everything that differs between Windows, macOS and Linux: opening files and links, desktop notifications,
-and finding Chrome, Edge or Chromium (PDF export) and LibreOffice (old .doc files)."""
+and finding the PDF engine (bundled, or Chrome, Edge or Chromium) and LibreOffice (old .doc files)."""
+import functools
 import os
 import shutil
 import subprocess
@@ -105,6 +106,41 @@ def find_chrome() -> str | None:
                r"Chromium\Application\chrome.exe", r"BraveSoftware\Brave-Browser\Application\brave.exe"]
         return _first_existing(Path(d) / r for r in rel for d in _win_dirs())
     return None
+
+
+def bundled_pdf_engine() -> str | None:
+    """Chrome Headless Shell shipped inside the macOS and Linux apps (packaging/fetch_pdf_engine.py puts it there). None when
+    running from source, and on Windows, where Edge is always installed."""
+    if not getattr(sys, "frozen", False):
+        return None
+    exe_dir = Path(sys.executable).resolve().parent
+    name = "chrome-headless-shell.exe" if IS_WIN else "chrome-headless-shell"
+    # Windows and Linux builds keep it next to the program. A macOS app keeps it in Contents/Resources.
+    for folder in (exe_dir / "pdf-engine", exe_dir.parent / "Resources" / "pdf-engine"):
+        if (folder / name).is_file():
+            if IS_MAC:
+                _clear_quarantine(folder)
+            return str(folder / name)
+    return None
+
+
+@functools.cache
+def _clear_quarantine(folder: Path) -> None:
+    """Files in a downloaded app carry macOS's quarantine flag. Approving JobPortal covers the app, but the engine is a
+    separate program, so drop the flag from it. Otherwise Gatekeeper could block the first PDF export."""
+    try:
+        subprocess.run(["xattr", "-dr", "com.apple.quarantine", str(folder)], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def find_pdf_engine() -> str | None:
+    """What prints resumes to PDF: JOBPORTAL_CHROME when set, else the engine bundled with the app, else an installed
+    Chrome, Edge, Chromium or Brave."""
+    if os.environ.get("JOBPORTAL_CHROME"):
+        return find_chrome()
+    return bundled_pdf_engine() or find_chrome()
 
 
 def find_soffice() -> str | None:

@@ -1,6 +1,7 @@
 ; Windows installer, built by the Release workflow after PyInstaller:
 ;   iscc /DAppVersion=0.2.0 packaging\windows\jobportal.iss
-; Installs dist\JobPortal for the current user (no admin rights) with Start menu and desktop shortcuts.
+; One click: no questions and no admin rights. It installs dist\JobPortal for the current user, adds Start menu and
+; desktop shortcuts, and opens JobPortal when it's done. Uninstall it from Settings, Apps.
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
@@ -13,7 +14,11 @@ AppVersion={#AppVersion}
 AppPublisher=JobPortal contributors
 AppPublisherURL=https://github.com/mattsaund/JobPortal
 DefaultDirName={autopf}\JobPortal
+DisableWelcomePage=yes
+DisableDirPage=yes
 DisableProgramGroupPage=yes
+DisableReadyPage=yes
+DisableFinishedPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\..\out
 OutputBaseFilename=JobPortal-Windows-Setup
@@ -26,9 +31,6 @@ SolidCompression=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
-[Tasks]
-Name: "desktopicon"; Description: "Add a desktop shortcut"
-
 [InstallDelete]
 ; Files from the previous version's bundle that this one doesn't ship anymore.
 Type: filesandordirs; Name: "{app}\_internal"
@@ -38,7 +40,7 @@ Source: "..\..\dist\JobPortal\*"; DestDir: "{app}"; Flags: ignoreversion recurse
 
 [Icons]
 Name: "{autoprograms}\JobPortal"; Filename: "{app}\JobPortal.exe"
-Name: "{autodesktop}\JobPortal"; Filename: "{app}\JobPortal.exe"; Tasks: desktopicon
+Name: "{autodesktop}\JobPortal"; Filename: "{app}\JobPortal.exe"
 
 [Run]
-Filename: "{app}\JobPortal.exe"; Description: "Open JobPortal"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\JobPortal.exe"; Flags: nowait skipifsilent

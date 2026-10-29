@@ -58,9 +58,9 @@ def run() -> int:
         rows.append(_row(True, "ChatGPT", f"signed in as {st['email'] or st['name'] or 'your account'}"))
     else:
         rows.append(_row(None, "ChatGPT", "not signed in yet. Open JobPortal and click Continue with ChatGPT (needs a Go, Plus or Pro plan)."))
-    chrome = osutil.find_chrome()
+    chrome = osutil.find_pdf_engine()
     if chrome:
-        rows.append(_row(True, "PDF export", chrome))
+        rows.append(_row(True, "PDF export", ("built in: " if chrome == osutil.bundled_pdf_engine() else "") + chrome))
     else:
         problems += 1
         rows.append(_row(False, "PDF export", "needs Google Chrome, Microsoft Edge or Chromium (or set JOBPORTAL_CHROME to one)"))

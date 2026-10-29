@@ -193,8 +193,8 @@ def cover_html(md: str, facts: dict, company: str = "", location: str = "", scal
 # ---------------------------------------------------------------- PDF
 
 async def html_to_pdf(html_text: str, out: Path) -> int:
-    """Print HTML to PDF with a headless Chromium browser (Chrome, Edge, Chromium or Brave); returns the page count."""
-    chrome = osutil.find_chrome()
+    """Print HTML to PDF with the bundled engine or an installed Chromium browser; returns the page count."""
+    chrome = osutil.find_pdf_engine()
     if not chrome:
         raise RuntimeError("PDF export needs Google Chrome, Microsoft Edge or Chromium. Install one, or set JOBPORTAL_CHROME "
                            "to the browser's full path.")

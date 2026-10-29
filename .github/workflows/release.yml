@@ -25,6 +25,15 @@ jobs:
         run: python -m pip install -e ".[build]"
       - name: Build the app
         run: python -m PyInstaller --noconfirm --clean packaging/jobportal.spec
+      # macOS and Linux don't come with a Chromium browser, so their apps carry their own PDF engine. Windows has Edge.
+      - name: Bundle the PDF engine (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          python packaging/fetch_pdf_engine.py mac-arm64 dist/JobPortal.app/Contents/Resources/pdf-engine
+          codesign --force --sign - dist/JobPortal.app
+      - name: Bundle the PDF engine (Linux)
+        if: runner.os == 'Linux'
+        run: python packaging/fetch_pdf_engine.py linux64 dist/JobPortal/pdf-engine
       - name: Smoke test
         shell: bash
         env:
@@ -35,10 +44,17 @@ jobs:
             macOS) BIN=dist/JobPortal.app/Contents/MacOS/JobPortal ;;
             *) BIN=dist/JobPortal/JobPortal ;;
           esac
+          if [ "$RUNNER_OS" != "Windows" ]; then "$BIN" --doctor | grep "PDF export" | grep -q "built in"; fi
           "$BIN" --server --port 8795 &
           for i in $(seq 1 90); do curl -sf http://127.0.0.1:8795/api/meta > /dev/null && break; sleep 1; done
-          curl -sf http://127.0.0.1:8795/api/meta | grep -q '"version"'
+          curl -sf http://127.0.0.1:8795/api/meta | grep -q '"pdf_ready":true'
           curl -sf http://127.0.0.1:8795/ | grep -q JobPortal
+          # Print a resume to PDF the way a user would: save one to the library, then export it.
+          ID=$(curl -sf -X POST http://127.0.0.1:8795/api/library -H 'content-type: application/json' \
+            -d '{"name": "Smoke test", "md": "# Jordan Rivera\njordan.rivera@example.com\n\n## Experience\n- Closed 40+ tickets a week"}' \
+            | python -c "import json, sys; print(json.load(sys.stdin)['id'])")
+          curl -sf -o smoke.pdf "http://127.0.0.1:8795/api/library/$ID/export/pdf"
+          head -c 5 smoke.pdf | grep -q "%PDF"
           "$BIN" --stop --port 8795 || true
       - name: Package (Windows)
         if: runner.os == 'Windows'

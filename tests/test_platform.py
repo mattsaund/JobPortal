@@ -118,3 +118,18 @@ def test_appimage_menu_entry_only_for_appimages(monkeypatch):
     from jobportal import desktop
     monkeypatch.delenv("APPIMAGE", raising=False)
     assert not desktop.add_to_app_menu()
+
+
+def test_bundled_pdf_engine_comes_first(tmp_path, monkeypatch):
+    from pathlib import Path
+    engine = tmp_path / "pdf-engine" / ("chrome-headless-shell.exe" if osutil.IS_WIN else "chrome-headless-shell")
+    engine.parent.mkdir()
+    engine.write_text("")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "JobPortal"))
+    monkeypatch.delenv("JOBPORTAL_CHROME", raising=False)
+    assert Path(osutil.find_pdf_engine()).resolve() == engine.resolve()
+    chosen = tmp_path / ("chrome.exe" if osutil.IS_WIN else "chrome")
+    chosen.write_text("")
+    monkeypatch.setenv("JOBPORTAL_CHROME", str(chosen))
+    assert osutil.find_pdf_engine() == str(chosen)  # the user's own choice wins

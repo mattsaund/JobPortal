@@ -120,7 +120,7 @@ async def events(request: Request):
 def meta():
     return {"version": __version__, "os": osutil.os_name(), "data_dir": str(DATA), "efforts": EFFORTS,
             "statuses": APP_STATUSES, "collectors": [{"key": k, "label": v[0]} for k, v in COLLECTORS.items()],
-            "pdf_ready": bool(osutil.find_chrome())}
+            "pdf_ready": bool(osutil.find_pdf_engine())}
 
 
 # ---------------------------------------------------------------- Sign in with ChatGPT
