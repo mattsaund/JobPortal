@@ -136,7 +136,7 @@ class RuleFilters:
     def __init__(self, cfg: dict):
         self.cfg = cfg
         filters = cfg["filters"]
-        self.include = _any_of(filters["title_include"], "$^")  # level words; only checked for strict_titles sources
+        self.include = _any_of(filters["title_include"], ".")  # level words (none for mid level: any title passes)
         self.exclude = _any_of(filters["title_exclude"], "$^")  # too-senior and other unwanted title words
         self.tech = _any_of(filters.get("tech_title", []), ".")  # an empty list lets every title through
         self.matcher = LocationMatcher(cfg["locations"]["allowed"])

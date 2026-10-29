@@ -549,3 +549,14 @@ def test_feeds_read_rss_and_atom():
     assert feeds._parse_feed(rss) == [{"title": "Hiring: IT intern", "link": "https://example.com/a", "summary": "Apply by Friday", "date": "2026-10-27"}]
     assert feeds._parse_feed(atom) == [{"title": "New grad role", "link": "https://example.com/b", "summary": "Join us", "date": "2026-10-20"}]
     assert feeds._parse_feed("not xml") == []
+
+
+def test_empty_title_include_lets_every_title_through():
+    """Mid-level searches have no level words, so the include filter must not drop every job-board title."""
+    from jobportal.core import settings
+    cfg = settings.get()
+    cfg["filters"]["title_include"] = []
+    cfg["locations"]["allowed"] = ["Anywhere in the US"]
+    job = RawJob("ats_boards", "Software Engineer", "Example Robotics", "https://jobs.example.com/1", location="Austin, TX")
+    ok, reason, _ = pipeline.RuleFilters(cfg).check(job)
+    assert ok, reason
