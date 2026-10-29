@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from jobportal.ai import client as ai, signin
+from jobportal.core import bus, db
 
 
 def jwt(claims: dict) -> str:
@@ -18,6 +19,12 @@ def jwt(claims: dict) -> str:
 
 def query(url: str) -> dict:
     return {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
+
+
+def mock_http(monkeypatch, handler) -> None:
+    """Route every httpx.AsyncClient request to `handler` instead of the network."""
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
 
 
 def sign_in(monkeypatch, email="jordan.rivera@example.com") -> dict:
@@ -67,6 +74,13 @@ def test_sign_in_rejects_a_bad_state_or_nonce(monkeypatch):
     assert not signin.status()["signed_in"]
 
 
+def test_a_stale_sign_in_link_is_refused():
+    params = query(signin.start(8788))
+    signin._pending[params["state"]]["created"] -= signin.SIGN_IN_TIMEOUT + 1
+    with pytest.raises(signin.AuthError, match="expired"):
+        asyncio.run(signin.finish({"code": "abc", "state": params["state"], "client_id": "oaiapp_test"}))
+
+
 def test_refresh_rotates_tokens(monkeypatch):
     sign_in(monkeypatch)
     d = signin._load()
@@ -80,6 +94,41 @@ def test_refresh_rotates_tokens(monkeypatch):
     monkeypatch.setattr(signin, "_token_request", refresh)
     assert asyncio.run(signin.access_token()) == "access-2"
     assert signin._load()["refresh_token"] == "refresh-2"
+
+
+@pytest.mark.parametrize("reply, ends_sign_in", [
+    ({"error": "invalid_grant", "error_description": "Refresh token expired"}, True),
+    ({"error": {"code": "invalid_grant", "message": "Refresh token expired"}}, True),
+    ({"error": "temporarily_unavailable"}, False),
+])
+def test_a_refused_refresh(monkeypatch, reply, ends_sign_in):
+    real_token_request = signin._token_request
+    sign_in(monkeypatch)
+    monkeypatch.setattr(signin, "_token_request", real_token_request)
+    d = signin._load()
+    d["expires_at"] = time.time() - 1
+    signin._save(d)
+
+    def token_endpoint(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == signin.TOKEN_URL
+        return httpx.Response(400, json=reply)
+    mock_http(monkeypatch, token_endpoint)
+    with pytest.raises(signin.AuthError) as raised:
+        asyncio.run(signin.access_token())
+    assert isinstance(raised.value, signin.NotSignedIn) == ends_sign_in
+    assert signin.status()["signed_in"] != ends_sign_in  # only invalid_grant ends the sign-in
+    assert signin._load()["client_id"] == "oaiapp_test"  # the registration is kept for the next sign-in
+
+
+def test_sign_out_forgets_the_tokens_even_when_offline(monkeypatch):
+    sign_in(monkeypatch)
+
+    def offline(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("offline", request=request)
+    mock_http(monkeypatch, offline)
+    out = asyncio.run(signin.sign_out())
+    assert not out["signed_in"] and "Couldn't reach OpenAI" in out["note"]
+    assert "refresh_token" not in signin._load()
 
 
 def test_not_signed_in_is_a_clear_error():
@@ -116,8 +165,7 @@ def openai_mock(monkeypatch):
             return reply
         return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse(*reply))
 
-    real = httpx.AsyncClient
-    monkeypatch.setattr(ai.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    mock_http(monkeypatch, handler)
 
     async def token():
         return "test-token"
@@ -162,10 +210,34 @@ def test_web_task_fetches_pages_and_falls_back_without_search(openai_mock, monke
     assert replay[2]["type"] == "function_call_output" and "Job posting text" in replay[2]["output"]
 
 
+def test_a_search_refusal_without_search_is_an_error_not_a_retry(openai_mock):
+    openai_mock["replies"] = [httpx.Response(400, json={"error": {"message": "web_search is not supported for this account"}})]
+    with pytest.raises(ai.AIError, match="web_search"):
+        asyncio.run(ai.run("x", system="s", schema=SCHEMA, stage="triage", purpose="t"))
+    assert len(openai_mock["bodies"]) == 1
+
+
 def test_missing_fields_get_a_second_chance(openai_mock):
     openai_mock["replies"] = [[call("submit_result", {}), done()], [call("submit_result", {"score": 5}, "c2"), done()]]
     assert asyncio.run(ai.run("x", system="s", schema=SCHEMA, stage="triage", purpose="t"))["score"] == 5
     assert "Missing required fields: score" in openai_mock["bodies"][1]["input"][-1]["output"]
+
+
+def test_bad_tool_calls_get_a_reply(openai_mock):
+    not_an_object = item({"type": "function_call", "call_id": "c1", "name": "submit_result", "arguments": "[1, 2]"})
+    openai_mock["replies"] = [[not_an_object, call("send_email", {}, "c2"), done()], [call("submit_result", {"score": 3}, "c3"), done()]]
+    assert asyncio.run(ai.run("x", system="s", schema=SCHEMA, stage="triage", purpose="t"))["score"] == 3
+    replies = [i["output"] for i in openai_mock["bodies"][1]["input"] if i["type"] == "function_call_output"]
+    assert "valid JSON object" in replies[0] and "no tool called send_email" in replies[1]
+
+
+def test_a_failed_task_still_logs_its_tokens(openai_mock):
+    failed = {"type": "response.failed", "response": {"error": {"code": "server_error", "message": "boom"}}}
+    openai_mock["replies"] = [[call("send_email", {}), done(40)], [failed]]
+    with pytest.raises(ai.AIError, match="server_error: boom"):
+        asyncio.run(ai.run("x", system="s", schema=SCHEMA, stage="triage", purpose="t"))
+    assert db.one("SELECT tokens, ok, error FROM ai_calls") == {"tokens": 40, "ok": 0, "error": "server_error: boom"}
+    assert bus.state["tokens"] == 40
 
 
 def test_usage_cap_and_plan_errors(openai_mock):
@@ -183,7 +255,9 @@ def test_models_are_listed_for_the_account(openai_mock):
     assert asyncio.run(ai.models()) == ["gpt-test"]
 
 
-def test_fetch_refuses_local_and_private_addresses():
-    for url in ("http://127.0.0.1:8788/api/settings", "http://localhost/", "http://192.168.1.10/", "http://[::1]/", "file:///etc/passwd"):
-        text = asyncio.run(ai.fetch_public(url))
-        assert "can't be fetched" in text or "Only public" in text, url
+def test_fetch_refuses_local_private_and_malformed_addresses():
+    urls = ("http://127.0.0.1:8788/api/settings", "http://localhost/", "http://192.168.1.10/", "http://[::1]/", "file:///etc/passwd",
+            "http://[::1", "http://example.com:99999/", f"http://{'a' * 64}.com/")
+    for url in urls:
+        text = asyncio.run(ai.fetch_public(url))  # always a reply for the model, never an exception
+        assert any(s in text for s in ("can't be fetched", "Only public", "isn't a valid URL")), url
