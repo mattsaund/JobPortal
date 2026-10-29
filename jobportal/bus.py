@@ -25,6 +25,11 @@ def unsubscribe(q: asyncio.Queue) -> None:
     _subscribers.discard(q)
 
 
+def listeners() -> int:
+    """How many dashboards are connected to the live event stream."""
+    return len(_subscribers)
+
+
 def publish(kind: str, data) -> None:
     msg = json.dumps({"kind": kind, "data": data}, default=str)
     for q in list(_subscribers):

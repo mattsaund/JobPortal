@@ -21,9 +21,15 @@ async function api(path, opts = {}) {
   const ct = r.headers.get("content-type") || "";
   return ct.includes("json") ? r.json() : r.text();
 }
-// ---------- desktop app (pywebview): downloads, external links and notifications go through the native side
+// ---------- own window: the desktop app (pywebview) or a browser in app mode (?shell=app)
+// pywebview saves downloads and opens links through the native side. The app window sends links to the default browser.
 const desktop = () => !!(window.pywebview && window.pywebview.api);
+const appWindow = new URLSearchParams(location.search).get("shell") === "app";
+const ownWindow = () => desktop() || appWindow;
+const isExternal = (url) => /^(https?:|mailto:)/i.test(url);
+const openExternal = (url) => api("/api/open-external", { method: "POST", body: { url } });
 async function openUrl(url) {
+  if (appWindow && isExternal(url)) { openExternal(url); return; }
   if (!desktop()) { window.open(url, "_blank", "noopener"); return; }
   if (url.startsWith("/api/")) {
     const r = await window.pywebview.api.save_file(url);
@@ -32,10 +38,12 @@ async function openUrl(url) {
 }
 document.addEventListener("click", (e) => {
   const a = e.target.closest("a[href]");
-  if (!a || !desktop()) return;
+  if (!a || !ownWindow()) return;
   const href = a.getAttribute("href");
-  if (/^(https?:|mailto:)/i.test(href) || href.startsWith("/api/")) { e.preventDefault(); e.stopPropagation(); openUrl(href); }
+  if (isExternal(href) || (desktop() && href.startsWith("/api/"))) { e.preventDefault(); e.stopPropagation(); openUrl(href); }
 }, true);
+// Closing the app window quits JobPortal, so warn first when that would stop a search.
+if (appWindow) window.addEventListener("beforeunload", (e) => { if (S.state.running) { e.preventDefault(); e.returnValue = ""; } });
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 function ago(iso) {
   if (!iso) return "";
@@ -188,10 +196,10 @@ function onAIStatus(data) {
 }
 // Sign in with ChatGPT happens in the system browser; OpenAI sends it back to this app's server, which then publishes "ai".
 async function aiSignIn() {
-  const w = desktop() ? null : window.open("", "_blank");  // opened during the click so popup blockers allow it
+  const w = ownWindow() ? null : window.open("", "_blank");  // opened during the click so popup blockers allow it
   try {
     const r = await api("/api/ai/signin", { method: "POST" });
-    if (desktop()) window.pywebview.api.open_external(r.url); else if (w) w.location = r.url; else location.href = r.url;
+    if (ownWindow()) await openUrl(r.url); else if (w) w.location = r.url; else location.href = r.url;
     toast("Finish signing in", "Sign in with ChatGPT in your browser. JobPortal updates when you're done.");
   } catch (e) { if (w) w.close(); toast("Couldn't start sign-in", e.message, "error"); }
 }
@@ -787,7 +795,7 @@ function mailAction(how, i) {
   const card = $(`.email[data-i="${i}"]`), get = (k) => $(`[data-ef="${k}"]`, card).value;
   const to = get("to_addr"), su = get("subject"), body = get("body");
   if (how === "gmail") openUrl(`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(su)}&body=${encodeURIComponent(body)}`);
-  if (how === "mailto") { const u = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(su)}&body=${encodeURIComponent(body)}`; if (desktop()) openUrl(u); else location.href = u; }
+  if (how === "mailto") { const u = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(su)}&body=${encodeURIComponent(body)}`; if (ownWindow()) openUrl(u); else location.href = u; }
   if (how === "copy") copy(`Subject: ${su}\n\n${body}`, "Email copied");
   if (how === "eml") saveEmails().then(() => openUrl(`/api/leads/${S.lead.id}/export/email-${i}.eml`));
   if (how === "sent") api(`/api/leads/${S.lead.id}/events`, { method: "POST", body: { type: "email", text: `Sent ${S.lead.package.emails[i].kind.replace(/_/g, " ")} to ${to || "?"}: ${su}` } }).then(() => toast("Logged", "Email marked as sent"));
@@ -1077,7 +1085,7 @@ async function renderSettings() {
       <div class="row" style="margin-top:12px">${toggle(`data-path="filters.require_tech_title" data-bool="1"`, c.filters.require_tech_title)}<span class="small">Require a tech/science word in the title for job-board sources</span></div></div>
     <div class="card"><h3>Your data</h3><p class="muted small" style="margin-top:-4px">Everything JobPortal stores (database, imported resume, generated files) lives in one folder on this computer, never in the code folder. Delete the folder to start over from zero.</p>
       <div class="row"><span class="mono small" style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(S.meta.data_dir || "")}</span><button class="btn sm" data-act="open-data">Open folder</button></div>
-      ${desktop() ? "" : `<div class="row" style="margin-top:8px"><span class="muted small" style="flex:1">Closing this tab leaves JobPortal running so searches can finish. Quit stops it.</span><button class="btn sm" data-act="quit">Quit JobPortal</button></div>`}
+      ${ownWindow() ? "" : `<div class="row" style="margin-top:8px"><span class="muted small" style="flex:1">Closing this tab leaves JobPortal running so searches can finish. Quit stops it.</span><button class="btn sm" data-act="quit">Quit JobPortal</button></div>`}
       <div class="muted small" style="margin-top:8px">JobPortal ${esc(S.meta.version || "")} on ${esc(S.meta.os || "")}. PDF export: ${S.meta.pdf_ready ? "ready" : "needs Chrome, Edge or Chromium"}. ChatGPT: ${aiReady() ? "signed in" : "not signed in"}.</div></div>
     <div class="card"><h3>Prompts (advanced)</h3><p class="muted small" style="margin-top:-4px">Override the system prompts. Leave blank to use the built-in default (shown greyed).</p>
       ${Object.keys(defaults).map((k) => `<label class="f" style="margin-bottom:12px"><span>${k}</span><textarea rows="5" data-path="prompts.${k}" placeholder="${esc(defaults[k])}">${esc(c.prompts?.[k] || "")}</textarea></label>`).join("")}</div>

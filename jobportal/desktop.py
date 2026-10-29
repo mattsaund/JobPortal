@@ -1,11 +1,14 @@
 """JobPortal as a desktop program: the same server and dashboard in a native window (pywebview: Edge WebView2 on Windows,
-WebKit on macOS, GTK or Qt on Linux). When no native window is available it opens your default browser instead.
+WebKit on macOS, GTK or Qt on Linux). Without a native window toolkit it opens Chrome, Edge, Chromium or Brave in app mode,
+which is still a window of its own. A normal browser tab is the last resort.
 
 If a JobPortal server is already running (`jobportal --background`) the window attaches to it; otherwise the server runs inside
 this process and stops when the window closes."""
 import json
 import os
 import re
+import shutil
+import subprocess
 import threading
 import time
 import urllib.request
@@ -17,8 +20,8 @@ os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
 
 import uvicorn  # noqa: E402
 
-from . import osutil  # noqa: E402
-from .config import DATA, HOST, PORT, STATIC  # noqa: E402
+from . import bus, osutil  # noqa: E402
+from .config import CACHE, DATA, HOST, PORT, RESOURCES, STATIC  # noqa: E402
 
 BASE = f"http://{HOST}:{PORT}"
 ICON = STATIC / "icon.svg"
@@ -122,6 +125,90 @@ def open_in_browser(server, thread) -> None:
         stop_server(server, thread)
 
 
+APP_WINDOW_WAIT = 30  # seconds for the app window to load the dashboard (a new browser profile starts slowly)
+APP_WINDOW_GRACE = 3  # seconds with no dashboard connected, after the browser exits, before JobPortal quits
+
+
+def open_app_window(server, thread) -> bool:
+    """A window of its own without a native toolkit: Chrome, Edge, Chromium or Brave in app mode (no tabs or address bar),
+    with a separate profile so it runs apart from the user's own browser. JobPortal quits when the window closes.
+    Returns False when no such browser is installed or the window never opened."""
+    browser = osutil.find_chrome()
+    if not browser:
+        return False
+    profile = CACHE / "app-window"
+    profile.mkdir(parents=True, exist_ok=True)
+    cmd = [browser, f"--app={BASE}/?shell=app", f"--user-data-dir={profile}", "--no-first-run", "--no-default-browser-check",
+           "--window-size=1480,940", *(["--class=jobportal"] if osutil.IS_LINUX else [])]
+    try:
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **osutil.popen_flags())
+    except OSError:
+        return False
+    if not server:  # attached to a server that's already running, so opening the window is all there is to do
+        return True
+    deadline = time.monotonic() + APP_WINDOW_WAIT
+    while not bus.listeners():  # the dashboard connects to /api/events once the window has loaded it
+        if proc.poll() not in (None, 0) or time.monotonic() > deadline or not thread.is_alive():
+            if proc.poll() is None:
+                proc.kill()
+            return False
+        time.sleep(0.25)
+    print("JobPortal is open in its own window. Closing the window quits it.")
+    quiet_since = None
+    while thread.is_alive():
+        if proc.poll() is None or bus.listeners():
+            quiet_since = None
+        elif quiet_since is None:
+            quiet_since = time.monotonic()
+        elif time.monotonic() - quiet_since >= APP_WINDOW_GRACE:
+            break
+        time.sleep(0.25)
+    stop_server(server, thread)
+    return True
+
+
+def open_without_toolkit(server, thread) -> None:
+    if not open_app_window(server, thread):
+        open_in_browser(server, thread)
+
+
+APPIMAGE_MARK = "X-JobPortal-AppImage=true"
+
+
+def _exec_arg(path: str) -> str:
+    """Quote a path for a desktop entry's Exec key. The spec unescapes it twice: once as a string value, then as Exec quoting."""
+    out = path.replace("\\", "\\\\\\\\")
+    for ch in '"`$':
+        out = out.replace(ch, "\\\\" + ch)
+    return '"' + out.replace("%", "%%") + '"'
+
+
+def add_to_app_menu() -> bool:
+    """Running as an AppImage: add JobPortal to the Linux app menu, or point the entry at the AppImage again if it moved.
+    An entry made for a source checkout (packaging/linux/install-desktop-entry.sh) is left alone. True when it wrote one."""
+    appimage = os.environ.get("APPIMAGE")
+    if not (osutil.IS_LINUX and appimage):
+        return False
+    share = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    entry = share / "applications" / "jobportal.desktop"
+    icon = share / "icons" / "hicolor" / "scalable" / "apps" / "jobportal.svg"
+    old = entry.read_text(encoding="utf-8") if entry.is_file() else None
+    if old is not None and APPIMAGE_MARK not in old:
+        return False
+    template = (RESOURCES / "jobportal.desktop").read_text(encoding="utf-8")
+    text = template.replace("@EXEC@", _exec_arg(appimage)).rstrip("\n") + f"\n{APPIMAGE_MARK}\n"
+    if text == old and icon.is_file():
+        return False
+    try:
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        icon.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ICON, icon)
+        entry.write_text(text, encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
 def _gui() -> str | None:
     """Pick pywebview's backend: GTK or Qt on Linux; the platform default (WebView2, Cocoa) elsewhere."""
     if not osutil.IS_LINUX:
@@ -144,18 +231,20 @@ def _gui() -> str | None:
 
 
 def main(browser: bool = False) -> None:
+    if add_to_app_menu():
+        print("Added JobPortal to your app menu.")
     server, thread = start_server()
     if browser:
         return open_in_browser(server, thread)
     try:
         import webview
     except Exception as e:  # noqa: BLE001
-        print(f"No native window available ({e}). Opening JobPortal in your browser instead.")
-        return open_in_browser(server, thread)
+        print(f"No native window available ({e}).")
+        return open_without_toolkit(server, thread)
     gui = _gui()
     if osutil.IS_LINUX and gui is None:
-        print("No native window toolkit found (GTK WebKit or Qt WebEngine). Opening JobPortal in your browser instead.")
-        return open_in_browser(server, thread)
+        print("No native window toolkit found (GTK WebKit or Qt WebEngine).")
+        return open_without_toolkit(server, thread)
     if gui == "gtk":
         try:
             from gi.repository import GLib
@@ -181,6 +270,6 @@ def main(browser: bool = False) -> None:
         webview.start(gui=gui, private_mode=False, storage_path=str(storage),
                       **({"icon": str(ICON)} if osutil.IS_LINUX and ICON.exists() else {}))
     except Exception as e:  # noqa: BLE001 (missing WebView2 runtime, broken toolkit...)
-        print(f"Couldn't open a native window ({e}). Opening JobPortal in your browser instead.")
-        return open_in_browser(server, thread)
+        print(f"Couldn't open a native window ({e}).")
+        return open_without_toolkit(server, thread)
     stop_server(server, thread)

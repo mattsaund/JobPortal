@@ -68,7 +68,8 @@ and no middle dots as separators.
 ## Releases
 
 Push a version tag (for example `v0.2.0`) to `main`. The Release workflow builds the Windows, macOS and Linux apps, tests that
-each one starts, and publishes them on the Releases page. Bump `__version__` in `jobportal/__init__.py` first.
+each one starts, and publishes them on the Releases page. Bump `__version__` in `jobportal/__init__.py` first. The Windows
+installer comes from `packaging/windows/jobportal.iss` (Inno Setup).
 
 To build the app for your own system:
 

@@ -84,9 +84,12 @@ usage-cap error pauses the current run.
 - `osutil.py` opens files and links, sends notifications, and finds Chrome or Edge and LibreOffice on each system.
 - `extract.py` reads PDF, DOCX, ODT and RTF in pure Python (pypdf, python-docx).
 - `render.py` prints PDFs with whichever Chromium browser is installed.
-- `desktop.py` picks the window toolkit and falls back to the browser; `cli.py` handles the server modes with a PID file
-  instead of system tools.
-- `packaging/jobportal.spec` builds the standalone apps with PyInstaller; `.github/workflows/release.yml` runs it on each OS.
+- `desktop.py` picks the window: a native web view (WebView2, WebKit, GTK or Qt), else Chrome, Edge, Chromium or Brave in
+  app mode, else a browser tab. As an AppImage it adds itself to the Linux app menu. `cli.py` handles the server modes with
+  a PID file instead of system tools.
+- `packaging/jobportal.spec` builds the standalone apps with PyInstaller. `.github/workflows/release.yml` runs it on each OS
+  and wraps the result: an Inno Setup installer on Windows (`packaging/windows/jobportal.iss`), a disk image on macOS and an
+  AppImage on Linux.
 
 ## The dashboard
 

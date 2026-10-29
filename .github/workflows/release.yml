@@ -31,7 +31,7 @@ jobs:
           JOBPORTAL_HOME: ${{ runner.temp }}/jobportal-smoke
         run: |
           case "$RUNNER_OS" in
-            Windows) BIN=dist/JobPortal.exe ;;
+            Windows) BIN=dist/JobPortal/JobPortal.exe ;;
             macOS) BIN=dist/JobPortal.app/Contents/MacOS/JobPortal ;;
             *) BIN=dist/JobPortal/JobPortal ;;
           esac
@@ -42,13 +42,37 @@ jobs:
           "$BIN" --stop --port 8795 || true
       - name: Package (Windows)
         if: runner.os == 'Windows'
-        shell: bash
-        run: mkdir -p out && cp dist/JobPortal.exe out/JobPortal-Windows.exe
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $version = python -c "import jobportal; print(jobportal.__version__)"
+          & $iscc "/DAppVersion=$version" packaging\windows\jobportal.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+      - name: Test the installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          JOBPORTAL_HOME: ${{ runner.temp }}\jobportal-installed
+        run: |
+          Start-Process -Wait -FilePath out\JobPortal-Windows-Setup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+          $exe = "$env:LOCALAPPDATA\Programs\JobPortal\JobPortal.exe"
+          if (-not (Test-Path $exe)) { throw "JobPortal.exe wasn't installed" }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\JobPortal.lnk")) { throw "no Start menu shortcut" }
+          Start-Process -FilePath $exe -ArgumentList "--server", "--port", "8796"
+          $up = $false
+          for ($i = 0; $i -lt 90 -and -not $up; $i++) {
+            try { Invoke-RestMethod http://127.0.0.1:8796/api/meta | Out-Null; $up = $true } catch { Start-Sleep -Seconds 1 }
+          }
+          if (-not $up) { throw "the installed app didn't start" }
+          Start-Process -Wait -FilePath $exe -ArgumentList "--stop", "--port", "8796"
       - name: Package (macOS)
         if: runner.os == 'macOS'
         run: |
-          mkdir -p out
-          hdiutil create -volname JobPortal -srcfolder dist/JobPortal.app -ov -format UDZO out/JobPortal-macOS.dmg
+          mkdir -p out dmg
+          ditto dist/JobPortal.app dmg/JobPortal.app
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname JobPortal -srcfolder dmg -ov -format UDZO out/JobPortal-macOS.dmg
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -58,7 +82,7 @@ jobs:
           chmod +x JobPortal.AppDir/AppRun
           cp packaging/icons/jobportal.png JobPortal.AppDir/jobportal.png
           ln -s jobportal.png JobPortal.AppDir/.DirIcon
-          sed 's|@EXEC@|JobPortal|' packaging/linux/jobportal.desktop > JobPortal.AppDir/jobportal.desktop
+          sed 's|@EXEC@|JobPortal|' jobportal/resources/jobportal.desktop > JobPortal.AppDir/jobportal.desktop
           curl -sfL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x appimagetool
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool JobPortal.AppDir out/JobPortal-Linux-x86_64.AppImage

@@ -778,6 +778,16 @@ def open_data_folder():
     return {"ok": osutil.open_path(DATA), "path": str(DATA)}
 
 
+@app.post("/api/open-external")
+def open_external(body: dict):
+    """Open a web or mail link in the default browser or mail app. The app window (a browser in app mode) sends links here
+    so they leave the window."""
+    url = str(body.get("url") or "")
+    if not re.match(r"^(https?://|mailto:)", url, re.I):
+        raise HTTPException(400, "Only web and mail links can be opened.")
+    return {"ok": osutil.open_url(url)}
+
+
 @app.post("/api/quit")
 def quit_app(request: Request):
     """Stop JobPortal. The dashboard offers this in a browser tab, where closing the tab leaves the server running."""

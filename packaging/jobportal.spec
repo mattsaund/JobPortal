@@ -1,5 +1,5 @@
 # PyInstaller spec for the JobPortal app. From the repo root: pyinstaller --noconfirm packaging/jobportal.spec
-# Windows gets one JobPortal.exe, macOS gets JobPortal.app, Linux gets a JobPortal folder (wrapped into an AppImage by CI).
+# macOS gets JobPortal.app. Windows and Linux get a JobPortal folder, which CI wraps in an installer or an AppImage.
 import re
 import sys
 from pathlib import Path
@@ -23,12 +23,9 @@ a = Analysis([str(ROOT / "packaging" / "entry.py")], pathex=[str(ROOT)], datas=d
              hiddenimports=hiddenimports, excludes=["tkinter", "pytest", "ruff"])
 pyz = PYZ(a.pure)
 
-if sys.platform == "win32":
-    exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name=APP, console=False, icon=ICON, upx=False)
-else:
-    exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name=APP, console=False, icon=ICON, upx=False)
-    coll = COLLECT(exe, a.binaries, a.datas, name=APP, upx=False)
-    if sys.platform == "darwin":
-        app = BUNDLE(coll, name=f"{APP}.app", icon=ICON, bundle_identifier="io.github.mattsaund.jobportal",
-                     info_plist={"CFBundleShortVersionString": VERSION, "CFBundleVersion": VERSION, "NSHighResolutionCapable": True,
-                                 "LSApplicationCategoryType": "public.app-category.productivity"})
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name=APP, console=False, icon=ICON, upx=False)
+coll = COLLECT(exe, a.binaries, a.datas, name=APP, upx=False)
+if sys.platform == "darwin":
+    app = BUNDLE(coll, name=f"{APP}.app", icon=ICON, bundle_identifier="io.github.mattsaund.jobportal",
+                 info_plist={"CFBundleShortVersionString": VERSION, "CFBundleVersion": VERSION, "NSHighResolutionCapable": True,
+                             "LSApplicationCategoryType": "public.app-category.productivity"})

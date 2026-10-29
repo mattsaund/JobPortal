@@ -34,6 +34,15 @@ def test_refuses_changes_from_other_sites(client):
     assert client.get("/api/meta", headers={"origin": "https://evil.example"}).status_code == 200
 
 
+def test_open_external_only_opens_web_and_mail_links(client, monkeypatch):
+    from jobportal import osutil
+    opened = []
+    monkeypatch.setattr(osutil, "open_url", lambda url: opened.append(url) or True)
+    assert client.post("/api/open-external", json={"url": "https://example.com/job"}).json() == {"ok": True}
+    assert client.post("/api/open-external", json={"url": "file:///etc/passwd"}).status_code == 400
+    assert opened == ["https://example.com/job"]
+
+
 def test_quit_stops_the_server(client):
     from jobportal.main import app
     assert client.post("/api/quit").status_code == 409

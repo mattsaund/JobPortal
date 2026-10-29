@@ -24,12 +24,12 @@ Get the latest version from the [Releases page](https://github.com/mattsaund/Job
 
 | System | File | First run |
 |---|---|---|
-| Windows 10 or 11 | `JobPortal-Windows.exe` | If SmartScreen warns, click More info, then Run anyway. |
+| Windows 10 or 11 | `JobPortal-Windows-Setup.exe` | Run the installer. If SmartScreen warns, click More info, then Run anyway. It adds Start menu and desktop shortcuts. |
 | macOS (Apple Silicon) | `JobPortal-macOS.dmg` | Drag JobPortal to Applications and open it. If macOS blocks it, open System Settings, Privacy & Security, and click Open Anyway. |
-| Linux (x86_64) | `JobPortal-Linux-x86_64.AppImage` | Make it executable (`chmod +x`), then run it. It opens in your browser. |
+| Linux (x86_64) | `JobPortal-Linux-x86_64.AppImage` | Make it executable (`chmod +x`), then run it. The first run adds it to your app menu. |
 
-When JobPortal runs in a browser tab, closing the tab leaves it running so searches can finish. Settings, Your data has a
-Quit button.
+JobPortal opens in a window of its own. On Linux that needs Chrome, Edge, Chromium or Brave, whose app mode gives it a
+plain window. Without one it opens in a browser tab, and Settings, Your data has a Quit button.
 
 The apps aren't code-signed yet, which is why each system warns the first time.
 
@@ -89,7 +89,7 @@ Or install it yourself with `pip install -e .` to get a `jobportal` command.
 | `--data-dir PATH` | keep the data somewhere else (or set `JOBPORTAL_HOME`) |
 
 On Linux, a window of its own needs GTK WebKit or Qt WebEngine. Install your distribution's PyGObject and WebKit2GTK 4.1
-packages and `run.sh` uses them. Otherwise JobPortal opens in your browser. `packaging/linux/install-desktop-entry.sh` adds it
+packages and `run.sh` uses them. Otherwise it uses Chrome, Edge, Chromium or Brave in app mode, or a browser tab. `packaging/linux/install-desktop-entry.sh` adds it
 to your app menu.
 
 ## Where your data lives

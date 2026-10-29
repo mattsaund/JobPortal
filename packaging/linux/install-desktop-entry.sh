@@ -12,7 +12,7 @@ if [ "${1:-}" = "--remove" ]; then
 fi
 mkdir -p "$APPS" "$ICONS"
 cp "$ROOT/jobportal/static/icon.svg" "$ICONS/jobportal.svg"
-sed "s|@EXEC@|\"$ROOT/run.sh\"|" "$ROOT/packaging/linux/jobportal.desktop" > "$APPS/jobportal.desktop"
+sed "s|@EXEC@|\"$ROOT/run.sh\"|" "$ROOT/jobportal/resources/jobportal.desktop" > "$APPS/jobportal.desktop"
 chmod +x "$APPS/jobportal.desktop"
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPS" 2>/dev/null || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q "$SHARE/icons/hicolor" 2>/dev/null || true
