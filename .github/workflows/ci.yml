@@ -3,9 +3,9 @@ name: CI
 on:
   push:
     branches: ["**"]
-    paths-ignore: ["**.md", "docs/**"]
+    paths-ignore: ["**.md", "documentation/**"]
   pull_request:
-    paths-ignore: ["**.md", "docs/**"]
+    paths-ignore: ["**.md", "documentation/**"]
 
 jobs:
   test:

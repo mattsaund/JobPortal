@@ -141,3 +141,14 @@ nohup.out
 CLAUDE.md
 CLAUDE.local.md
 .mcp.json
+
+# ---------------------------------------------------------------- Team documents
+# Last on purpose: a later rule wins, so these beat the document and *.key rules above. The documentation folder holds the
+# team's school documents and presentations (Keynote files end in .key). Only these file types are let back in there.
+!documentation/**/*.pdf
+!documentation/**/*.docx
+!documentation/**/*.doc
+!documentation/**/*.odt
+!documentation/**/*.rtf
+!documentation/**/*.pages
+!documentation/**/*.key

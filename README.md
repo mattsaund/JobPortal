@@ -123,7 +123,8 @@ Settings, Your data shows the exact path. To start over, quit JobPortal and dele
 ## Working on JobPortal
 
 Start with [CONTRIBUTING.md](CONTRIBUTING.md). It has the team list, what to install, a map of the code and how to run the
-tests. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains how the pieces work together.
+tests. Everything else, from how the code works to our school documents and design ideas, is in
+[documentation/](documentation/).
 
 ## License
 

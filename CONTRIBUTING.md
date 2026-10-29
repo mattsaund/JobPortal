@@ -89,7 +89,7 @@ The command line:
 ## New to the code? Start here
 
 1. Get JobPortal running with a scratch data folder (see "Get it running" above) and click through every page.
-2. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It takes about ten minutes and saves hours later.
+2. Read [documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md). It takes about ten minutes and saves hours later.
 3. Pick an item from the To do list in the README and tell the team you're taking it.
 4. Find the files to change with the project map and the "Common changes" table, make a branch, make the change, add a
    test, and open a pull request.
@@ -149,12 +149,12 @@ JobPortal/
 │   └── resources/              files read at run time (the resume playbook, the Linux desktop entry)
 ├── tests/                      pytest tests and a fictional sample resume
 ├── packaging/                  how the release apps are built: PyInstaller spec, Windows installer, PDF engine, icons
-├── docs/ARCHITECTURE.md        how the pieces work together
+├── documentation/              how the code works (ARCHITECTURE.md), school documents, logo, color and font ideas
 ├── .github/workflows/          CI (tests on every push) and Release (builds the apps when a version tag is pushed)
 └── run.sh, run.ps1, run.bat    start scripts for running from source
 ```
 
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) walks through how a request, a search run and a profile build move through
+[documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md) walks through how a request, a search run and a profile build move through
 these files.
 
 ## Testing
