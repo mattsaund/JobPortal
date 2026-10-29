@@ -106,7 +106,7 @@ Settings, Your data shows the exact path. To start over, quit JobPortal and dele
 
 ## Privacy and safety
 
-- The server listens on 127.0.0.1 only and refuses requests for any other host name.
+- The server listens on 127.0.0.1 only. It refuses requests for any other host name and changes sent from other websites.
 - Each AI task sends OpenAI only what it needs. Voluntary self-identification answers (gender, race, veteran and disability
   status) are never sent. They only fill in the Application kit for copying.
 - ChatGPT tokens stay in the data folder. They never reach the dashboard, logs or URLs.
