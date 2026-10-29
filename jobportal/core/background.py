@@ -1,7 +1,9 @@
-"""Background work started by API requests: building a package, updating the profile, an AI analysis.
+"""Background work: building a package, updating the profile, an AI analysis. API routes start most of it, and the
+profile starts its own follow-ups.
 
-The request returns right away. The dashboard hears about progress and results over the live event stream (core/bus.py),
-so nothing here sends a reply. Every task is tracked so the server can cancel what's still running when it shuts down."""
+Whoever starts a task returns right away. The dashboard hears about progress and results over the live event stream
+(core/bus.py), so nothing here sends a reply. Every task is tracked so the server can cancel what's still running when it
+shuts down (web/server.py calls cancel_all)."""
 import asyncio
 
 from jobportal.core import bus

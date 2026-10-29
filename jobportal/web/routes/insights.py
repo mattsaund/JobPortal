@@ -2,10 +2,9 @@
 from fastapi import APIRouter
 
 from jobportal.candidate import profile
-from jobportal.core import db, settings
+from jobportal.core import background, db, settings
 from jobportal.insights import analysis, crm
 from jobportal.search import pipeline, plan
-from jobportal.web import background
 
 router = APIRouter()
 

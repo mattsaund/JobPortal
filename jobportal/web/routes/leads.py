@@ -8,11 +8,10 @@ from fastapi import APIRouter, HTTPException
 
 from jobportal.ai import client as ai
 from jobportal.candidate import profile
-from jobportal.core import bus, db
+from jobportal.core import background, bus, db
 from jobportal.core.config import APP_STATUSES, LEADS_DIR
 from jobportal.core.textutil import coverage
 from jobportal.search import pipeline
-from jobportal.web import background
 from jobportal.web.common import ai_error, lead_or_404
 
 router = APIRouter()

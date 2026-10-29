@@ -7,9 +7,8 @@ from fastapi import APIRouter, HTTPException, Request
 
 from jobportal.ai import client as ai
 from jobportal.candidate import library, onboarding, profile
-from jobportal.core import bus, db
+from jobportal.core import background, bus, db
 from jobportal.documents import extract
-from jobportal.web import background
 from jobportal.web.common import ai_error, read_upload
 
 router = APIRouter()

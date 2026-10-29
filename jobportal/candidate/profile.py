@@ -52,8 +52,12 @@ from collections import Counter
 from datetime import date
 
 from jobportal.ai import client as ai, prompts
-from jobportal.core import bus, db, settings as settings_mod
-from jobportal.web import background  # tracks background tasks, so the server can stop them when it shuts down
+from jobportal.core import (
+    background,  # tracks background tasks, so the server can stop them when it shuts down
+    bus,
+    db,
+    settings as settings_mod,
+)
 
 # candidate/onboarding.py, search/pipeline.py and insights/analysis.py all import this module when they load. Importing one
 # of them at the top of this file would be circular, so the few functions that need them import them inside the function.

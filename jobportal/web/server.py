@@ -14,10 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from jobportal import __version__
 from jobportal.ai import client as ai, signin
 from jobportal.candidate import profile
-from jobportal.core import bus, db, settings
+from jobportal.core import background, bus, db, settings
 from jobportal.core.config import STATIC
 from jobportal.search import pipeline
-from jobportal.web import background
 from jobportal.web.routes import ROUTERS
 
 # Host names that mean "this computer". "testserver" is the name FastAPI's test client uses.
