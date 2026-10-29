@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobPortal</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230c0d10'/><circle cx='12.5' cy='16' r='7.5' fill='%23ff7a1a'/><circle cx='19.5' cy='16' r='7.5' fill='none' stroke='%23a98bff' stroke-width='2.4' stroke-dasharray='3.4 2.4'/></svg>">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side">
+    <div class="logo"><svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="12" r="6.5" fill="#ff7a1a"/><circle cx="15" cy="12" r="6.5" fill="none" stroke="#a98bff" stroke-width="2" stroke-dasharray="3 2.2"/></svg>JobPortal</div>
+    <nav class="nav" id="nav"></nav>
+    <a class="status-pill ok" id="profile-pill" href="#/profile"></a>
+    <div class="grow"></div>
+    <div class="agents" id="agents"></div>
+    <div class="usage" id="usage" title="Your Claude subscription usage (from the most recent AI call)"></div>
+  </aside>
+  <main id="main"></main>
+</div>
+<div class="toasts" id="toasts"></div>
+<div id="modal"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=JobPortal
+GenericName=Job search
+Comment=Import your resume, answer the standard job questions, and it finds jobs and prepares each application
+Exec=@EXEC@
+Icon=jobportal
+Terminal=false
+StartupWMClass=jobportal
+Categories=Office;Utility;
+Keywords=jobs;resume;internship;applications;
