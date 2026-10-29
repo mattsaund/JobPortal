@@ -41,7 +41,8 @@ The tables (columns not listed are plain and named for what they hold):
   run_log          the log lines of each run, shown on the Runs page
   candidates       the triage backlog: jobs that passed the rule filters but haven't been scored yet (RawJob as JSON)
   ai_calls         one row per AI request: purpose, model, effort, tokens, how long it took and any error. Open
-                   /api/ai_calls to look at it while developing. cost_usd is always 0"""
+                   /api/ai_calls to look at it while developing. cost_usd is always 0
+  resume_library   saved resumes on the Resumes page (candidate/library.py). Storage only: they never feed the profile"""
 import json
 import re
 import sqlite3
@@ -101,6 +102,11 @@ CREATE TABLE IF NOT EXISTS candidates (
 CREATE TABLE IF NOT EXISTS ai_calls (
   id INTEGER PRIMARY KEY, ts TEXT, run_id INTEGER, lead_id INTEGER, purpose TEXT, model TEXT, effort TEXT,
   cost_usd REAL, tokens INTEGER DEFAULT 0, duration_ms INTEGER, ok INTEGER, error TEXT
+);
+-- v0.1.0 created this table on first use from candidate/library.py. It lives here now, with the same columns.
+CREATE TABLE IF NOT EXISTS resume_library (
+  id INTEGER PRIMARY KEY, name TEXT, md TEXT, style TEXT DEFAULT '{}', source TEXT, lead_id INTEGER, tags TEXT DEFAULT '[]',
+  notes TEXT DEFAULT '', original_file TEXT, created_at TEXT, updated_at TEXT
 );
 """
 

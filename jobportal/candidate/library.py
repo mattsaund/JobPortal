@@ -20,10 +20,6 @@ from jobportal.core.config import DATA
 from jobportal.documents import extract
 
 LIB_DIR = DATA / "library"
-# This table isn't part of core/db.py's schema, so _ensure_table() creates it the first time the library is used.
-SCHEMA = """CREATE TABLE IF NOT EXISTS resume_library (
-  id INTEGER PRIMARY KEY, name TEXT, md TEXT, style TEXT DEFAULT '{}', source TEXT, lead_id INTEGER, tags TEXT DEFAULT '[]',
-  notes TEXT DEFAULT '', original_file TEXT, created_at TEXT, updated_at TEXT)"""
 DEFAULT_STYLE = {"theme": "classic", "max_pages": 1}
 
 IMPORT_SYSTEM = """Convert the extracted text of ONE resume into the markdown format below. Preserve the content exactly: same wording,
@@ -32,10 +28,6 @@ numbers). Never add, remove, improve or reword anything."""
 IMPORT_SCHEMA = {"type": "object", "properties": {"resume_md": {"type": "string"}, "suggested_name": {"type": "string"}},
                  "required": ["resume_md", "suggested_name"]}
 
-
-def _ensure_table() -> None:
-    """Create the table if it doesn't exist yet. That check is cheap, so every function below starts with it."""
-    db.ex(SCHEMA)
 
 
 def _decode(row: dict | None) -> dict | None:
@@ -58,14 +50,12 @@ def _delete_downloads(item_id: int) -> None:
 
 def list_items() -> list[dict]:
     """Every saved resume, most recently changed first, with a 400-character preview in place of the full text."""
-    _ensure_table()
     return [_decode(r) for r in db.q("SELECT id, name, style, source, lead_id, tags, notes, created_at, updated_at, "
                                      "substr(md, 1, 400) AS preview FROM resume_library ORDER BY updated_at DESC")]
 
 
 def get(item_id: int) -> dict | None:
     """One saved resume with its full markdown, or None when there's no such item."""
-    _ensure_table()
     return _decode(db.one("SELECT * FROM resume_library WHERE id=?", (item_id,)))
 
 
@@ -73,7 +63,6 @@ def create(name: str, md: str, style: dict | None = None, source: str = "saved",
            tags: list | None = None, notes: str = "", original_file: str | None = None) -> dict:
     """Save a new resume and return it. style defaults to DEFAULT_STYLE. source says where it came from: "saved",
     "saved from lead" (with lead_id) or "imported" (with original_file, the name of the imported file)."""
-    _ensure_table()
     now = db.now()
     new_id = db.ex("INSERT INTO resume_library(name, md, style, source, lead_id, tags, notes, original_file, created_at, updated_at) "
                    "VALUES(?,?,?,?,?,?,?,?,?,?)", (name.strip() or "Untitled resume", md, json.dumps(style or DEFAULT_STYLE),
@@ -84,7 +73,6 @@ def create(name: str, md: str, style: dict | None = None, source: str = "saved",
 def update(item_id: int, fields: dict) -> dict:
     """Change a saved resume and return it. Only name, md, style, tags and notes can change; other keys are ignored.
     Rendered downloads are deleted, because they no longer match."""
-    _ensure_table()
     changes = {k: v for k, v in fields.items() if k in ("name", "md", "style", "tags", "notes")}
     for column in ("style", "tags"):
         if column in changes:
@@ -98,7 +86,6 @@ def update(item_id: int, fields: dict) -> dict:
 
 def delete(item_id: int) -> None:
     """Delete a saved resume and its rendered downloads."""
-    _ensure_table()
     db.ex("DELETE FROM resume_library WHERE id=?", (item_id,))
     _delete_downloads(item_id)
 
