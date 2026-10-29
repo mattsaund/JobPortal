@@ -94,15 +94,24 @@ _Coming soon._
 - [ ] Get a good logo
 - [ ] Change the name (maybe?)
 - [ ] Simplify the UI: fewer buttons and fewer words. Sleek, simple and easy to use.
-- [ ] Finish extra documents in the dashboard: a drop zone in setup that takes your resume plus other resumes, certificates,
-      cover letters and awards at once, and a list on the Profile page. The server side is done (`/api/profile/documents`).
+- [ ] Test Sign in with ChatGPT and a full search with a real ChatGPT plan, end to end. It hasn't been tried with a real
+      account yet, and the alpha needs a working AI feature.
+- [ ] Finish extra documents in the dashboard: one drop zone in setup that takes your resume plus other resumes,
+      certificates, cover letters and awards at once, with the best resume picked as the main one and a button to pick a
+      different one, and a list on the Profile page. The server side is done (`/api/profile/documents`).
 - [ ] A continuous stream of leads: run searches on a schedule by default after setup
-- [ ] Reach more places, especially more social media sites
+- [ ] Reach everywhere: more social media and chat communities (X, Threads, LinkedIn posts, Discord, Slack, Telegram,
+      Facebook groups) and more job boards (Indeed, Handshake, ZipRecruiter)
+- [ ] Make it ready for people outside the team: clearer first-run help, a plan for people without a ChatGPT plan (an API
+      key option or a clear message), an Intel Mac build, and code signing so Windows and macOS stop warning (maybe)
+- [ ] Try the whole flow on a few classmates' resumes: ranked jobs in their areas, tailored resumes and cover letters,
+      recruiter contacts and email templates for each match
 
 ### Course deliverables (from the assignment PDFs)
 
 - [ ] Unit 3: system design spec with a UML architecture diagram, interface contracts (API endpoints, request and
-      response formats, errors; FastAPI serves them at http://127.0.0.1:8788/docs) and a 500-word design rationale
+      response formats, errors; FastAPI serves them at http://127.0.0.1:8788/docs) and a 500-word design rationale. The
+      ARCHITECTURE.md we removed is in the git history and makes a good start.
 - [ ] Unit 5: everyone commits and reviews pull requests, each of us peer reviews one teammate's module, and each writes a
       250-word refinement report on technical debt
 - [ ] Unit 8: API docs, an installation guide and a user manual, CI/CD screenshots, a test coverage report, performance
