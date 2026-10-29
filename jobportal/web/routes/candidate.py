@@ -123,14 +123,6 @@ async def learn_voice():
         raise ai_error(e)
 
 
-@router.get("/api/profile/resume")
-def imported_resume():
-    resume = profile.resume()
-    if not resume:
-        raise HTTPException(404, "no resume imported yet")
-    return resume
-
-
 @router.get("/api/profile/{key}/history")
 def profile_history(key: str):
     """Earlier versions of one profile section, newest first."""

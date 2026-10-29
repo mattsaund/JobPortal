@@ -310,7 +310,8 @@ function foundMenu(l) {
 }
 
 // ---------------------------------------------------------------- add a lead
-// The "+ Add a lead" dialog: a link or the pasted posting. POST /api/leads/manual starts building its package.
+// The "+ Add a lead" dialog: a link or the pasted posting. POST /api/leads/manual starts building its package, or returns the
+// saved lead when the same job was added before.
 function addLeadModal() {
   const kinds = [["posting", "Posting"], ["program", "Program"], ["event", "Event"], ["intel", "Intel / cold outreach"]];
   modal(`<h2>Add a lead</h2><p class="muted small">Paste any job link (LinkedIn, Workday, a post, a Reddit comment) or paste the job text.
@@ -327,7 +328,9 @@ function addLeadModal() {
       const body = { url: $("#al-url").value, text: $("#al-text").value, title: $("#al-title").value, company: $("#al-co").value, kind: $("#al-kind").value };
       const lead = await api("/api/leads/manual", { method: "POST", body });
       closeModal();
-      toast("Building package", "JobPortal is researching and tailoring. It pops up here when it's ready.", "", lead.id);
+      // The same job pasted again comes back as the saved lead ("existing"), and its package is left alone.
+      if (lead.existing) toast("Already in your leads", "That job is saved already. Here it is.", "", lead.id);
+      else toast("Building package", "JobPortal is researching and tailoring. It pops up here when it's ready.", "", lead.id);
       location.hash = `#/lead/${lead.id}`;
     } catch (e) {
       toast("Couldn't add lead", e.message, "error");

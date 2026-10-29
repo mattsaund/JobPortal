@@ -24,9 +24,12 @@ function modelOptions(models, selected, emptyLabel) {
 }
 
 // Draws the page from the saved settings. The playbook text loads after the page shows.
-async function renderSettings() {
-  S.cfg = await api("/api/settings");
-  S.cfgDirty = false;
+// renderSettings({ keepEdits: true }) redraws from S.cfg as it is, so unsaved changes survive (the search area editor uses it).
+async function renderSettings(opts) {
+  if (!(opts && opts.keepEdits === true && S.cfg)) {
+    S.cfg = await api("/api/settings");
+    S.cfgDirty = false;
+  }
   let webSearch;  // true, false, or unknown until the first web task tries it
   try {
     const status = await api("/api/ai/status");

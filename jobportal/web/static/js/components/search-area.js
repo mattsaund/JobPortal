@@ -159,7 +159,15 @@ async function saveArea(area) {
   closeModal();
   toast("Search area saved", areaSummary(fresh.locations.allowed));
   if (S.route[0] === "leads") renderMission();
-  if (S.route[0] === "settings") renderSettings();
+  if (S.route[0] === "settings") {
+    // Unsaved Settings edits stay on screen: only their locations take the values just saved.
+    if (S.cfgDirty && S.cfg) {
+      S.cfg.locations = { ...S.cfg.locations, ...fresh.locations };
+      renderSettings({ keepEdits: true });
+    } else {
+      renderSettings();
+    }
+  }
 }
 
 // ---------------------------------------------------------------- actions
