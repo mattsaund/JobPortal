@@ -86,6 +86,16 @@ The command line:
 | `--port 8790` | use another port (or set `JOBPORTAL_PORT`) |
 | `--data-dir PATH` | keep the data somewhere else (or set `JOBPORTAL_HOME`) |
 
+## New to the code? Start here
+
+1. Get JobPortal running with a scratch data folder (see "Get it running" above) and click through every page.
+2. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It takes about ten minutes and saves hours later.
+3. Pick an item from the To do list in the README and tell the team you're taking it.
+4. Find the files to change with the project map and the "Common changes" table, make a branch, make the change, add a
+   test, and open a pull request.
+
+Ask in the group chat whenever you're stuck. Everyone on the team is learning this codebase too.
+
 ## Project map
 
 ```

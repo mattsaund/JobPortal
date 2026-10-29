@@ -2,8 +2,7 @@
 
 Who calls it: the search run (pipeline.py) builds a package for each qualified lead with build_package. The lead page reaches
 the rest through the web routes (web/routes/leads.py, documents.py and library.py): rebuild a package, ask gap questions,
-rework the resume with the answers, swap in a saved resume, re-run the resume check, add a job by hand. Many of those routes
-still call these functions as pipeline.<name>; pipeline.py re-exports them so that keeps working.
+rework the resume with the answers, swap in a saved resume, re-run the resume check, add a job by hand.
 
 How a package is built (build_package):
 1. When the lead only has a snippet, fetch the full posting (collectors/details.py).
