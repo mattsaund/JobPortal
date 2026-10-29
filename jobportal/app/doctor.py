@@ -8,6 +8,7 @@ such as the ChatGPT sign-in). The exit code is always 0; the last line says how 
 import platform
 import socket
 import sys
+from pathlib import Path
 
 from jobportal import __version__
 from jobportal.core import osutil
@@ -21,17 +22,23 @@ def _row(ok: bool | None, name: str, detail: str) -> str:
 
 def _window_toolkit() -> tuple[bool | None, str]:
     """Whether JobPortal can open a native window here, and how (see app/desktop.py for the fallbacks)."""
+    # Without a native toolkit, desktop.py opens a Chromium browser in app mode (still a window of its own), else a tab.
+    browser = osutil.find_chrome()
+    fallback = (f"JobPortal opens in its own window through {Path(browser).stem} app mode" if browser
+                else "JobPortal opens in a browser tab (install Chrome, Edge, Chromium or Brave for a window of its own)")
     try:
         import webview  # noqa: F401
     except Exception as e:  # noqa: BLE001
-        return False, f"pywebview isn't importable ({e}); JobPortal will open in your browser"
+        return (True if browser else None), f"pywebview isn't importable ({e}); {fallback}"
     if osutil.IS_LINUX:
         from jobportal.app.desktop import _gui
         gui = _gui()
         if gui:
             return True, f"pywebview with {gui.upper()}"
-        return None, ("no GTK WebKit or Qt WebEngine; JobPortal opens in your browser. For a window: install your distro's "
-                      "PyGObject + WebKit2GTK 4.1 packages, or `pip install \"pywebview[qt]\"`")
+        if getattr(sys, "frozen", False):  # the AppImage can't use the system's GTK, so the app-mode window is the plan
+            return (True if browser else None), f"no native toolkit in this build; {fallback}"
+        return (True if browser else None), (f"no GTK WebKit or Qt WebEngine; {fallback}. For a native window, install PyGObject "
+                                             "and WebKit2GTK 4.1 (Arch: python-gobject webkit2gtk-4.1)")
     if osutil.IS_WIN:
         return True, "pywebview with Edge WebView2 (preinstalled on Windows 10 and 11)"
     return True, "pywebview with the system WebKit"
