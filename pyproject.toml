@@ -36,7 +36,7 @@ build = ["pyinstaller>=6.10"]
 qt = ["pywebview[qt]>=5.0"]
 
 [project.scripts]
-jobportal = "jobportal.cli:main"
+jobportal = "jobportal.app.cli:main"
 
 [project.urls]
 Repository = "https://github.com/mattsaund/JobPortal"
@@ -48,7 +48,8 @@ version = { attr = "jobportal.__version__" }
 include = ["jobportal*"]
 
 [tool.setuptools.package-data]
-jobportal = ["static/*", "static/fonts/*", "resources/*"]
+jobportal = ["resources/*"]
+"jobportal.web" = ["static/*", "static/fonts/*", "static/js/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -60,5 +61,9 @@ target-version = "py311"
 extend-exclude = [".venv"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "B006", "B008"]
+select = ["E", "F", "W", "B006", "B008", "I"]
 ignore = ["E501", "E731", "E741", "E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["jobportal"]
+combine-as-imports = true

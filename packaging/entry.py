@@ -33,5 +33,5 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
     _log_streams()
     _system_libraries()
-    from jobportal.cli import main
+    from jobportal.app.cli import main
     sys.exit(main())

@@ -3,7 +3,7 @@ import zipfile
 
 import pytest
 
-from jobportal import extract
+from jobportal.documents import extract
 
 
 def make_pdf(lines: list[str]) -> bytes:

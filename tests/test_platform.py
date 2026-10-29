@@ -2,7 +2,8 @@ import os
 import subprocess
 import sys
 
-from jobportal import cli, osutil
+from jobportal.app import cli
+from jobportal.core import osutil
 
 
 def test_os_name():
@@ -52,7 +53,8 @@ def test_app_window_runs_until_the_window_closes(monkeypatch):
     import threading
     import time
 
-    from jobportal import bus, desktop
+    from jobportal.app import desktop
+    from jobportal.core import bus
     launched = []
 
     class Browser:  # a window that the user closes after a moment
@@ -81,7 +83,7 @@ def test_app_window_runs_until_the_window_closes(monkeypatch):
 
 
 def test_app_window_gives_up_without_a_working_browser(monkeypatch):
-    from jobportal import desktop
+    from jobportal.app import desktop
 
     class Crashes:
         def __init__(self, cmd, **kw):
@@ -99,7 +101,7 @@ def test_app_window_gives_up_without_a_working_browser(monkeypatch):
 
 
 def test_appimage_adds_itself_to_the_app_menu(tmp_path, monkeypatch):
-    from jobportal import desktop
+    from jobportal.app import desktop
     monkeypatch.setattr(desktop.osutil, "IS_LINUX", True)
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     monkeypatch.setenv("APPIMAGE", "/home/jordan/Apps/JobPortal.AppImage")
@@ -115,7 +117,7 @@ def test_appimage_adds_itself_to_the_app_menu(tmp_path, monkeypatch):
 
 
 def test_appimage_menu_entry_only_for_appimages(monkeypatch):
-    from jobportal import desktop
+    from jobportal.app import desktop
     monkeypatch.delenv("APPIMAGE", raising=False)
     assert not desktop.add_to_app_menu()
 

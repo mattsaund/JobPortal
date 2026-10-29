@@ -1,6 +1,6 @@
 import re
 
-from jobportal import levels
+from jobportal.core import levels
 
 
 def passes(title: str, lv, roles=None) -> bool:

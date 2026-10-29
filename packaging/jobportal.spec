@@ -11,7 +11,7 @@ APP = "JobPortal"
 VERSION = re.search(r'__version__ = "([^"]+)"', (ROOT / "jobportal" / "__init__.py").read_text(encoding="utf-8")).group(1)
 ICON = str(ROOT / "packaging" / "icons" / {"win32": "jobportal.ico", "darwin": "jobportal.icns"}.get(sys.platform, "jobportal.png"))
 
-datas = [(str(ROOT / "jobportal" / "static"), "jobportal/static"), (str(ROOT / "jobportal" / "resources"), "jobportal/resources")]
+datas = [(str(ROOT / "jobportal" / "web" / "static"), "jobportal/web/static"), (str(ROOT / "jobportal" / "resources"), "jobportal/resources")]
 binaries = []
 hiddenimports = collect_submodules("jobportal") + collect_submodules("uvicorn")
 d, b, h = collect_all("webview")

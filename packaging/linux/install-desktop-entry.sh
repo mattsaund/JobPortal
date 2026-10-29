@@ -11,7 +11,7 @@ if [ "${1:-}" = "--remove" ]; then
   exit 0
 fi
 mkdir -p "$APPS" "$ICONS"
-cp "$ROOT/jobportal/static/icon.svg" "$ICONS/jobportal.svg"
+cp "$ROOT/jobportal/web/static/icon.svg" "$ICONS/jobportal.svg"
 sed "s|@EXEC@|\"$ROOT/run.sh\"|" "$ROOT/jobportal/resources/jobportal.desktop" > "$APPS/jobportal.desktop"
 chmod +x "$APPS/jobportal.desktop"
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPS" 2>/dev/null || true

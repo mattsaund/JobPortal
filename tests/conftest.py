@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-# Must happen before anything imports jobportal.config, which reads JOBPORTAL_HOME once.
+# Must happen before anything imports jobportal.core.config, which reads JOBPORTAL_HOME once.
 _HOME = Path(tempfile.mkdtemp(prefix="jobportal-test-"))
 os.environ["JOBPORTAL_HOME"] = str(_HOME)
 os.environ.pop("JOBPORTAL_PORT", None)
@@ -17,7 +17,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture(autouse=True)
 def zero_data():
-    from jobportal import ai, bus, config, db, openai_auth, profile
+    from jobportal.ai import client as ai, signin
+    from jobportal.candidate import profile
+    from jobportal.core import bus, config, db
     db.close()
     for p in config.DATA.glob("*"):
         if p.is_dir():
@@ -28,7 +30,7 @@ def zero_data():
     bus.state.update(running=False, active_agents={}, tokens=0)
     ai.web_search_ok, ai._limit_hit_at = None, 0.0
     ai._models.update(at=0.0, ids=[])
-    openai_auth._pending.clear()
+    signin._pending.clear()
     yield
     db.close()
 
@@ -53,14 +55,14 @@ class FakeAI:
         if callable(out):
             out = out(prompt)
         if out is None:
-            from jobportal.ai import AIError
+            from jobportal.ai.client import AIError
             raise AIError(f"no fake response for {purpose}")
         return {**out, "_tokens": 0, "_tools": {}}
 
 
 @pytest.fixture
 def fake_ai(monkeypatch) -> FakeAI:
-    from jobportal import ai
+    from jobportal.ai import client as ai
     fake = FakeAI()
     monkeypatch.setattr(ai, "run", fake.run)
     return fake

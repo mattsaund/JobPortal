@@ -3,7 +3,8 @@ from datetime import date
 
 import pytest
 
-from jobportal import osutil, render, resumecheck
+from jobportal.core import osutil
+from jobportal.documents import render, resumecheck
 
 
 def test_resume_html(sample_resume):

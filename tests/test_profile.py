@@ -2,7 +2,10 @@ import asyncio
 import copy
 
 from conftest import PROFILE_OUT, STANDARD_ANSWERS
-from jobportal import db, onboarding, pipeline, profile
+
+from jobportal.candidate import onboarding, profile
+from jobportal.core import db
+from jobportal.search import pipeline
 
 
 def test_starts_with_zero_data():
@@ -68,3 +71,13 @@ def test_ask_deduplicates():
     assert profile.ask("Have you used Docker?", "The posting asks for it.", source="Acme application", lead_id=7)
     assert not profile.ask("have you used docker", "dup")
     assert profile.open_counts_by_lead() == {7: 1}
+
+
+def test_only_the_resume_and_answers_feed_the_profile(fake_ai, sample_resume):
+    """Saved resumes are storage. Whatever is in them must never reach the profile build."""
+    from jobportal.candidate import library
+    library.create("Old resume", "# Someone Else\n## Experience\n- MARKER-NOT-FROM-THE-USER", None, "saved")
+    _setup(fake_ai, sample_resume)
+    asyncio.run(profile.build("test"))
+    build_prompt = next(c for c in fake_ai.calls if c["purpose"] == "profile-build")["prompt"]
+    assert "Budget Buddy" in build_prompt and "MARKER-NOT-FROM-THE-USER" not in build_prompt

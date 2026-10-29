@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from jobportal import ai, openai_auth
+from jobportal.ai import client as ai, signin
 
 
 def jwt(claims: dict) -> str:
@@ -22,64 +22,64 @@ def query(url: str) -> dict:
 
 def sign_in(monkeypatch, email="jordan.rivera@example.com") -> dict:
     """Run the whole redirect flow with a fake token endpoint; returns the authorize parameters that were used."""
-    params = query(openai_auth.start(8788))
+    params = query(signin.start(8788))
 
     async def token(form):
-        assert form["grant_type"] == "authorization_code" and form["code_verifier"] and form["resource"] == openai_auth.RESOURCE
-        return {"access_token": "access-1", "refresh_token": "refresh-1", "expires_in": 3600, "scope": openai_auth.SCOPES,
-                "id_token": jwt({"iss": openai_auth.ISSUER, "aud": "oaiapp_test", "nonce": params["nonce"], "exp": time.time() + 600,
+        assert form["grant_type"] == "authorization_code" and form["code_verifier"] and form["resource"] == signin.RESOURCE
+        return {"access_token": "access-1", "refresh_token": "refresh-1", "expires_in": 3600, "scope": signin.SCOPES,
+                "id_token": jwt({"iss": signin.ISSUER, "aud": "oaiapp_test", "nonce": params["nonce"], "exp": time.time() + 600,
                                  "sub": "user-1", "email": email, "name": "Jordan"})}
-    monkeypatch.setattr(openai_auth, "_token_request", token)
-    asyncio.run(openai_auth.finish({"code": "abc", "state": params["state"], "client_id": "oaiapp_test"}))
+    monkeypatch.setattr(signin, "_token_request", token)
+    asyncio.run(signin.finish({"code": "abc", "state": params["state"], "client_id": "oaiapp_test"}))
     return params
 
 
 def test_first_authorize_url_registers_the_app():
-    p = query(openai_auth.start(8788))
+    p = query(signin.start(8788))
     assert p["client_id"] == "dynamic_agent_client" and p["agent_name_hint"] == "JobPortal"
     assert p["ext_agent_host_id"].startswith("urn:uuid:")
     assert p["redirect_uri"] == "http://127.0.0.1:8788/auth/callback"
     assert "chatgpt.tokens.use.direct" in p["scope"].split() and p["resource"] == "https://api.openai.com/v1"
-    assert p["code_challenge_method"] == "S256" and p["state"] in openai_auth._pending
+    assert p["code_challenge_method"] == "S256" and p["state"] in signin._pending
 
 
 def test_sign_in_flow_and_reauthorization(monkeypatch):
     first = sign_in(monkeypatch)
-    st = openai_auth.status()
+    st = signin.status()
     assert st["signed_in"] and st["email"] == "jordan.rivera@example.com"
-    again = query(openai_auth.start(9000))
+    again = query(signin.start(9000))
     assert again["client_id"] == "oaiapp_test" and "agent_name_hint" not in again
     assert again["ext_agent_host_id"] == first["ext_agent_host_id"] and again["login_hint"] == "jordan.rivera@example.com"
     assert "access-1" not in json.dumps(st)  # tokens never leave the server
 
 
 def test_sign_in_rejects_a_bad_state_or_nonce(monkeypatch):
-    with pytest.raises(openai_auth.AuthError, match="expired"):
-        asyncio.run(openai_auth.finish({"code": "x", "state": "nope", "client_id": "oaiapp_test"}))
-    params = query(openai_auth.start(8788))
+    with pytest.raises(signin.AuthError, match="expired"):
+        asyncio.run(signin.finish({"code": "x", "state": "nope", "client_id": "oaiapp_test"}))
+    params = query(signin.start(8788))
 
     async def token(form):
-        return {"access_token": "a", "refresh_token": "r", "scope": openai_auth.SCOPES,
-                "id_token": jwt({"iss": openai_auth.ISSUER, "aud": "oaiapp_test", "nonce": "wrong", "exp": time.time() + 600})}
-    monkeypatch.setattr(openai_auth, "_token_request", token)
-    with pytest.raises(openai_auth.AuthError, match="didn't check out"):
-        asyncio.run(openai_auth.finish({"code": "abc", "state": params["state"], "client_id": "oaiapp_test"}))
-    assert not openai_auth.status()["signed_in"]
+        return {"access_token": "a", "refresh_token": "r", "scope": signin.SCOPES,
+                "id_token": jwt({"iss": signin.ISSUER, "aud": "oaiapp_test", "nonce": "wrong", "exp": time.time() + 600})}
+    monkeypatch.setattr(signin, "_token_request", token)
+    with pytest.raises(signin.AuthError, match="didn't check out"):
+        asyncio.run(signin.finish({"code": "abc", "state": params["state"], "client_id": "oaiapp_test"}))
+    assert not signin.status()["signed_in"]
 
 
 def test_refresh_rotates_tokens(monkeypatch):
     sign_in(monkeypatch)
-    d = openai_auth._load()
+    d = signin._load()
     d["expires_at"] = time.time() - 1
-    openai_auth._save(d)
+    signin._save(d)
 
     async def refresh(form):
         assert form["grant_type"] == "refresh_token" and form["refresh_token"] == "refresh-1" and form["client_id"] == "oaiapp_test"
         assert "scope" not in form
         return {"access_token": "access-2", "refresh_token": "refresh-2", "expires_in": 3600}
-    monkeypatch.setattr(openai_auth, "_token_request", refresh)
-    assert asyncio.run(openai_auth.access_token()) == "access-2"
-    assert openai_auth._load()["refresh_token"] == "refresh-2"
+    monkeypatch.setattr(signin, "_token_request", refresh)
+    assert asyncio.run(signin.access_token()) == "access-2"
+    assert signin._load()["refresh_token"] == "refresh-2"
 
 
 def test_not_signed_in_is_a_clear_error():
@@ -121,7 +121,7 @@ def openai_mock(monkeypatch):
 
     async def token():
         return "test-token"
-    monkeypatch.setattr(openai_auth, "access_token", token)
+    monkeypatch.setattr(signin, "access_token", token)
     return state
 
 

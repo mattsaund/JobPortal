@@ -2,14 +2,13 @@ import copy
 import time
 
 import pytest
-from fastapi.testclient import TestClient
-
 from conftest import PROFILE_OUT, STANDARD_ANSWERS
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
 def client():
-    from jobportal.main import app
+    from jobportal.web.server import app
     with TestClient(app) as c:
         yield c
 
@@ -35,7 +34,7 @@ def test_refuses_changes_from_other_sites(client):
 
 
 def test_open_external_only_opens_web_and_mail_links(client, monkeypatch):
-    from jobportal import osutil
+    from jobportal.core import osutil
     opened = []
     monkeypatch.setattr(osutil, "open_url", lambda url: opened.append(url) or True)
     assert client.post("/api/open-external", json={"url": "https://example.com/job"}).json() == {"ok": True}
@@ -44,7 +43,7 @@ def test_open_external_only_opens_web_and_mail_links(client, monkeypatch):
 
 
 def test_quit_stops_the_server(client):
-    from jobportal.main import app
+    from jobportal.web.server import app
     assert client.post("/api/quit").status_code == 409
 
     class Server:
@@ -110,3 +109,52 @@ def test_chatgpt_sign_in_endpoints(client):
     page = client.get("/auth/callback?state=bogus&code=x")
     assert page.status_code == 200 and "Sign-in didn" in page.text
     assert client.get("/api/ai/models").status_code == 401
+
+
+def _lead_with_documents() -> int:
+    """A lead with a resume and a package, as if a search had built one."""
+    from jobportal.core import db
+    from jobportal.search import pipeline
+    lead_id = pipeline.add_manual_lead("https://jobs.example.com/123", "Build internal tools in Python.", "Software Engineering Intern",
+                                       "Example Robotics", "Columbus, OH")
+    db.update_lead(lead_id, resume_md="# Jordan Rivera\njordan.rivera@example.com\n\n## Projects\n- Budget Buddy",
+                   package={"interview_prep_md": "## Likely questions\n- Tell me about Budget Buddy.",
+                            "emails": [{"kind": "recruiter", "to_addr": "recruiting@example.com", "subject": "Internship", "body": "Hello!"}],
+                            "contacts": [{"name": "Sam Lee", "title": "Recruiter", "org": "Example Robotics", "email": "sam@example.com"}]})
+    return lead_id
+
+
+def test_lead_downloads(client):
+    lead_id = _lead_with_documents()
+    get = lambda name: client.get(f"/api/leads/{lead_id}/export/{name}")  # noqa: E731
+    assert "Budget Buddy" in get("resume.md").text
+    assert "Sam Lee" in get("contacts.csv").text and "Build internal tools" in get("posting.txt").text
+    assert "Subject: Internship" in get("email-0.eml").text
+    assert get("interview_prep.docx").content[:2] == b"PK"  # a Word file is a zip
+    assert get("email-5.eml").status_code == 404 and get("cover_letter.md").status_code == 404 and get("resume.exe").status_code == 404
+
+
+def test_manual_lead_needs_a_link_or_text(client, fake_ai):
+    assert client.post("/api/leads/manual", json={}).status_code == 400
+    lead = client.post("/api/leads/manual", json={"url": "https://jobs.example.com/9"}).json()
+    assert lead["source"] == "manual" and lead["stage"] == "qualified"
+
+
+def test_dream_list(client):
+    r = client.put("/api/dreams", json={"companies": ["Example Robotics", " "], "jobs": ["Robotics Intern"], "bypass": False}).json()
+    assert r["companies"] == ["Example Robotics"] and r["jobs"] == ["Robotics Intern"] and r["bypass"] is False
+    _lead_with_documents()
+    assert client.post("/api/dreams/recheck").json()["changed"] == 1  # the lead's company is now a dream company
+
+
+def test_source_check_counts_what_passes(client, monkeypatch):
+    from jobportal.search import collectors
+    from jobportal.search.collectors.base import RawJob
+
+    async def fake_collector(ctx):
+        return [RawJob("fake", "Software Engineering Intern", "Example Robotics", "https://jobs.example.com/1", location="Remote"),
+                RawJob("fake", "Senior Staff Engineer", "Example Robotics", "https://jobs.example.com/2", location="Remote")]
+    monkeypatch.setitem(collectors.COLLECTORS, "fake", ("Fake source", fake_collector))
+    r = client.post("/api/sources/test/fake").json()
+    assert r["ok"] and r["found"] == 2 and r["pass_filters"] <= 1
+    assert client.post("/api/sources/test/nope").status_code == 404

@@ -1,9 +1,10 @@
 import asyncio
 
 import pytest
-
 from conftest import STANDARD_ANSWERS
-from jobportal import onboarding, profile, settings
+
+from jobportal.candidate import onboarding, profile
+from jobportal.core import settings
 
 
 def test_questions_are_well_formed():
@@ -61,7 +62,7 @@ def test_import_resume_stores_file_and_prefills(fake_ai, sample_resume):
     assert out["prefill"]["city"] == "Columbus"
     assert out["prefill"]["email"] == "jordan.rivera@example.com"  # the AI left it empty, the regex found it
     assert profile.resume()["filename"] == "Jordan Rivera.md"
-    from jobportal.config import RESUME_DIR
+    from jobportal.core.config import RESUME_DIR
     assert any(RESUME_DIR.iterdir())
 
 
