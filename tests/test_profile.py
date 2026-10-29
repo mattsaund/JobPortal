@@ -106,3 +106,10 @@ def test_only_the_resume_and_answers_feed_the_profile(fake_ai, sample_resume):
     asyncio.run(profile.build("test"))
     build_prompt = next(c for c in fake_ai.calls if c["purpose"] == "profile-build")["prompt"]
     assert "Budget Buddy" in build_prompt and "MARKER-NOT-FROM-THE-USER" not in build_prompt
+
+
+def test_answers_used_in_a_resume_are_marked_applied():
+    profile.ask("Have you used ROS?", "The posting asks for it.", source="Example Robotics application", lead_id=3)
+    profile.answer_question("Have you used ROS?", "Yes, in a class project.")
+    profile.mark_answers_applied(3)
+    assert profile.questions()[0]["status"] == "applied"

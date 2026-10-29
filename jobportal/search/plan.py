@@ -47,10 +47,10 @@ def all_queries(cfg: dict) -> list[str]:
 
 
 def role_words(cfg: dict) -> list[str]:
-    """Role phrases that describe what the user wants: the target roles plus the profile plan's role families. Social
-    collectors build their post filter from these. Unlike all_queries, this ignores search.use_profile_plan, so cfg is
-    currently unused."""
-    return _dedupe(target_roles() + list(_plan().get("role_families", [])))
+    """Role phrases that describe what the user wants: the target roles, plus the profile plan's role families when
+    search.use_profile_plan is on (as for all_queries and plan_dreams). Social collectors build their post filter from these."""
+    families = _plan().get("role_families", []) if cfg["search"].get("use_profile_plan", True) else []
+    return _dedupe(target_roles() + list(families))
 
 
 def plan_dreams(cfg: dict) -> list[str]:

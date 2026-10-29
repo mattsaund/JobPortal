@@ -180,6 +180,12 @@ def _names_foreign_place(loc: str, us_pattern: re.Pattern = _US_RE) -> bool:
     return bool(FOREIGN_RE.search(loc)) and not us_pattern.search(loc)
 
 
+def outside_us(loc: str) -> bool:
+    """True when a location names another country and not the US ("Toronto, ON", "Remote, Canada"). The Dream list's
+    location bypass uses it: dream jobs may be anywhere in the US, not anywhere in the world."""
+    return _names_foreign_place(clean(loc), _US_OR_DOTTED_RE)
+
+
 def fingerprint(company: str, title: str, location: str = "") -> str:
     """A short id that is the same for the same job wherever it was found: company, title and state, normalized, then
     hashed. leads.fingerprint is unique, so a job seen on two sites is stored once.

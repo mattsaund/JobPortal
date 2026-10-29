@@ -32,7 +32,7 @@ from jobportal.ai import client as ai, prompts
 from jobportal.candidate import profile as profile_mod
 from jobportal.core import bus, db, settings as settings_mod
 from jobportal.core.genres import DEFAULT_INDUSTRIES, classify, classify_industry
-from jobportal.core.textutil import LocationMatcher, age_days, fingerprint, url_key
+from jobportal.core.textutil import LocationMatcher, age_days, fingerprint, outside_us, url_key
 from jobportal.search import plan
 from jobportal.search.collectors import COLLECTORS, details, hunt
 from jobportal.search.collectors.base import SOCIAL_SOURCES, Ctx, RawJob
@@ -170,6 +170,8 @@ class RuleFilters:
         bypass = (dream_company and loc_cfg.get("dream_bypass")) or (dream_job and loc_cfg.get("dream_jobs_bypass"))
         if in_area is False and not bypass:
             return False, "outside your locations", 0
+        if in_area is False and all(outside_us(loc) for loc in j.loc_list()):  # the bypass covers the US, not other countries
+            return False, "outside the US", 0
         # The AI hunt's agents were given the allowed locations, so an unknown location from them gets the benefit of the doubt.
         if in_area is None and loc_cfg.get("unknown_policy") == "drop" and j.source != "ai_hunt":
             return False, "unknown location", 0

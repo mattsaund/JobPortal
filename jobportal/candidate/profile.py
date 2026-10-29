@@ -44,9 +44,11 @@ pages update. When one finishes it starts background work: re-scoring leads, lea
 import asyncio
 import contextlib
 import copy
+import functools
 import hashlib
 import json
 import re
+import threading
 import time
 from collections import Counter
 from datetime import date
@@ -269,6 +271,19 @@ def _qkey(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
 
 
+_questions_lock = threading.RLock()
+
+
+def _one_at_a_time(fn):
+    """Run a question edit while holding _questions_lock. Edits come from the event loop and from FastAPI's worker threads
+    at the same time, and each one reads, changes and saves the whole list, so two at once could lose one of them."""
+    @functools.wraps(fn)
+    def locked(*args, **kwargs):
+        with _questions_lock:
+            return fn(*args, **kwargs)
+    return locked
+
+
 def _save_questions(qs: list[dict]) -> None:
     """Store the question list and tell open dashboards (the Questions tab, the sidebar count and the profile status)."""
     db.kv_set("profile.questions", qs)
@@ -276,6 +291,7 @@ def _save_questions(qs: list[dict]) -> None:
     publish_status()
 
 
+@_one_at_a_time
 def ask(question: str, why: str, field: str = "", source: str = "JobPortal", lead_id: int | None = None) -> bool:
     """Add an open question to Profile -> Questions. Returns True if it was added.
 
@@ -293,6 +309,7 @@ def ask(question: str, why: str, field: str = "", source: str = "JobPortal", lea
     return True
 
 
+@_one_at_a_time
 def answer_question(question: str, answer: str) -> list[dict]:
     """Save the user's answer and return the updated question list. A question that isn't in the list (one the user typed in
     themselves) is added as answered. The answer waits (synced=False) until the next update adds it to the profile, which
@@ -311,6 +328,7 @@ def answer_question(question: str, answer: str) -> list[dict]:
     return qs
 
 
+@_one_at_a_time
 def dismiss_question(question: str) -> list[dict]:
     """Mark a question as not relevant (the "Not relevant" button). Returns the updated list."""
     qs = questions()
@@ -331,6 +349,7 @@ def unsynced() -> list[dict]:
     return [q for q in _answered() if not q.get("synced")]
 
 
+@_one_at_a_time
 def _mark_synced(read: list[dict]) -> None:
     """Mark the answers a build or update just read as part of the profile. An answer saved while the AI was working wasn't
     in its prompt, so it keeps waiting for the next update."""
@@ -342,6 +361,18 @@ def _mark_synced(read: list[dict]) -> None:
     _save_questions(qs)
 
 
+@_one_at_a_time
+def mark_answers_applied(lead_id: int) -> None:
+    """Mark the answered questions one lead raised as "applied": their answers are now worked into that lead's resume, so
+    the lead page stops offering to use them again. search/packages.py calls this after it reworks the resume."""
+    qs = questions()
+    for q in qs:
+        if q.get("lead_id") == lead_id and q.get("status") == "answered":
+            q["status"] = "applied"
+    _save_questions(qs)
+
+
+@_one_at_a_time
 def _set_questions(new: list[dict]) -> None:
     """Merge the open questions a build or update returned into the question list.
 

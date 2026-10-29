@@ -560,3 +560,26 @@ def test_empty_title_include_lets_every_title_through():
     job = RawJob("ats_boards", "Software Engineer", "Example Robotics", "https://jobs.example.com/1", location="Austin, TX")
     ok, reason, _ = pipeline.RuleFilters(cfg).check(job)
     assert ok, reason
+
+
+def test_dream_bypass_covers_the_us_only():
+    from jobportal.core import settings
+    cfg = settings.get()
+    cfg["filters"]["title_include"] = []
+    cfg["locations"].update(allowed=["Ohio"], dream_bypass=True)
+    cfg["dream_companies"] = ["Example Robotics"]
+    filters = pipeline.RuleFilters(cfg)
+    job = lambda loc: RawJob("ats_boards", "Software Engineer", "Example Robotics", f"https://jobs.example.com/{loc}", location=loc)  # noqa: E731
+    assert filters.check(job("Austin, TX"))[0]  # outside the search area, but a dream company in the US
+    assert filters.check(job("Toronto, ON"))[1] == "outside the US"
+
+
+def test_role_words_follow_the_profile_plan_switch():
+    from jobportal.candidate import profile
+    from jobportal.core import settings
+    from jobportal.search import plan
+    profile.save("search_plan", {"role_families": ["Robotics software"], "queries": [], "dream_companies": []})
+    cfg = settings.get()
+    assert "Robotics software" in plan.role_words(cfg)
+    cfg["search"]["use_profile_plan"] = False
+    assert "Robotics software" not in plan.role_words(cfg)

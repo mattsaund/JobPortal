@@ -158,3 +158,11 @@ def test_source_check_counts_what_passes(client, monkeypatch):
     r = client.post("/api/sources/test/fake").json()
     assert r["ok"] and r["found"] == 2 and r["pass_filters"] <= 1
     assert client.post("/api/sources/test/nope").status_code == 404
+
+
+def test_pasting_the_same_job_twice_opens_the_saved_lead(client, fake_ai):
+    first = client.post("/api/leads/manual", json={"url": "https://jobs.example.com/77"}).json()
+    again = client.post("/api/leads/manual", json={"url": "https://jobs.example.com/77"}).json()
+    assert again["id"] == first["id"] and again["existing"] is True
+    assert "existing" not in client.post("/api/leads/manual", json={"text": "Robotics intern, Columbus."}).json()
+    assert client.post("/api/leads/manual", json={"text": "Robotics intern, Columbus."}).json()["existing"] is True

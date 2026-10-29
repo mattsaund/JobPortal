@@ -79,9 +79,9 @@ def kill_all() -> None:
         task.cancel()
 
 
-def usage_high(cfg: dict | None = None) -> bool:
+def usage_high() -> bool:
     """True for USAGE_CAP_PAUSE seconds after OpenAI reports that JobPortal hit its ChatGPT usage cap. Search runs check
-    this before they start more AI work. `cfg` is ignored. It is still accepted because search/pipeline.py passes it."""
+    this before they start more AI work."""
     return time.time() - _limit_hit_at < USAGE_CAP_PAUSE
 
 

@@ -79,16 +79,33 @@ def insert_lead(row: dict) -> int:
     return db.ex(f"INSERT INTO leads({', '.join(row)}) VALUES({placeholders})", tuple(row.values()))
 
 
+def _manual_fingerprint(url: str, text: str, title: str, company: str, location: str) -> str:
+    """The fingerprint of a pasted job. A collected job's fingerprint is its company, title and state. A pasted job often has
+    none of those yet, so the link (or, without a link, the pasted text) goes into the key. That keeps two different pasted
+    jobs from colliding, while the same job pasted twice gets the same key."""
+    return fingerprint(company or url, (title or "(new lead, analyzing...)") + (url or text), location)
+
+
+def saved_manual_lead(url: str = "", text: str = "", title: str = "", company: str = "", location: str = "") -> int | None:
+    """The id of a saved lead that is the same job as this paste (same link, or same pasted text), or None."""
+    row = db.one("SELECT id FROM leads WHERE fingerprint=?", (_manual_fingerprint(url, text, title, company, location),))
+    if not row and url:
+        row = db.one("SELECT id FROM leads WHERE url_key=?", (url_key(url),))
+    return row["id"] if row else None
+
+
 def add_manual_lead(url: str = "", text: str = "", title: str = "", company: str = "", location: str = "",
                     kind: str = "posting") -> int:
     """Save a job the user pasted (a link, the posting text, or both) as a lead that is ready for a package, and return its
-    id. Title and company may be empty: building the package fills them in. The caller starts build_package."""
+    id. Title and company may be empty: building the package fills them in. The caller starts build_package. When the same
+    job is already saved, nothing is added and the saved lead's id comes back."""
+    existing = saved_manual_lead(url, text, title, company, location)
+    if existing:
+        return existing
+    key = _manual_fingerprint(url, text, title, company, location)
     title = title or "(new lead, analyzing...)"
     now = db.now()
     found = [{"source": "manual", "label": "Added by you", "url": url}] if url else []
-    # A collected job's fingerprint is its company, title and state. A pasted job often has none of those yet, so the link
-    # (or, without a link, the pasted text) goes into the key. That keeps two different pasted jobs from colliding.
-    key = fingerprint(company or url, title + (url or text), location)
     lead_id = insert_lead({"fingerprint": key, "url_key": url_key(url), "url": url, "title": title, "company": company,
                            "location": location, "kind": kind, "source": "manual", "sources": '["manual"]',
                            "source_detail": "Added manually", "description": text, "score": 0, "stage": "qualified",
@@ -383,16 +400,6 @@ async def _save_reworked_resume(lead: dict, md: str, review: dict, tokens: int, 
     return ats_coverage
 
 
-def _mark_answers_applied(lead_id: int) -> None:
-    """Mark this lead's answered questions as "applied", so the lead page stops offering to use them again. Writes the
-    profile's question list directly (kv profile.questions) and publishes it."""
-    questions = profile_mod.questions()
-    for q in questions:
-        if q.get("lead_id") == lead_id and q.get("status") == "answered":
-            q["status"] = "applied"
-    db.kv_set("profile.questions", questions)
-    bus.publish("questions", questions)
-
 
 async def gap_questions(lead_id: int) -> int:
     """Ask the candidate 1 to 3 questions whose answers could truthfully strengthen this lead's resume, based on what the
@@ -443,7 +450,7 @@ async def apply_answers(lead_id: int) -> dict:
     # The reworked resume also becomes the version "revert to AI version" goes back to.
     ats_coverage = await _save_reworked_resume(lead, md, review, tokens, original_resume_md=md)
     db.add_event(lead_id, "resume", f"Resume updated with {len(answered)} answer(s): {summary[:300]}")
-    _mark_answers_applied(lead_id)
+    profile_mod.mark_answers_applied(lead_id)
     bus.publish("lead", lead_summary(lead_id))
     bus.publish("toast", {"title": "Resume updated with your answers", "body": summary[:200], "lead_id": lead_id})
     return {"ok": True, "change_summary": summary, "coverage": ats_coverage}

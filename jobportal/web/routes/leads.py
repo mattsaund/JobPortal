@@ -109,7 +109,7 @@ def patch_lead(lead_id: int, body: dict):
             fields.setdefault("follow_up_at", (date.today() + timedelta(days=7)).isoformat())
     folder = LEADS_DIR / str(lead_id)
     if "resume_md" in fields and fields["resume_md"] != current.get("resume_md"):
-        _clear_rendered(folder, "resume.pdf", "resume.docx", "resume.fit")
+        _clear_rendered(folder, *packages.RENDERED_RESUME)
         keywords = (current.get("package") or {}).get("keywords") or []
         if keywords:
             fields["ats_coverage"], hit, miss = coverage(keywords, fields["resume_md"])
@@ -117,7 +117,7 @@ def patch_lead(lead_id: int, body: dict):
     if "package" in fields:
         shutil.rmtree(folder / "exports", ignore_errors=True)
         if "resume_style" in (body.get("package") or {}):  # a new layout or page limit changes the rendered resume
-            _clear_rendered(folder, "resume.pdf", "resume.docx", "resume.fit")
+            _clear_rendered(folder, *packages.RENDERED_RESUME)
     if "cover_md" in fields and fields["cover_md"] != current.get("cover_md"):
         _clear_rendered(folder, "cover_letter.pdf", "cover_letter.docx")
     db.update_lead(lead_id, **fields)
@@ -162,12 +162,16 @@ async def rebuild_package(lead_id: int):
 
 @router.post("/api/leads/manual")
 async def add_manual_lead(body: dict):
-    """Add a job the user found: a link, the posting text, or both. Its package starts building right away."""
+    """Add a job the user found: a link, the posting text, or both. Its package starts building right away. The same job
+    pasted again isn't added twice: the saved lead comes back with "existing": true, and its package is left alone."""
     url, text = (body.get("url") or "").strip(), (body.get("text") or "").strip()
     if not url and not text:
         raise HTTPException(400, "paste a URL or the job text")
-    lead_id = packages.add_manual_lead(url, text, body.get("title") or "", body.get("company") or "", body.get("location", ""),
-                                       body.get("kind", "posting"))
+    title, company, location = body.get("title") or "", body.get("company") or "", body.get("location", "")
+    existing = packages.saved_manual_lead(url, text, title, company, location)
+    if existing:
+        return {**packages.lead_summary(existing), "existing": True}
+    lead_id = packages.add_manual_lead(url, text, title, company, location, body.get("kind", "posting"))
     background.spawn(packages.build_package(lead_id), error_title="Package failed", lead_id=lead_id)
     return packages.lead_summary(lead_id)
 
