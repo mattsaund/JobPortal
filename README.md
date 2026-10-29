@@ -123,8 +123,7 @@ Settings, Your data shows the exact path. To start over, quit JobPortal and dele
 ## Working on JobPortal
 
 Start with [CONTRIBUTING.md](CONTRIBUTING.md). It has the team list, what to install, a map of the code and how to run the
-tests. Everything else, from how the code works to our school documents and design ideas, is in
-[documentation/](documentation/).
+tests, plus how the code works. Our school documents and design ideas are in [documentation/](documentation/).
 
 > **Heads up: documents outside the `documentation/` folder are ignored.** Git only picks up PDF, Word, ODT, RTF, Pages and
 > Keynote files inside `documentation/`. Anywhere else in the repo they're skipped and never committed, so a real resume

@@ -89,7 +89,7 @@ The command line:
 ## New to the code? Start here
 
 1. Get JobPortal running with a scratch data folder (see "Get it running" above) and click through every page.
-2. Read [documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md). It takes about ten minutes and saves hours later.
+2. Read "How it works" below the project map. It takes five minutes and saves hours later.
 3. Pick an item from the To do list in the README and tell the team you're taking it.
 4. Find the files to change with the project map and the "Common changes" table, make a branch, make the change, add a
    test, and open a pull request.
@@ -149,13 +149,29 @@ JobPortal/
 │   └── resources/              files read at run time (the resume playbook, the Linux desktop entry)
 ├── tests/                      pytest tests and a fictional sample resume
 ├── packaging/                  how the release apps are built: PyInstaller spec, Windows installer, PDF engine, icons
-├── documentation/              how the code works (ARCHITECTURE.md), school documents, logo, color and font ideas
+├── documentation/              school documents, and logo, color and font ideas
 ├── .github/workflows/          CI (tests on every push) and Release (builds the apps when a version tag is pushed)
 └── run.sh, run.ps1, run.bat    start scripts for running from source
 ```
 
-[documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md) walks through how a request, a search run and a profile build move through
-these files.
+## How it works
+
+- **A click, start to finish.** A page in `web/static/js/pages/` calls the API. `web/server.py` checks that the request
+  comes from this computer and from the dashboard itself. Then the route in `web/routes/` hands the work to the package that
+  does it, which reads and writes the database (`core/db.py`) and asks the AI (`ai/client.py`).
+- **Long work runs in the background.** Building a package or updating the profile starts with `core/background.py`, and
+  the request returns right away. Progress and results come back as live events: `core/bus.py` sends them, `/api/events`
+  streams them, and `web/static/js/live.js` updates the page.
+- **The profile has three inputs:** the resume, the standard questions and the questions asked along the way
+  (`candidate/`). Saved resumes, leads and web results never feed it.
+- **A search run** (`search/pipeline.py`): the collectors find jobs, the rule filters drop what doesn't fit your levels and
+  locations, the AI scores the rest, and the best ones get a package (`search/packages.py`).
+- **The dashboard** is plain JavaScript with no build step. `index.html` loads the scripts in order (core, live, layout,
+  components, pages, then main), so code that runs at load time can only use files loaded before it. Each page registers
+  its own buttons with `onAction()`.
+- **The packages stack in layers:** `core`, then `ai`, then `candidate` and `documents`, then `search` and `insights`, then
+  `web`, then `app`. A lower package never imports a higher one at the top of a file. When it has to, it imports inside the
+  function, which keeps import loops out.
 
 ## Testing
 

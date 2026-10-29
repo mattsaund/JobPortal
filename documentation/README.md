@@ -1,11 +1,10 @@
 # Documentation
 
-Everything about JobPortal that isn't code lives here: how the code works, our school project documents, and design ideas.
+Our school project documents and design ideas live here. How the code works is in [CONTRIBUTING.md](../CONTRIBUTING.md).
 If you're not sure where something goes, put it here and mention it in the group chat.
 
 | Folder or file | What goes in it |
 |---|---|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | how the code works: the packages, a request from start to finish, the profile, a search run |
 | [school/](school/) | CMSC 495 7304 work: the proposal, reports, presentations, meeting notes and the final submission |
 | [design/logos/](design/logos/) | logo ideas and sketches. The app's logo today is a placeholder in `jobportal/web/static/icon.svg`, and the app icons in `packaging/icons/` are made from it. |
 | [design/colors/](design/colors/) | color scheme ideas, as images or hex codes like `#ff7a1a`. The dashboard's colors are set at the top of `jobportal/web/static/style.css`. |
