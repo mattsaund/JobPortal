@@ -163,8 +163,8 @@ JobPortal/
 - **Long work runs in the background.** Building a package or updating the profile starts with `core/background.py`, and
   the request returns right away. Progress and results come back as live events: `core/bus.py` sends them, `/api/events`
   streams them, and `web/static/js/live.js` updates the page.
-- **The profile has three inputs:** the resume, the standard questions and the questions asked along the way
-  (`candidate/`). Saved resumes, leads and web results never feed it.
+- **The profile's inputs** are the resume, any extra documents (`candidate/documents.py`), the standard questions and the
+  questions asked along the way (`candidate/`). Saved resumes, leads and web results never feed it.
 - **A search run** (`search/pipeline.py`): the collectors find jobs, the rule filters drop what doesn't fit your levels and
   locations, the AI scores the rest, and the best ones get a package (`search/packages.py`).
 - **The dashboard** is plain JavaScript with no build step. `index.html` loads the scripts in order (core, live, layout,
@@ -228,8 +228,9 @@ Add or update a test with every bug fix and every feature.
 1. **No personal data in the repo.** JobPortal starts empty. Never commit a real resume, a database, generated documents or
    anyone's contact details. `.gitignore` blocks databases everywhere, and PDF, Word and other document files everywhere
    except `documentation/`, but check `git status` before you commit.
-2. **Only the resume and the questions teach JobPortal about the user.** That means the imported resume, the standard
-   questions and the questions asked along the way. Don't add other ways to feed the profile.
+2. **Only the user's own material teaches JobPortal about them:** the main resume, any extra documents they add (other
+   resumes, certificates, cover letters, awards), the standard questions and the questions asked along the way. Don't add
+   other ways to feed the profile.
 3. **Keep it cross-platform.** Anything that touches the operating system (opening files and links, notifications, finding
    programs) goes through `jobportal/core/osutil.py`. Use `pathlib` for paths and pass `encoding="utf-8"` whenever you read
    or write text. Keep `run.sh` and `run.ps1` doing the same thing.

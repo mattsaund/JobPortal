@@ -280,9 +280,10 @@ def _soffice_text(name: str, data: bytes) -> str:
         return _decode(out.read_bytes()) if out.exists() else ""
 
 
-def extract_text(name: str, data: bytes) -> str:
-    """Plain text of one resume file, picked by its extension (a file without one is read as text). Raises ExtractError
-    with a message meant for the user when the file can't be read or holds too little text."""
+def extract_text(name: str, data: bytes, min_chars: int = MIN_CHARS) -> str:
+    """Plain text of one file, picked by its extension (a file without one is read as text). Raises ExtractError with a
+    message meant for the user when the file can't be read or holds fewer than min_chars characters. Resumes use the
+    default; extra documents (candidate/documents.py) pass a lower minimum, since a certificate can be one line."""
     suffix = Path(name or "").suffix.lower()
     try:
         if suffix in (".md", ".markdown", ".txt", ""):
@@ -306,6 +307,6 @@ def extract_text(name: str, data: bytes) -> str:
     except Exception as e:  # noqa: BLE001 (third-party parsers raise their own error types)
         raise ExtractError(f"couldn't read {name}: {type(e).__name__}: {e}") from e
     text = _tidy(text)
-    if len(text) < MIN_CHARS:
+    if len(text) < min_chars:
         raise ExtractError("couldn't find any text in that file. A scanned (image) PDF can't be read; export a text PDF or DOCX instead.")
     return text

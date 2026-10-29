@@ -166,3 +166,23 @@ def test_pasting_the_same_job_twice_opens_the_saved_lead(client, fake_ai):
     assert again["id"] == first["id"] and again["existing"] is True
     assert "existing" not in client.post("/api/leads/manual", json={"text": "Robotics intern, Columbus."}).json()
     assert client.post("/api/leads/manual", json={"text": "Robotics intern, Columbus."}).json()["existing"] is True
+
+
+def test_extra_documents(client, fake_ai, sample_resume):
+    upload = lambda name, data: client.put(f"/api/profile/documents?filename={name}", content=data)  # noqa: E731
+    cert = upload("AWS certificate.txt", b"AWS Certified Cloud Practitioner. Jordan Rivera, 2025.")  # one line is enough
+    assert cert.status_code == 200 and cert.json()["kind"] == "certificate"
+    assert upload("AWS certificate.txt", b"AWS Certified Cloud Practitioner. Jordan Rivera, 2025.").json()["duplicate"] is True
+    assert upload("photo.png", b"\x89PNG not text").status_code == 400  # images can't be read
+    letter = upload("cover letter.txt", b"Dear Hiring Team, I build robots and tools people use every day.").json()
+    listed = client.get("/api/profile/documents").json()
+    assert [d["kind"] for d in listed] == ["certificate", "cover letter"] and "text" not in listed[0]
+    assert client.get("/api/onboarding").json()["documents"] == listed
+    assert client.delete(f"/api/profile/documents/{letter['id']}").json() == {"ok": True}
+    assert client.delete(f"/api/profile/documents/{letter['id']}").status_code == 404
+    # Swap: a document becomes the main resume, and the old main resume is kept as a document.
+    fake_ai.responses["onboarding-prefill"] = {}
+    client.post("/api/onboarding/resume-text", json={"text": sample_resume, "name": "old resume.md", "prefill": False, "save_to_library": False})
+    newer = upload("newer resume.md", sample_resume.replace("Budget Buddy", "Budget Buddy 2").encode()).json()
+    assert client.post(f"/api/profile/documents/{newer['id']}/main").json()["resume"]["filename"] == "newer resume.md"
+    assert "old resume.md" in [d["name"] for d in client.get("/api/profile/documents").json()]

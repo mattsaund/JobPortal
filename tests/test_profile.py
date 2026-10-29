@@ -98,14 +98,18 @@ def test_ask_deduplicates():
     assert profile.open_counts_by_lead() == {7: 1}
 
 
-def test_only_the_resume_and_answers_feed_the_profile(fake_ai, sample_resume):
-    """Saved resumes are storage. Whatever is in them must never reach the profile build."""
-    from jobportal.candidate import library
+def test_the_profile_reads_documents_but_never_saved_resumes(fake_ai, sample_resume):
+    """Extra documents feed the profile build. Saved resumes are storage: whatever is in them must never reach it."""
+    from jobportal.candidate import documents, library
     library.create("Old resume", "# Someone Else\n## Experience\n- MARKER-NOT-FROM-THE-USER", None, "saved")
+    documents.add("certificate.txt", b"Certified ROS Developer. Jordan Rivera, 2026.")
     _setup(fake_ai, sample_resume)
     asyncio.run(profile.build("test"))
     build_prompt = next(c for c in fake_ai.calls if c["purpose"] == "profile-build")["prompt"]
-    assert "Budget Buddy" in build_prompt and "MARKER-NOT-FROM-THE-USER" not in build_prompt
+    assert "Budget Buddy" in build_prompt and "Certified ROS Developer" in build_prompt
+    assert "MARKER-NOT-FROM-THE-USER" not in build_prompt
+    # The build remembers which documents it read, so the watcher only rebuilds when they change again.
+    assert db.kv_get("profile.documents_built") == documents.changed_at()
 
 
 def test_answers_used_in_a_resume_are_marked_applied():

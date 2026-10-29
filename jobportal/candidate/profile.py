@@ -3,11 +3,13 @@
 Every search, score and document is made from it. Triage and the AI hunt read a short digest(). Application packages, resume
 revisions and the Analysis page read the full_context(). The Profile page shows overview() and saves hand edits with save().
 
-Where it comes from (the only three inputs):
-  1. The resume the user imports. onboarding.import_resume() stores it as "profile.resume".
-  2. Their answers to the standard job questions. onboarding.save_answers() stores them as "profile.answers". The optional
+Where it comes from (these are the only inputs):
+  1. The resume the user imports, their main resume. onboarding.import_resume() stores it as "profile.resume".
+  2. Extra documents, if they add any: other resumes, certificates, cover letters, awards and transcripts
+     (candidate/documents.py, kept as "profile.documents"). They widen the profile, and with it the search.
+  3. Their answers to the standard job questions. onboarding.save_answers() stores them as "profile.answers". The optional
      writing sample is one of these answers, and learn_voice() learns how the user writes from it.
-  3. Their answers to questions JobPortal asks along the way, kept as "profile.questions". A question comes from a profile
+  4. Their answers to questions JobPortal asks along the way, kept as "profile.questions". A question comes from a profile
      build, from an application package (lead_id links it to that lead), or from the user typing in something new.
   Nothing else feeds the profile: not saved resumes (candidate/library.py), not leads, not web results.
 
@@ -23,16 +25,17 @@ What it holds (each section is one row in the kv table, under "profile.<section>
   voice             how the user writes, learned from the writing sample (markdown)
 
 How a profile is born:
-  Setup imports the resume, then saves the standard answers. Saving fills in facts and qa straight from the answers. Then
-  build() sends the resume, the answers and every answered question to the AI in one call. The AI writes the other sections
-  and lists open questions: gaps worth asking the user about.
+  Setup imports the resume (and any extra documents), then saves the standard answers. Saving fills in facts and qa
+  straight from the answers. Then build() sends the resume, the documents, the answers and every answered question to the
+  AI in one call. The AI writes the other sections and lists open questions: gaps worth asking the user about.
 
 How it changes:
   - The user answers a question. answers_watcher() waits until they pause, then update_from_answers() asks the AI for only
     the sections the new answers change. A search run, and a lead's "Update this resume with my answers" button, add
     waiting answers first too.
   - The user edits a section by hand (save()). Later builds keep the edit unless a source contradicts it.
-  - The user saves new standard answers or clicks Rebuild, and build() runs again from all three inputs.
+  - The user adds or removes documents. answers_watcher() waits until they pause, then build() runs again.
+  - The user saves new standard answers or clicks Rebuild, and build() runs again from every input.
   - The writing sample changes, and learn_voice() rewrites the voice section.
   The standard answers always win over what the AI read from the resume: their facts are copied back after every build and
   update. save() keeps each section's previous version in the profile_history table, and every build, update and voice
@@ -433,8 +436,9 @@ def _phase(text: str, busy: bool = True) -> None:
 # ---------------------------------------------------------------- build / update
 
 def _prompt_head() -> str:
-    """The sources at the start of the full-build prompt: today's date, the resume text, the standard answers and the resume
-    markdown format."""
+    """The sources at the start of the full-build prompt: today's date, the resume text, the extra documents, the standard
+    answers and the resume markdown format."""
+    from jobportal.candidate import documents
     from jobportal.candidate.onboarding import answers_for_prompt
     imported = resume() or {}
     answers = standard_answers()
@@ -442,6 +446,9 @@ def _prompt_head() -> str:
 
 === RESUME ({imported.get('filename', 'none')}, imported {str(imported.get('imported_at', ''))[:10]}) ===
 {(imported.get('text') or '(no resume imported)')[:60000]}
+
+=== EXTRA DOCUMENTS (other resumes, certificates, cover letters, awards, transcripts) ===
+{documents.for_prompt()}
 
 === STANDARD ANSWERS (saved {str(answers.get('_saved_at', ''))[:10]}) ===
 {answers_for_prompt(answers)}
@@ -492,8 +499,10 @@ async def build(reason: str = "manual") -> dict:
 
 === CURRENT PROFILE (may include the candidate's own edits; keep them unless a source contradicts them) ===
 {current}"""
+        documents_seen = db.kv_get("profile.documents_changed_at")  # the documents this build reads (see answers_watcher)
         out = await ai.run(prompt, system=prompts.system("profile", prompts.PROFILE_SYSTEM), schema=prompts.PROFILE_SCHEMA,
                            stage="profile", purpose="profile-build", label="profile: build", timeout=2400)
+        db.kv_set("profile.documents_built", documents_seen)
         return _save_result("build", reason, out, read)
 
 
@@ -683,8 +692,10 @@ def overview() -> dict:
 # ---------------------------------------------------------------- background sync of answers
 
 async def answers_watcher(settings_get):
-    """A loop the server starts at launch. Every 15 seconds it looks for answers that aren't in the profile yet, and once the
-    newest one has waited sync_delay_sec (60 by default), it runs update_from_answers().
+    """A loop the server starts at launch. Every 15 seconds it checks two things, and acts once the user has paused for
+    sync_delay_sec (60 by default):
+    - Documents added or removed since the last build: build() runs again, so the profile reads them.
+    - Answers that aren't in the profile yet: update_from_answers() adds them.
 
     It does nothing while a search or another profile update is running, when settings profile.auto_sync_answers is off,
     or before the first build. settings_get is the function that returns the current settings (the server passes settings.get)."""
@@ -692,13 +703,18 @@ async def answers_watcher(settings_get):
         await asyncio.sleep(15)
         try:
             options = settings_get().get("profile", {})
-            pending = unsynced()
-            if not pending or not options.get("auto_sync_answers", True) or not is_built():
+            if not options.get("auto_sync_answers", True) or not is_built():
                 continue
             if _lock.locked() or bus.state.get("running"):
                 continue  # busy now, so check again on the next tick
-            newest = max(float(q.get("answered_ts") or 0) for q in pending)
-            if time.time() - newest >= float(options.get("sync_delay_sec", 60)):
+            delay = float(options.get("sync_delay_sec", 60))
+            documents_changed = db.kv_get("profile.documents_changed_at")
+            if documents_changed and documents_changed != db.kv_get("profile.documents_built"):
+                if time.time() - float(documents_changed) >= delay:
+                    await build("documents changed")  # a full build also reads every waiting answer
+                continue
+            pending = unsynced()
+            if pending and time.time() - max(float(q.get("answered_ts") or 0) for q in pending) >= delay:
                 await update_from_answers("answered questions")
         except Exception:  # noqa: BLE001 (the watcher must never stop; update_from_answers already showed the error)
             pass

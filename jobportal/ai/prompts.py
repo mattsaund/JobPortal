@@ -311,7 +311,11 @@ Every search, score, resume, cover letter and email is made from this profile, s
 sources say, and nothing they don't.
 
 SOURCES (all from the candidate):
-- RESUME: the resume they imported. It is a data source, never a template. Mine it for facts.
+- RESUME: the resume they imported, their main resume. It is a data source, never a template. Mine it for facts.
+- EXTRA DOCUMENTS (when present): other files they added, such as older resumes, certificates, cover letters, awards and
+  transcripts. Mine them like the resume: every skill, certification, award, project, role and achievement they show belongs
+  in the profile. When a document and the main resume disagree on a date or title, prefer the main resume and mark the item
+  "(confirm)". The standard answers and the follow-up answers win over any document.
 - STANDARD ANSWERS: their answers to the standard job-application questions. These are authoritative for contact details,
   eligibility, education, what they are looking for and their preferences.
 - ANSWERS TO FOLLOW-UP QUESTIONS: dated answers to questions JobPortal asked along the way. They add skills, metrics, projects and
@@ -332,9 +336,11 @@ SECTIONS:
 - skills_inventory: EVERY skill named anywhere in the sources, each with a category, a level ("strong" = used substantially in a
   documented job or project, "working" = coursework or smaller use, "listed" = only appears in a list) and 1-3 evidence items.
 - provenance: for name, email, school, degree, graduation, GPA, work authorization, clearance, each job's title and dates, and each
-  certification: field, value, source ("resume", "standard answers" or "answer: <the question>") and the source date.
+  certification: field, value, source ("resume", "document: <file name>", "standard answers" or "answer: <the question>") and the
+  source date.
 - search_plan: role_families = the 8-14 kinds of roles to pursue, ranked: lead with the candidate's stated target roles, then cover
-  every other industry and role type their skills truly fit; queries = 18-30 short job-board search phrases (2-5 words) covering
+  every other industry and role type their skills truly fit, including directions only the extra documents show (a certificate or
+  an award can open a role family the resume never mentions); queries = 18-30 short job-board search phrases (2-5 words) covering
   those families, worded for their levels (e.g. "intern", "junior", "senior"); dream_companies = the employers they named plus
   closely aligned organizations (official names); notes = one line on the strategy.
 

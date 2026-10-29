@@ -22,7 +22,7 @@ from datetime import date
 from pathlib import Path
 
 from jobportal.ai import client as ai
-from jobportal.candidate import profile as profile_mod
+from jobportal.candidate import documents, profile as profile_mod
 from jobportal.core import bus, db, settings as settings_mod
 from jobportal.core.config import RESUME_DIR
 from jobportal.core.genres import DEFAULT_INDUSTRIES
@@ -433,7 +433,7 @@ def save_answers(raw: dict) -> dict:
 def state() -> dict:
     """Everything the setup page needs (the Profile page's Resume and Standard answers tabs use it too): the questions, the
     saved answers over the defaults, the required ids, the resume's details and the first 4,000 characters of its text,
-    the latest pre-fill, the progress flags, the profile status, and the file types a resume upload accepts."""
+    the latest pre-fill, the progress flags, the profile status, the file types an upload accepts, and the extra documents."""
     imported = profile_mod.resume()
     answers = profile_mod.standard_answers()
     built = profile_mod.is_built()
@@ -441,4 +441,4 @@ def state() -> dict:
             "resume": profile_mod.resume_info(), "resume_preview": (imported or {}).get("text", "")[:4000],
             "prefill": db.kv_get("onboarding.prefill") or {}, "answers_saved": bool(answers.get("_saved_at")), "profile_built": built,
             "complete": bool(imported and answers.get("_saved_at") and built), "status": profile_mod.status_snapshot(),
-            "accept": extract.ACCEPT}
+            "accept": extract.ACCEPT, "documents": documents.listing()}

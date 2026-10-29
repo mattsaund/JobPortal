@@ -94,6 +94,19 @@ _Coming soon._
 - [ ] Get a good logo
 - [ ] Change the name (maybe?)
 - [ ] Simplify the UI: fewer buttons and fewer words. Sleek, simple and easy to use.
+- [ ] Finish extra documents in the dashboard: a drop zone in setup that takes your resume plus other resumes, certificates,
+      cover letters and awards at once, and a list on the Profile page. The server side is done (`/api/profile/documents`).
+- [ ] A continuous stream of leads: run searches on a schedule by default after setup
+- [ ] Reach more places, especially more social media sites
+
+### Course deliverables (from the assignment PDFs)
+
+- [ ] Unit 3: system design spec with a UML architecture diagram, interface contracts (API endpoints, request and
+      response formats, errors; FastAPI serves them at http://127.0.0.1:8788/docs) and a 500-word design rationale
+- [ ] Unit 5: everyone commits and reviews pull requests, each of us peer reviews one teammate's module, and each writes a
+      250-word refinement report on technical debt
+- [ ] Unit 8: API docs, an installation guide and a user manual, CI/CD screenshots, a test coverage report, performance
+      benchmarks, a 10 to 15 minute video, and a 1,300-word paper each, with team names and contributions
 
 ## Built with
 

@@ -1,12 +1,12 @@
-"""The user's side: setup (import a resume, answer the standard questions), the Profile page, and the questions JobPortal
-asks along the way.
+"""The user's side: setup (import a resume and any extra documents, answer the standard questions), the Profile page, and
+the questions JobPortal asks along the way.
 
-These three are the only ways JobPortal learns about the user. Nothing else feeds the profile: not saved resumes, not
-leads, not anything found on the web."""
+These are the only ways JobPortal learns about the user. Nothing else feeds the profile: not saved resumes, not leads, not
+anything found on the web."""
 from fastapi import APIRouter, HTTPException, Request
 
 from jobportal.ai import client as ai
-from jobportal.candidate import library, onboarding, profile
+from jobportal.candidate import documents, library, onboarding, profile
 from jobportal.core import background, bus, db
 from jobportal.documents import extract
 from jobportal.web.common import ai_error, read_upload
@@ -75,6 +75,43 @@ async def save_answers(body: dict):
 @router.get("/api/profile")
 def get_profile():
     return profile.get_all()
+
+
+# ---------------------------------------------------------------- extra documents
+# Registered before PUT /api/profile/{key}, so "documents" is never read as a profile section's name.
+
+@router.get("/api/profile/documents")
+def list_documents():
+    """The extra documents: other resumes, certificates, cover letters, awards and transcripts (without their text)."""
+    return documents.listing()
+
+
+@router.put("/api/profile/documents")
+async def add_document(request: Request, filename: str):
+    """Add one document, sent as the raw request body. The profile rebuilds about a minute after the user stops adding."""
+    data = await read_upload(request)
+    try:
+        return documents.add(filename, data)
+    except ValueError as e:  # extract.ExtractError (no readable text, unsupported type) or the document limit
+        raise HTTPException(400, str(e))
+
+
+@router.post("/api/profile/documents/{doc_id}/main")
+async def use_document_as_main_resume(doc_id: str):
+    """Swap: this document becomes the main resume, and the old main resume becomes a document."""
+    try:
+        return {"resume": await documents.make_main(doc_id)}
+    except KeyError:
+        raise HTTPException(404, "no such document")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/api/profile/documents/{doc_id}")
+def remove_document(doc_id: str):
+    if not documents.remove(doc_id):
+        raise HTTPException(404, "no such document")
+    return {"ok": True}
 
 
 @router.put("/api/profile/{key}")
