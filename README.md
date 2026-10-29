@@ -107,6 +107,7 @@ _Coming soon._
 - [ ] Make it for everyone, not just tech: cover all job types, job genres and school levels (high school, trades,
       college, graduate), adapt to each person the way the Analysis page does, and add sources for every kind of job. Today
       the filters, keywords, default companies and some sources lean toward computer science, space and tech.
+- [ ] Make job search type as broad as possible covering all types of jobs.
 - [ ] Try the whole flow on a few classmates' resumes: ranked jobs in their areas, tailored resumes and cover letters,
       recruiter contacts and email templates for each match
 
