@@ -49,11 +49,6 @@ def preview(body: dict):
     return HTMLResponse(f"<div class='md'>{render.markdown_html(md)}</div>")
 
 
-@router.post("/api/preview/markdown")
-def preview_markdown(body: dict):
-    return HTMLResponse(render.markdown_html(body.get("md", "")))
-
-
 @router.post("/api/leads/{lead_id}/revise")
 async def revise_document(lead_id: int, body: dict):
     """Ask the AI to edit a lead's document by instruction. Returns the new text for the editor to show; nothing is saved."""
