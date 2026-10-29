@@ -10,6 +10,7 @@ from jobportal.core import db, settings
 
 
 def _result(out: dict) -> dict:
+    """The part of the AI's answer the editor shows: the new text and a short summary of what changed."""
     return {"text": out["text"], "change_summary": out.get("change_summary", "")}
 
 

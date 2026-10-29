@@ -59,6 +59,29 @@ def test_docx_text_includes_tables_and_header():
     assert text.index("Experience") < text.index("Skills")
 
 
+def test_docx_text_inside_content_controls_and_header_tables():
+    """Word's resume templates wrap text in content controls (w:sdt), and many put the contact details in a header table."""
+    from docx import Document
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import nsdecls
+    doc = Document()
+    section = doc.sections[0]
+    row = section.header.add_table(rows=1, cols=2, width=section.page_width).rows[0]
+    row.cells[0].text, row.cells[1].text = "jordan.rivera@example.com", "(555) 010-0199"
+    doc.add_paragraph("Experience")
+    block = parse_xml(f'<w:sdt {nsdecls("w")}><w:sdtContent><w:p><w:r><w:t>Student Technician, Campus IT Help Desk, resolving '
+                      "40+ tickets every week for students and staff.</w:t></w:r></w:p></w:sdtContent></w:sdt>")
+    inline = parse_xml(f'<w:p {nsdecls("w")}><w:r><w:t xml:space="preserve">Skills: </w:t></w:r><w:sdt><w:sdtContent><w:r>'
+                       "<w:t>Python, SQL</w:t></w:r></w:sdtContent></w:sdt></w:p>")
+    doc.paragraphs[-1]._p.addnext(block)
+    block.addnext(inline)
+    buf = io.BytesIO()
+    doc.save(buf)
+    text = extract.extract_text("resume.docx", buf.getvalue())
+    assert "jordan.rivera@example.com   (555) 010-0199" in text
+    assert "Student Technician, Campus IT Help Desk" in text and "Skills: Python, SQL" in text
+
+
 def test_odt_text():
     content = ('<?xml version="1.0"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
                'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text>'
@@ -82,6 +105,15 @@ def test_rtf_text():
     assert "Café shift lead\t2023" in text
     assert "’s worth" in text
     assert "Arial" not in text  # the font table is skipped
+
+
+def test_rtf_from_textedit_and_word_symbols():
+    """macOS TextEdit ends lines with a backslash before the line break, and Word writes curly quotes as control words."""
+    rtf = ("{\\rtf1\\ansi\\cocoartf2580{\\fonttbl\\f0 Helvetica;}\n\\f0 Jordan Rivera\\\nStudent Technician, Campus IT Help Desk\\\n"
+           "Jordan\\rquote s scripts saved the help desk hours of work every week {\\uc1\\u-10179?\\u-8704?}\\par}")
+    lines = extract.extract_text("resume.rtf", rtf.encode("latin-1")).split("\n")
+    assert lines[:2] == ["Jordan Rivera", "Student Technician, Campus IT Help Desk"]
+    assert lines[2].startswith("Jordan’s scripts") and lines[2].endswith("every week \U0001F600")  # two \u halves make one emoji
 
 
 def test_text_encodings():

@@ -1,1 +1,2 @@
-"""Resumes and other files: reading imported files, rendering HTML, PDF and DOCX, and checking resumes."""
+"""Resumes and other documents: reading imported files (extract), rendering HTML, PDF and Word files (render), checking
+resumes (resumecheck), building downloads (exports) and AI edits by instruction (revise)."""

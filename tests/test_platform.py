@@ -23,6 +23,22 @@ def test_parser_modes():
     assert p.parse_args(["--server", "--port", "9999"]).port == 9999
 
 
+def test_stop_never_signals_a_stale_pid_file(monkeypatch):
+    """A PID file left by a crashed server may name some other program by now, so --stop only removes it."""
+    from jobportal.app import desktop
+    monkeypatch.setattr(desktop, "up", lambda: False)  # nothing answers on the port
+    bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    pid_file = cli._pid_file()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(bystander.pid), encoding="utf-8")
+    try:
+        assert cli.stop() == 0
+        assert bystander.poll() is None and not pid_file.exists()
+    finally:
+        bystander.kill()
+        bystander.wait()
+
+
 def test_cli_version_and_doctor(tmp_path):
     env = {**os.environ, "JOBPORTAL_HOME": str(tmp_path)}
     out = subprocess.run([sys.executable, "-m", "jobportal", "--version"], capture_output=True, text=True, env=env, timeout=60)

@@ -19,6 +19,27 @@ def test_links_are_sanitized():
     assert 'href="#"' in html and 'href="https://example.com"' in html
 
 
+def test_bare_links_stay_inside_their_tags():
+    # A bold address is one link inside the bold, not a broken tag.
+    assert render.inline_html("**https://example.com**") == '<b><a href="https://example.com">https://example.com</a></b>'
+    # A quote ends the address, so text after it can't add attributes to the link.
+    assert render.inline_html('see https://example.com"onmouseover="alert(1)').startswith('see <a href="https://example.com">')
+    # Punctuation that ends a sentence stays out of the link.
+    assert 'href="https://example.com/portfolio">' in render.inline_html("My work: https://example.com/portfolio.")
+
+
+def test_docx_links_and_numbered_lines(tmp_path):
+    from docx import Document
+    out = tmp_path / "prep.docx"
+    md = "## Steps\n1. First\n2. Second\n- Read [the guide](https://example.com/guide), not [this](javascript:alert(1))\n- **[Bold link](https://example.com/b)**"
+    render.markdown_docx(md, out, "Interview prep")
+    doc = Document(str(out))
+    assert "1. First" in [p.text for p in doc.paragraphs]  # numbers print as written; Word never renumbers them
+    links = [link for p in doc.paragraphs for link in p.hyperlinks]
+    assert [link.url for link in links] == ["https://example.com/guide", "https://example.com/b"]  # the javascript: link is plain text
+    assert links[1].runs[0].bold
+
+
 def test_long_date_is_portable():
     assert render.long_date(date(2026, 3, 5)) == "March 5, 2026"
 
@@ -39,9 +60,27 @@ def test_resume_check(sample_resume):
     assert "2 pages" in texts and "Non-standard heading" in texts and "first person" in texts
 
 
-@pytest.mark.skipif(not osutil.find_chrome(), reason="needs Chrome, Edge or Chromium")
+def test_roman_numerals_are_not_first_person(sample_resume):
+    courses = sample_resume.replace("Operating Systems", "Calculus I, Physics I and II, File I/O")
+    assert not any("first person" in i["text"] for i in resumecheck.check(courses)["issues"])
+    pronoun = sample_resume.replace("- Resolved", "- I resolved")
+    assert any("first person" in i["text"] for i in resumecheck.check(pronoun)["issues"])
+
+
+@pytest.mark.skipif(not osutil.find_pdf_engine(), reason="needs Chrome, Edge or Chromium")
 def test_pdf_export(sample_resume, tmp_path):
     info = asyncio.run(render.resume_pdf(sample_resume, tmp_path / "resume.pdf"))
     assert info["pages"] == 1 and (tmp_path / "resume.pdf").stat().st_size > 1000
     render.resume_docx(sample_resume, tmp_path / "resume.docx", render.fit_scale(tmp_path / "resume.pdf"))
     assert (tmp_path / "resume.docx").stat().st_size > 1000
+
+
+@pytest.mark.skipif(not osutil.find_pdf_engine(), reason="needs Chrome, Edge or Chromium")
+def test_every_pdf_page_keeps_its_margins(tmp_path):
+    from pypdf import PdfReader
+    md = "\n".join(f"## Topic {i}\n" + "\n".join(f"- Point {j} about topic {i}" for j in range(8)) for i in range(10))
+    assert asyncio.run(render.markdown_pdf(md, tmp_path / "prep.pdf", "Interview prep")) >= 2
+    page = PdfReader(str(tmp_path / "prep.pdf")).pages[1]
+    baselines = []
+    page.extract_text(visitor_text=lambda text, cm, tm, font, size: baselines.append(tm[5] * cm[3] + cm[5]) if text.strip() else None)
+    assert float(page.mediabox.height) - max(baselines) > 36  # page 2 starts below its top margin, not at the paper's edge

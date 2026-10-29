@@ -65,6 +65,7 @@ def document_markdown(lead: dict, doc: str) -> tuple[str, str]:
 
 
 def contacts_csv(lead: dict) -> str:
+    """The lead's contacts as CSV text, one row per person, with the columns in CONTACT_COLUMNS."""
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(CONTACT_COLUMNS)

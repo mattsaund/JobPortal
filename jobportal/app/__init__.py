@@ -1,1 +1,1 @@
-"""Starting JobPortal on a computer: the command line, the app window and the --doctor check."""
+"""Starting JobPortal on a computer: the command line (cli), the app window (desktop) and the --doctor check (doctor)."""
