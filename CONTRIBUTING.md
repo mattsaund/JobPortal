@@ -8,13 +8,8 @@ in a pull request like any other change.
 
 | Name | Role |
 |---|---|
-<<<<<<< HEAD
 | `Matthew Saunders` | `Lead Architect` |
-| `<NAME>` | `<ROLE>` |
-=======
-| MATTHEW SAUNDERS | LEAD ARCHITECT |
-| JOSHUA PITTER | LEAD ARCHITECT |
->>>>>>> 284d64b (Added Name and Email to the README.md and CONTRIBUTING.md files.)
+| `Joshua Pitter` | `Lead Architect` |
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
@@ -231,8 +226,7 @@ Add or update a test with every bug fix and every feature.
 ## Rules
 
 1. **No personal data in the repo.** JobPortal starts empty. Never commit a real resume, a database, generated documents or
-   anyone's contact details. `.gitignore` blocks databases everywhere, and PDF, Word and other document files everywhere
-   except `documentation/`, but check `git status` before you commit.
+   anyone's contact details. `.gitignore` blocks databases, but not documents, so check `git status` before you commit.
 2. **Only the user's own material teaches JobPortal about them:** the main resume, any extra documents they add (other
    resumes, certificates, cover letters, awards), the standard questions and the questions asked along the way. Don't add
    other ways to feed the profile.
