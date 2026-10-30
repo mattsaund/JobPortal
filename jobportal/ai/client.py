@@ -157,7 +157,22 @@ async def models(force: bool = False) -> list[str]:
         err = _error_body(r.text)
         raise _error(err.get("code"), err.get("message"), r.status_code)
     # Skip models whose visibility is anything but "list" (for example "hide").
-    ids = [m["id"] for m in r.json().get("data", []) if m.get("visibility", "list") == "list"]
+    body = r.json()
+    entries = body.get("data")
+    if entries is None:
+        entries = body.get("models", [])
+    if not isinstance(entries, list):
+        raise AIError("OpenAI returned an unexpected model list format.")
+
+    ids = []
+    for model in entries:
+        if not isinstance(model, dict):
+            continue
+        if model.get("visibility", "list") != "list":
+            continue
+        model_id = model.get("id") or model.get("slug")
+        if isinstance(model_id, str) and model_id.strip():
+            ids.append(model_id.strip())
     _models.update(at=time.time(), ids=ids)
     return ids
 
