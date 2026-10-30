@@ -281,3 +281,31 @@ def test_fetch_connects_to_the_address_it_checked(monkeypatch):
     text = asyncio.run(ai.fetch_public("https://jobs.example.com/apply?id=7"))
     assert "Software Engineering Intern" in text and lookups == ["jobs.example.com"]
     assert seen == {"url": "https://93.184.215.14/apply?id=7", "host": "jobs.example.com", "sni": "jobs.example.com"}
+
+@pytest.mark.parametrize("container, identifier", [
+    ("data", "id"),
+    ("models", "slug"),
+])
+def test_model_response_formats(monkeypatch, container, identifier):
+    async def token():
+        return "test-token"
+
+    monkeypatch.setattr(signin, "access_token", token)
+
+    def handler(request):
+        assert request.url.path.endswith("/models")
+        return httpx.Response(200, json={
+            container: [
+                {identifier: "model-first", "visibility": "list"},
+                {identifier: "model-hidden", "visibility": "hide"},
+                {identifier: "model-second"},
+                {},
+                None,
+            ]
+        })
+
+    mock_http(monkeypatch, handler)
+    assert asyncio.run(ai.models(force=True)) == [
+        "model-first",
+        "model-second",
+    ]
