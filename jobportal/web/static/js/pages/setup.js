@@ -113,7 +113,7 @@ function setupStatusChanged() {
   } else if (st.error) {
     card.innerHTML = `<h3>Step 4: building your profile</h3><div class="banner bad"><div><b>The build failed:</b> ${esc(st.error)}</div></div>
       <p class="muted small">Check that you're signed in with ChatGPT on a Go, Plus or Pro plan, then try again.</p>
-      <div class="row"><button class="btn primary" data-act="profile-build">Try again</button><button class="btn ghost" data-act="setup-step" data-step="answers">Back to the questions</button></div>`;
+      <div class="row"><button class="btn" data-act="ai-signin">Continue with ChatGPT</button><button class="btn primary" data-act="profile-build">Try again</button><button class="btn ghost" data-act="setup-step" data-step="answers">Back to the questions</button></div>`;
   } else {
     const questions = st.open_questions
       ? `<div class="banner accent"><div><b>${plural(st.open_questions, "question")}</b> would make your applications stronger. Answer them any time; your profile
