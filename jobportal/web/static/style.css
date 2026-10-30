@@ -620,3 +620,13 @@ a:focus-visible {
   background: #bcebd9;
   color: #142b43;
 }
+.logo {
+  padding: 8px 0 24px;
+}
+
+.logo img {
+  display: block;
+  width: 100%;
+  max-width: 204px;
+  height: auto;
+}
