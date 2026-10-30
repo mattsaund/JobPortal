@@ -455,3 +455,168 @@ h3.sect { margin: 4px 0 8px; font: 600 12px var(--font); text-transform: upperca
   .profile-hero .ph-sync { text-align: left; }
 }
 @media (max-width: 720px) { .libgrid { grid-template-columns: 1fr; } }
+/* GREEN JOBPORTAL THEME */
+
+:root {
+  color-scheme: light;
+
+  --bg: #f5f8fa;
+  --panel: #ffffff;
+  --panel2: #f0f6f5;
+  --panel3: #e7f8f2;
+
+  --line: #e0e9ee;
+  --line2: #bcced5;
+
+  --text: #142b43;
+  --text2: #456074;
+  --muted: #617587;
+
+  --act: #007d63;
+  --info: #2465ae;
+  --ai: #7050b5;
+
+  --good: #147952;
+  --warn: #926000;
+  --bad: #be3434;
+
+  --font: Arial, Helvetica, sans-serif;
+  --r: 12px;
+}
+
+/* Navy sidebar */
+.side {
+  background: #061e30;
+  border-right-color: #244052;
+  color: #c0ced8;
+
+  --text: #f2faf8;
+  --text2: #c0ced8;
+  --muted: #9ab2c0;
+  --line: #294554;
+  --line2: #456273;
+  --panel2: #123140;
+  --panel3: #173c45;
+  --act: #45edb5;
+  --info: #91c5ff;
+  --ai: #c1adff;
+  --good: #62dfac;
+  --warn: #ffd17d;
+  --bad: #ff9696;
+}
+
+.logo {
+  padding-top: 12px;
+  padding-bottom: 28px;
+  font-size: 22px;
+}
+
+.nav a {
+  padding: 12px;
+  margin-bottom: 5px;
+}
+
+.nav a.on {
+  background: #173c45;
+  color: #45edb5;
+  box-shadow: inset 3px 0 #45edb5;
+}
+
+.nav a:hover {
+  background: #123140;
+}
+
+.nav .badge {
+  background: #2c5558;
+  color: #c9ffed;
+}
+
+/* Page spacing and cards */
+.page {
+  padding-top: 32px;
+}
+
+.page-h h1 {
+  font-size: 28px;
+  letter-spacing: -0.7px;
+}
+
+.card,
+.tile,
+.libcard {
+  box-shadow: 0 3px 12px #142b4305;
+}
+
+.card h3 {
+  color: var(--text2);
+}
+
+.tile {
+  padding: 19px;
+}
+
+.tile .n {
+  font-size: 30px;
+}
+
+.mission {
+  background: linear-gradient(135deg, #e7f8f2, #ffffff);
+  border-color: #cce7dc;
+}
+
+/* Buttons and controls */
+.btn.primary {
+  background: var(--act);
+  border-color: var(--act);
+  color: #ffffff;
+}
+
+.btn.primary.ai {
+  background: var(--ai);
+  border-color: var(--ai);
+  color: #ffffff;
+}
+
+.runbtn .mode {
+  color: #142b43;
+  background-color: #bcebd9;
+  border-color: var(--act);
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--act);
+  outline-offset: 3px;
+}
+
+/* Keep logs readable on the light theme */
+.console {
+  background: #ffffff;
+}
+
+.console .ch {
+  background: #f0f6f5;
+}
+
+.console .ln .t {
+  color: #617587;
+}
+
+/* Dialogs and notifications */
+.modal-bg {
+  background: #061e3080;
+}
+
+.modal,
+.toast,
+.viz-tip {
+  box-shadow: 0 16px 45px #061e3026;
+}
+
+::selection {
+  background: #bcebd9;
+  color: #142b43;
+}
