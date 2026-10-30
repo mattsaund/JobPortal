@@ -19,5 +19,3 @@ The README and CONTRIBUTING guide stay at the top of the repo, because GitHub sh
   link to them in a Markdown file here.
 - **No personal data.** Team names and roles are fine. Real resumes, grades, student IDs and anyone's private contact
   details are not.
-- **PDF and Word files are allowed in this folder.** The rest of the repo blocks them, so a real resume can't get committed
-  by accident.

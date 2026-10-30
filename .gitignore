@@ -101,21 +101,11 @@ pdf-engine/
 *.pid
 chatgpt_auth.json
 
-# Personal documents (resumes, cover letters, exports) never belong in the repo. Test fixtures are fictional and allowed.
-*.pdf
-*.docx
-*.doc
-*.odt
-*.rtf
-*.pages
-!tests/fixtures/*
-
 # ---------------------------------------------------------------- Secrets
 .env
 .env.*
 !.env.example
 *.pem
-*.key
 
 # ---------------------------------------------------------------- Logs, temporary and backup files
 *.log
@@ -141,14 +131,3 @@ nohup.out
 CLAUDE.md
 CLAUDE.local.md
 .mcp.json
-
-# ---------------------------------------------------------------- Team documents
-# Last on purpose: a later rule wins, so these beat the document and *.key rules above. The documentation folder holds the
-# team's school documents and presentations (Keynote files end in .key). Only these file types are let back in there.
-!documentation/**/*.pdf
-!documentation/**/*.docx
-!documentation/**/*.doc
-!documentation/**/*.odt
-!documentation/**/*.rtf
-!documentation/**/*.pages
-!documentation/**/*.key
