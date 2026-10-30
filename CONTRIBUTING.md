@@ -8,7 +8,7 @@ in a pull request like any other change.
 
 | Name | Role |
 |---|---|
-| `<NAME>` | `<ROLE>` |
+| `Matthew Saunders` | `Lead Architect` |
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
