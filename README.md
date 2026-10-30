@@ -90,8 +90,8 @@ _Coming soon._
 - [ ] Add profile editing and creation
 - [ ] Job listing saving
 - [ ] Get a good color scheme
-- [ ] Pick a good font
-- [ ] Get a good logo
+- [ ] Pick a good font - Becca (currently working)
+- [ ] Get a good logo - Becca (currently working)
 - [ ] Change the name (maybe?)
 - [ ] Simplify the UI: fewer buttons and fewer words. Sleek, simple and easy to use.
 - [ ] Test Sign in with ChatGPT and a full search with a real ChatGPT plan, end to end. It hasn't been tried with a real

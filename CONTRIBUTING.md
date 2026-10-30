@@ -8,8 +8,13 @@ in a pull request like any other change.
 
 | Name | Role |
 |---|---|
+<<<<<<< HEAD
 | `Matthew Saunders` | `Lead Architect` |
 | `<NAME>` | `<ROLE>` |
+=======
+| MATTHEW SAUNDERS | LEAD ARCHITECT |
+| JOSHUA PITTER | LEAD ARCHITECT |
+>>>>>>> 284d64b (Added Name and Email to the README.md and CONTRIBUTING.md files.)
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
