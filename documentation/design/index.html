@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>JobPortal | Career Dashboard</title>
+
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <div class="app-shell">
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar" aria-label="Main navigation">
+
+      <a class="brand" href="index.html" aria-label="JobPortal home">
+        <img
+          src="logos/jobportal-brand.png"
+          alt="JobPortal green JP portal logo"
+        >
+      </a>
+
+      <p class="brand-caption">POWERED BY PERSONA</p>
+      <p class="nav-label">YOUR WORKSPACE</p>
+
+      <nav id="navigation">
+        <button
+          class="nav-item active"
+          data-page="dashboard"
+          aria-current="page"
+        >
+          <span data-icon="grid"></span>
+          Dashboard
+        </button>
+
+        <button class="nav-item" data-page="jobs">
+          <span data-icon="briefcase"></span>
+          Explore Jobs
+          <span class="nav-badge">6</span>
+        </button>
+
+        <button class="nav-item" data-page="applications">
+          <span data-icon="file"></span>
+          My Applications
+        </button>
+
+        <button class="nav-item" data-page="saved">
+          <span data-icon="heart"></span>
+          Saved Jobs
+        </button>
+
+        <button class="nav-item" data-page="companies">
+          <span data-icon="building"></span>
+          Companies
+        </button>
+
+        <button class="nav-item" data-page="resources">
+          <span data-icon="book"></span>
+          Career Resources
+        </button>
+
+        <button class="nav-item" data-page="events">
+          <span data-icon="calendar"></span>
+          Events
+        </button>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="next-step">
+          <span class="eyebrow">A LITTLE PROGRESS, EVERY DAY</span>
+
+          <h3>Your next chapter<br>starts here.</h3>
+          <p>Find a role that fits who you are.</p>
+
+          <button class="button mint" data-page="jobs">
+            Explore opportunities
+            <span data-icon="arrow"></span>
+          </button>
+        </div>
+
+        <button class="nav-item" data-page="settings">
+          <span data-icon="settings"></span>
+          Profile &amp; Settings
+        </button>
+
+        <div class="sidebar-foot">
+          <span class="status-dot"></span>
+          Student workspace
+          <span>v1.0</span>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- MAIN WORKSPACE -->
+    <div class="workspace">
+
+      <!-- TOP BAR -->
+      <header class="topbar">
+
+        <label class="search-box">
+          <span data-icon="search"></span>
+
+          <input
+            id="search"
+            type="search"
+            placeholder="Search jobs, companies, or skills…"
+            aria-label="Search jobs, companies, or skills"
+          >
+
+          <kbd>/</kbd>
+        </label>
+
+        <div class="top-actions">
+          <span class="demo-label">DEMO WORKSPACE</span>
+
+          <button
+            class="icon-button"
+            id="notifications"
+            aria-label="View notifications"
+          >
+            <span data-icon="bell"></span>
+            <i aria-hidden="true"></i>
+          </button>
+
+          <button class="user-button" data-page="settings">
+            <span class="avatar">JS</span>
+
+            <span class="user-name">
+              <strong id="header-name">Jamie Smith</strong>
+              <small>Student account</small>
+            </span>
+
+            <span data-icon="chevron"></span>
+          </button>
+        </div>
+
+      </header>
+
+      <main id="main" tabindex="-1">
+
+        <!-- PAGE HEADING -->
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow" id="breadcrumb">
+              YOUR CAREER, YOUR WAY
+            </p>
+
+            <h1 id="page-title" tabindex="-1">
+              Welcome back, Jamie<span class="green">.</span>
+            </h1>
+
+            <p id="page-subtitle">
+              Discover opportunities, build your skills,
+              and take your next step.
+            </p>
+          </div>
+
+          <span class="semester">
+            <span class="status-dot"></span>
+            Fall 2026
+          </span>
+        </div>
+
+        <div class="dashboard-layout">
+
+          <!-- JOBS AND STATISTICS -->
+          <section class="primary-column" aria-label="Career overview">
+
+            <div id="stats" class="stats"></div>
+
+            <div class="section-heading">
+              <div>
+                <h2 id="section-title">Recommended for you</h2>
+
+                <p id="section-subtitle">
+                  Opportunities that align with your skills and interests.
+                </p>
+              </div>
+
+              <button
+                class="text-button"
+                id="view-all"
+                data-page="jobs"
+              >
+                View all jobs
+                <span data-icon="arrow"></span>
+              </button>
+            </div>
+
+            <div
+              id="filters"
+              class="filters"
+              aria-label="Filter job type"
+            >
+              <button
+                class="chip active"
+                data-filter="All"
+                aria-pressed="true"
+              >
+                All opportunities
+              </button>
+
+              <button
+                class="chip"
+                data-filter="Internship"
+                aria-pressed="false"
+              >
+                Internships
+              </button>
+
+              <button
+                class="chip"
+                data-filter="Full-time"
+                aria-pressed="false"
+              >
+                Full-time
+              </button>
+
+              <button
+                class="chip"
+                data-filter="Remote"
+                aria-pressed="false"
+              >
+                Remote
+              </button>
+            </div>
+
+            <!-- JavaScript inserts job cards here. -->
+            <div id="content" class="job-list"></div>
+
+            <div id="results-footer" class="results-footer"></div>
+
+          </section>
+
+          <!-- RIGHT SIDEBAR -->
+          <aside
+            class="right-column"
+            aria-label="Profile and career tools"
+          >
+
+            <!-- PROFILE -->
+            <section class="panel profile-panel">
+              <div class="panel-heading">
+                <h2>Your profile</h2>
+                <span class="small-tag">LOOKING GOOD</span>
+              </div>
+
+              <div class="profile-progress">
+                <span class="avatar large">JS</span>
+
+                <div>
+                  <strong id="profile-name">Jamie Smith</strong>
+                  <p>Computer Science Student</p>
+
+                  <span class="available">
+                    <span class="status-dot"></span>
+                    Open to opportunities
+                  </span>
+                </div>
+              </div>
+
+              <div class="progress-label">
+                <span>Profile completion</span>
+                <strong id="completion">67%</strong>
+              </div>
+
+              <progress
+                id="profile-progress"
+                value="4"
+                max="6"
+                aria-label="Profile completion"
+              >
+                67%
+              </progress>
+
+              <ul class="checklist" id="checklist"></ul>
+
+              <button
+                class="button light full"
+                data-page="settings"
+              >
+                Complete your profile
+                <span data-icon="arrow"></span>
+              </button>
+            </section>
+
+            <!-- RESUME -->
+            <section class="panel">
+              <div class="tool-heading">
+                <span class="tool-icon blue" data-icon="file"></span>
+
+                <div>
+                  <h2>Your resume</h2>
+                  <p>Make a great first impression.</p>
+                </div>
+              </div>
+
+              <label
+                class="upload-zone"
+                id="upload-zone"
+                for="resume"
+              >
+                <span data-icon="upload"></span>
+
+                <strong id="resume-label">
+                  Drop your resume here
+                </strong>
+
+                <small>PDF, DOC, DOCX · Up to 5 MB</small>
+
+                <span class="button light full">Browse files</span>
+
+                <input
+                  id="resume"
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                >
+              </label>
+
+              <p class="privacy-note">
+                Demo: file stays in this browser session.
+              </p>
+            </section>
+
+            <!-- CAREER RESOURCES -->
+            <section class="resource-panel">
+              <span class="eyebrow">MAKE YOUR NEXT MOVE</span>
+
+              <span class="resource-orbit" aria-hidden="true">↗</span>
+
+              <h2>
+                A little preparation.<br>
+                A lot of possibility.
+              </h2>
+
+              <p>
+                Resume tips, interview practice, and tools
+                to help you stand out.
+              </p>
+
+              <button class="text-button" data-page="resources">
+                Explore career resources
+                <span data-icon="arrow"></span>
+              </button>
+            </section>
+
+          </aside>
+
+        </div>
+
+        <footer class="page-footer">
+          <span>© 2026 JobPortal · Powered by Persona</span>
+          <span>Interface prototype · Sample data</span>
+        </footer>
+
+      </main>
+
+    </div>
+
+  </div>
+
+  <!-- JOB DETAILS POPUP -->
+  <dialog id="details-dialog">
+    <div class="dialog-top">
+      <span class="eyebrow">OPPORTUNITY DETAILS</span>
+
+      <button
+        class="icon-button"
+        id="close-dialog"
+        aria-label="Close details"
+      >
+        <span data-icon="close"></span>
+      </button>
+    </div>
+
+    <div id="dialog-content"></div>
+  </dialog>
+
+  <!-- STATUS MESSAGES -->
+  <div
+    id="toast"
+    class="toast"
+    role="status"
+    aria-live="polite"
+  ></div>
+
+</body>
+</html>
