@@ -10,7 +10,7 @@ in a pull request like any other change.
 |---|---|
 | `Matthew Saunders` | `Lead Architect` |
 | `Joshua Pitter` | `Lead Architect` |
-| `<NAME>` | `<ROLE>` |
+| `Earth Patel` | `Interface Designer` |
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
