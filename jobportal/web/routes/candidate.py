@@ -70,6 +70,18 @@ async def save_answers(body: dict):
     return {"ok": True, "answers": answers, "building": building, "status": profile.status_snapshot()}
 
 
+@router.patch("/api/onboarding/answers")
+async def save_some_answers(body: dict):
+    """Save one or a few standard answers ({"answers": {question id: answer}}), as the Home page asks them one at a time.
+    Nothing is required. When this fills the last required question, the answers count as saved and, with a resume
+    imported, the first profile build starts. Returns the answers, the required ids still missing, and the status."""
+    out = onboarding.merge_answers(body.get("answers") or {})
+    building = bool(out.pop("first_complete") and profile.resume())
+    if building:
+        background.spawn(profile.build("standard answers saved"))  # build() reports its own errors as toasts
+    return {**out, "building": building, "status": profile.status_snapshot()}
+
+
 # ---------------------------------------------------------------- the profile
 
 @router.get("/api/profile")

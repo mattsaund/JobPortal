@@ -26,14 +26,14 @@ from jobportal.core import db, settings as settings_mod
 from jobportal.core.textutil import norm_company
 
 OPEN_STAGES = ("ready", "qualified", "packaging")  # passed triage; the package is done or on its way
-NOT_APPLIED = ("new", "saved")
-AWAITING = ("applied", "assessment", "interviewing")  # applied and waiting to hear back
-IN_FLIGHT = AWAITING + ("offer",)
+NOT_APPLIED = ("new", "ready")
+AWAITING = ("applied", "interviewing")  # applied and waiting to hear back
+IN_FLIGHT = AWAITING + ("accepted",)
 ACTIVE_STATUSES = NOT_APPLIED + IN_FLIGHT  # everything except rejected, ghosted, withdrawn and trashed
 # How much each pipeline stage is worth in lead_value(): how close it is to an application. Other stages count 0.5.
 STAGE_WEIGHT = {"ready": 1.0, "qualified": 0.8, "packaging": 0.85, "filtered": 0.35, "closed": 0.05, "error": 0.6}
 # How much each application status is worth. Statuses not listed (rejected, ghosted, withdrawn) are worth nothing.
-STATUS_WEIGHT = {"new": 1.0, "saved": 1.05, "applied": 0.9, "assessment": 1.3, "interviewing": 1.6, "offer": 2.0}
+STATUS_WEIGHT = {"new": 1.0, "ready": 1.05, "applied": 0.9, "interviewing": 1.6, "accepted": 2.0}
 
 
 def _days_until(iso: str | None) -> int | None:
@@ -164,7 +164,7 @@ def _accounts(leads: list[dict]) -> tuple[list[dict], list[dict]]:
                                f"{len(open_roles)} open roles at {company['company']}. One referral could cover them all",
                                ", ".join(f"{lead['title'][:40]} ({lead.get('score')})" for lead in open_roles[:4]),
                                {"label": "See all", "search": company["company"]}))
-        rejected = [lead for lead in company["leads"] if lead["app_status"] in ("rejected", "ghosted")]
+        rejected = [lead for lead in company["leads"] if lead["app_status"] == "rejected"]
         if rejected:
             moves.append(_move(f"reengage:{key}:{best['id']}", "Re-engage", 62, best, f"New opening at {company['company']}, where you applied before",
                                f"Earlier: {rejected[0]['title'][:50]} ({rejected[0]['app_status']}). Now: {best['title'][:60]}",

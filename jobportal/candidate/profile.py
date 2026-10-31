@@ -499,10 +499,13 @@ async def build(reason: str = "manual") -> dict:
 
 === CURRENT PROFILE (may include the candidate's own edits; keep them unless a source contradicts them) ===
 {current}"""
-        documents_seen = db.kv_get("profile.documents_changed_at")  # the documents this build reads (see answers_watcher)
+        # The documents and standard answers this build reads. answers_watcher() rebuilds when either changes after this.
+        documents_seen = db.kv_get("profile.documents_changed_at")
+        answers_seen = db.kv_get("profile.answers_changed_at")
         out = await ai.run(prompt, system=prompts.system("profile", prompts.PROFILE_SYSTEM), schema=prompts.PROFILE_SCHEMA,
                            stage="profile", purpose="profile-build", label="profile: build", timeout=2400)
         db.kv_set("profile.documents_built", documents_seen)
+        db.kv_set("profile.answers_built", answers_seen)
         return _save_result("build", reason, out, read)
 
 
@@ -692,10 +695,11 @@ def overview() -> dict:
 # ---------------------------------------------------------------- background sync of answers
 
 async def answers_watcher(settings_get):
-    """A loop the server starts at launch. Every 15 seconds it checks two things, and acts once the user has paused for
+    """A loop the server starts at launch. Every 15 seconds it checks three things, and acts once the user has paused for
     sync_delay_sec (60 by default):
     - Documents added or removed since the last build: build() runs again, so the profile reads them.
-    - Answers that aren't in the profile yet: update_from_answers() adds them.
+    - Standard answers changed on the Home page since the last build (onboarding.merge_answers): build() runs again.
+    - Answers to follow-up questions that aren't in the profile yet: update_from_answers() adds them.
 
     It does nothing while a search or another profile update is running, when settings profile.auto_sync_answers is off,
     or before the first build. settings_get is the function that returns the current settings (the server passes settings.get)."""
@@ -712,6 +716,11 @@ async def answers_watcher(settings_get):
             if documents_changed and documents_changed != db.kv_get("profile.documents_built"):
                 if time.time() - float(documents_changed) >= delay:
                     await build("documents changed")  # a full build also reads every waiting answer
+                continue
+            answers_changed = db.kv_get("profile.answers_changed_at")
+            if answers_changed and answers_changed != db.kv_get("profile.answers_built"):
+                if time.time() - float(answers_changed) >= delay:
+                    await build("standard answers changed")
                 continue
             pending = unsynced()
             if pending and time.time() - max(float(q.get("answered_ts") or 0) for q in pending) >= delay:

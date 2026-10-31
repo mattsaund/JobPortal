@@ -186,3 +186,38 @@ def test_extra_documents(client, fake_ai, sample_resume):
     newer = upload("newer resume.md", sample_resume.replace("Budget Buddy", "Budget Buddy 2").encode()).json()
     assert client.post(f"/api/profile/documents/{newer['id']}/main").json()["resume"]["filename"] == "newer resume.md"
     assert "old resume.md" in [d["name"] for d in client.get("/api/profile/documents").json()]
+
+
+def test_quick_add_delete_and_tracker_columns(client, fake_ai):
+    assert client.post("/api/leads/manual", json={"title": "Pharmacy Technician"}).status_code == 400  # a company too
+    assert client.post("/api/leads/manual", json={"title": "Chef", "company": "Example Bistro", "app_status": "bogus"}).status_code == 400
+    lead = client.post("/api/leads/manual", json={"title": "Pharmacy Technician", "company": "Example Health",
+                                                  "app_status": "applied"}).json()
+    assert lead["stage"] == "ready" and lead["app_status"] == "applied"  # nothing to build a package from
+    board = client.get("/api/tracker").json()
+    assert list(board["columns"]) == ["ready", "applied", "interviewing", "accepted", "rejected"]
+    assert [x["id"] for x in board["columns"]["applied"]] == [lead["id"]]
+    assert client.get("/api/stats").json()["tracked"] == 1
+    assert client.delete(f"/api/leads/{lead['id']}").json() == {"ok": True}
+    assert client.get(f"/api/leads/{lead['id']}").status_code == 404
+    assert client.delete(f"/api/leads/{lead['id']}").status_code == 404
+
+
+def test_old_statuses_move_to_the_tracker_columns(client):
+    from jobportal.core import db
+    from jobportal.search import packages
+    ids = {old: packages.insert_lead({"fingerprint": f"fp-{old}", "title": "Role", "company": "Example Co", "app_status": old})
+           for old in ("saved", "assessment", "offer", "ghosted", "withdrawn")}
+    db.close()  # the next query reopens the database, which runs the migration
+    assert {old: db.one("SELECT app_status FROM leads WHERE id=?", (i,))["app_status"] for old, i in ids.items()} == {
+        "saved": "ready", "assessment": "interviewing", "offer": "accepted", "ghosted": "rejected", "withdrawn": "rejected"}
+
+
+def test_home_saves_answers_one_at_a_time(client, fake_ai, sample_resume):
+    fake_ai.responses["onboarding-prefill"] = {}
+    client.put("/api/onboarding/resume?filename=resume.md&save_to_library=0", content=sample_resume.encode())
+    out = client.patch("/api/onboarding/answers", json={"answers": {"city": "Columbus"}}).json()
+    assert not out["building"] and out["missing"]
+    fake_ai.responses["profile-build"] = PROFILE_OUT
+    out = client.patch("/api/onboarding/answers", json={"answers": STANDARD_ANSWERS}).json()
+    assert out["complete"] and out["building"] and out["missing"] == []

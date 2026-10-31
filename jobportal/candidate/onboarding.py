@@ -18,6 +18,7 @@ Key ideas:
 """
 import hashlib
 import re
+import time
 from datetime import date
 from pathlib import Path
 
@@ -169,7 +170,12 @@ def _filled(value) -> bool:
 
 def missing_required(answers: dict) -> list[str]:
     """The labels of the required questions left blank."""
-    return [FIELDS[k]["label"] for k in REQUIRED if not _filled(answers.get(k))]
+    return [FIELDS[k]["label"] for k in missing_ids(answers)]
+
+
+def missing_ids(answers: dict) -> list[str]:
+    """The ids of the required questions left blank, in the order the questions are asked."""
+    return [k for k in REQUIRED if not _filled(answers.get(k))]
 
 
 def defaults() -> dict:
@@ -245,8 +251,26 @@ async def import_resume(filename: str, data: bytes | None = None, text: str | No
                                  "imported_at": db.now(), "sha1": hashlib.sha1(raw).hexdigest()})
     found = await prefill(text) if do_prefill else regex_prefill(text)
     db.kv_set("onboarding.prefill", found)
+    filled = _fill_from_resume(found)
     profile_mod.publish_status()
-    return {"resume": profile_mod.resume_info(), "prefill": found}
+    return {"resume": profile_mod.resume_info(), "prefill": found, "filled": filled}
+
+
+def _fill_from_resume(found: dict) -> list[str]:
+    """Until the standard answers are saved once, put what the resume says into every question that's still empty, so the
+    Home page only has to ask what the resume didn't answer. The ids filled this way are kept in "_from_resume", so Home can
+    show them for a quick check. Once the answers are saved, a new resume never changes them. Returns the ids filled."""
+    current = profile_mod.standard_answers()
+    if current.get("_saved_at"):
+        return []
+    empty = {key for key, field in FIELDS.items() if not _filled(current.get(key))}
+    fill = {key: value for key, value in found.items() if key in empty and _filled(value)}
+    if not fill:
+        return []
+    answers = _clean_answers({**_plain(current), **fill})
+    filled = [key for key in fill if _filled(answers.get(key))]
+    db.kv_set("profile.answers", {**answers, "_from_resume": sorted(set(current.get("_from_resume", [])) | set(filled))})
+    return filled
 
 
 # ---------------------------------------------------------------- answers -> facts, Application kit, settings
@@ -430,6 +454,46 @@ def save_answers(raw: dict) -> dict:
     return answers
 
 
+def _plain(answers: dict) -> dict:
+    """The answers without the "_" keys (notes like "_saved_at" that aren't answers)."""
+    return {key: value for key, value in answers.items() if not key.startswith("_")}
+
+
+def merge_answers(partial: dict) -> dict:
+    """Save some of the standard answers: the Home page asks them one at a time, and saves each as it's answered.
+
+    The given answers replace the saved ones for those questions, and every other answer stays. Unlike save_answers(),
+    nothing is required here. The first time every required question has an answer, the answers count as saved (stamped
+    "_saved_at"), exactly like a full save, and "first_complete" comes back True so the route can start the first profile
+    build. After that, each change stamps "profile.answers_changed_at", and profile.answers_watcher() rebuilds the profile
+    once the user pauses, so answering five questions in a row means one rebuild, not five.
+
+    Returns {"answers", "missing" (ids of required questions still empty), "complete", "first_complete"}."""
+    current = profile_mod.standard_answers()
+    given = {key: value for key, value in (partial or {}).items() if key in FIELDS}
+    answers = _clean_answers({**defaults(), **_plain(current), **given})
+    # Answering a question that was filled from the resume confirms it, so it leaves the "check these" list.
+    from_resume = [key for key in current.get("_from_resume", []) if key not in given]
+    missing = missing_ids(answers)
+    was_saved = bool(current.get("_saved_at"))
+    complete = not missing
+    meta = {"_from_resume": from_resume} if from_resume else {}
+    if complete:
+        meta["_saved_at"] = db.now()
+    elif was_saved:
+        meta["_saved_at"] = current["_saved_at"]  # emptying a required answer later doesn't undo setup
+    db.kv_set("profile.answers", {**answers, **meta})
+    if complete or was_saved:
+        apply_to_profile(answers)
+        apply_to_settings(answers, _plain(current))
+        if was_saved:
+            db.kv_set("profile.answers_changed_at", time.time())
+        bus.publish("profile", {"ts": db.now(), "mode": "answers"})
+    profile_mod.publish_status()
+    return {"answers": {**answers, **meta}, "missing": missing, "complete": complete or was_saved,
+            "first_complete": complete and not was_saved}
+
+
 def state() -> dict:
     """Everything the setup page needs (the Profile page's Resume and Standard answers tabs use it too): the questions, the
     saved answers over the defaults, the required ids, the resume's details and the first 4,000 characters of its text,
@@ -437,7 +501,9 @@ def state() -> dict:
     imported = profile_mod.resume()
     answers = profile_mod.standard_answers()
     built = profile_mod.is_built()
-    return {"questions": QUESTIONS, "answers": {**defaults(), **answers}, "required": REQUIRED,
+    merged = {**defaults(), **answers}
+    return {"questions": QUESTIONS, "answers": merged, "required": REQUIRED, "missing": missing_ids(merged),
+            "from_resume": answers.get("_from_resume", []),
             "resume": profile_mod.resume_info(), "resume_preview": (imported or {}).get("text", "")[:4000],
             "prefill": db.kv_get("onboarding.prefill") or {}, "answers_saved": bool(answers.get("_saved_at")), "profile_built": built,
             "complete": bool(imported and answers.get("_saved_at") and built), "status": profile_mod.status_snapshot(),

@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from jobportal import __version__
 from jobportal.core import bus, db, osutil
-from jobportal.core.config import APP_STATUSES, DATA, EFFORTS
+from jobportal.core.config import APP_STATUSES, DATA, EFFORTS, STATUS_LABELS
 from jobportal.search.collectors import COLLECTORS
 
 router = APIRouter()
@@ -39,7 +39,7 @@ async def events(request: Request):
 @router.get("/api/meta")
 def meta():
     """Facts the dashboard needs once at startup: version, system, data folder, choices for menus, and whether PDF export works."""
-    return {"version": __version__, "os": osutil.os_name(), "data_dir": str(DATA), "efforts": EFFORTS, "statuses": APP_STATUSES,
+    return {"version": __version__, "os": osutil.os_name(), "data_dir": str(DATA), "efforts": EFFORTS, "statuses": APP_STATUSES, "status_labels": STATUS_LABELS,
             "collectors": [{"key": key, "label": label} for key, (label, _fn) in COLLECTORS.items()],
             "pdf_ready": bool(osutil.find_pdf_engine())}
 
@@ -51,14 +51,15 @@ def stats():
     week_ago = (date.today() - timedelta(days=7)).isoformat()
     today = date.today().isoformat()
     return {
-        "ready": count("SELECT COUNT(*) n FROM leads WHERE stage='ready' AND app_status IN ('new','saved')"),
+        "ready": count("SELECT COUNT(*) n FROM leads WHERE stage='ready' AND app_status IN ('new','ready')"),
         "queue": count("SELECT COUNT(*) n FROM leads WHERE stage IN ('qualified','packaging','error') AND app_status!='trashed'"),
         "applied": count("SELECT COUNT(*) n FROM leads WHERE applied_at IS NOT NULL"),
         "applied_week": count("SELECT COUNT(*) n FROM leads WHERE applied_at >= ?", (week_ago,)),
-        "interviewing": count("SELECT COUNT(*) n FROM leads WHERE app_status IN ('assessment','interviewing')"),
-        "offers": count("SELECT COUNT(*) n FROM leads WHERE app_status='offer'"),
+        "interviewing": count("SELECT COUNT(*) n FROM leads WHERE app_status='interviewing'"),
+        "accepted": count("SELECT COUNT(*) n FROM leads WHERE app_status='accepted'"),
+        "tracked": count("SELECT COUNT(*) n FROM leads WHERE app_status IN ('ready','applied','interviewing','accepted','rejected')"),
         "followups_due": count("SELECT COUNT(*) n FROM leads WHERE follow_up_at IS NOT NULL AND follow_up_at <= ? "
-                               "AND app_status IN ('applied','assessment','interviewing')", (today,)),
+                               "AND app_status IN ('applied','interviewing')", (today,)),
         "total": count("SELECT COUNT(*) n FROM leads"),
         "state": bus.state,
     }

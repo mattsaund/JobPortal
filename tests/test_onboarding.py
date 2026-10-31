@@ -85,3 +85,33 @@ def test_saving_answers_again_keeps_edits_made_on_other_pages():
     cfg = settings.get()
     assert cfg["dream_companies"] == ["Example Labs", "Example Aerospace"]  # the answers' swap applied, the page's addition kept
     assert cfg["locations"]["allowed"] == ["Texas", "Remote"]  # the location answers changed, so the area follows them
+
+
+def test_resume_fills_empty_answers_until_they_are_saved(fake_ai, sample_resume):
+    fake_ai.responses["onboarding-prefill"] = {"name": "Jordan Rivera", "city": "Columbus", "target_roles": ["Software Engineer"]}
+    out = asyncio.run(onboarding.import_resume("Jordan Rivera.md", data=sample_resume.encode()))
+    assert {"name", "city", "email", "target_roles"} <= set(out["filled"])
+    answers = profile.standard_answers()
+    assert answers["city"] == "Columbus" and "_saved_at" not in answers  # filled in, but setup isn't done
+    assert "city" in onboarding.state()["from_resume"]
+    # Once the answers are saved, a new resume never changes them.
+    onboarding.save_answers({**STANDARD_ANSWERS, "city": "Dayton"})
+    fake_ai.responses["onboarding-prefill"] = {"city": "Cleveland"}
+    assert asyncio.run(onboarding.import_resume("Newer.md", data=sample_resume.encode()))["filled"] == []
+    assert profile.standard_answers()["city"] == "Dayton"
+
+
+def test_answers_saved_one_at_a_time():
+    out = onboarding.merge_answers({"name": "Jordan Rivera", "not_a_question": "ignored"})
+    assert not out["complete"] and not out["first_complete"] and "email" in out["missing"]
+    assert "not_a_question" not in profile.standard_answers()
+    required = {key: STANDARD_ANSWERS[key] for key in onboarding.REQUIRED}
+    out = onboarding.merge_answers(required)
+    assert out["complete"] and out["first_complete"] and out["missing"] == []
+    assert profile.standard_answers()["name"] == "Jordan Rivera"  # the earlier answer stayed
+    assert profile.get("facts")["city"] == STANDARD_ANSWERS["city"]  # a complete save writes the facts
+    # Later changes keep setup done and stamp the change, so the watcher rebuilds the profile once.
+    out = onboarding.merge_answers({"city": ""})
+    assert out["complete"] and not out["first_complete"] and out["missing"] == ["city"]
+    from jobportal.core import db
+    assert db.kv_get("profile.answers_changed_at")

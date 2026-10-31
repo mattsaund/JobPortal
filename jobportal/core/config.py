@@ -41,10 +41,15 @@ PORT = int(os.environ.get("JOBPORTAL_PORT") or 8788)
 # Reasoning effort choices for each AI stage (Settings, "AI: ChatGPT"). Models come from the signed-in ChatGPT account.
 EFFORTS = ["low", "medium", "high"]
 
-# Where the user is with each application (the status menu on a lead's page). "new" is every lead's starting status, and
-# "trashed" moves a lead to the Leads page's Trash tab, out of every other list.
-APP_STATUSES = ["new", "saved", "applied", "assessment", "interviewing", "offer",
-                "rejected", "ghosted", "withdrawn", "trashed"]
+# Where the user is with each application. "new" is every lead's starting status: found, ranked and on the Leads page, but
+# not on the Tracker yet. The five in TRACKER_STATUSES are the Tracker's columns, left to right. "trashed" is a lead the
+# user deleted: it leaves every list, and a later search never adds the same job again.
+APP_STATUSES = ["new", "ready", "applied", "interviewing", "accepted", "rejected", "trashed"]
+TRACKER_STATUSES = ["ready", "applied", "interviewing", "accepted", "rejected"]
+STATUS_LABELS = {"new": "New", "ready": "Ready to apply", "applied": "Application sent", "interviewing": "In interview",
+                 "accepted": "Accepted", "rejected": "Rejected", "trashed": "Deleted"}
+# Statuses from v0.2.0 and earlier, and the status each one became. db._migrate() moves old leads over.
+OLD_STATUSES = {"saved": "ready", "assessment": "interviewing", "offer": "accepted", "ghosted": "rejected", "withdrawn": "rejected"}
 
 # Company job boards searched by default (verified live in October 2026). Each entry has a name and an "ats", the hiring
 # system the board runs on. Greenhouse, Lever and Ashby boards are found by "slug" (the company's id in that system's

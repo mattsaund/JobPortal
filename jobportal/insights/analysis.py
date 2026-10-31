@@ -100,9 +100,9 @@ def _funnel(leads: list[dict]) -> list[dict]:
         {"stage": "Qualified", "n": sum(1 for lead in leads if lead["stage"] in QUALIFIED)},
         {"stage": "Package ready", "n": sum(1 for lead in leads if lead["has_resume"])},
         {"stage": "Applied", "n": sum(1 for lead in leads if lead["applied_at"] is not None)},
-        {"stage": "Responses", "n": sum(statuses[s] for s in ("assessment", "interviewing", "offer", "rejected"))},
-        {"stage": "Interviews", "n": statuses["interviewing"] + statuses["offer"]},
-        {"stage": "Offers", "n": statuses["offer"]},
+        {"stage": "Responses", "n": sum(statuses[s] for s in ("interviewing", "accepted", "rejected"))},
+        {"stage": "Interviews", "n": statuses["interviewing"] + statuses["accepted"]},
+        {"stage": "Accepted", "n": statuses["accepted"]},
     ]
 
 

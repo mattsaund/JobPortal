@@ -22,7 +22,7 @@ import asyncio
 import json
 import re
 import tempfile
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from jobportal.ai import client as ai, prompts
@@ -94,10 +94,14 @@ def saved_manual_lead(url: str = "", text: str = "", title: str = "", company: s
 
 
 def add_manual_lead(url: str = "", text: str = "", title: str = "", company: str = "", location: str = "",
-                    kind: str = "posting") -> int:
-    """Save a job the user pasted (a link, the posting text, or both) as a lead that is ready for a package, and return its
-    id. Title and company may be empty: building the package fills them in. The caller starts build_package. When the same
-    job is already saved, nothing is added and the saved lead's id comes back."""
+                    kind: str = "posting", app_status: str = "new") -> int:
+    """Save a job the user added by hand and return its id. When the same job is already saved, nothing is added and the
+    saved lead's id comes back.
+
+    With a link or the posting text, the lead waits for its package (stage "qualified"; the caller starts build_package),
+    and title and company may be empty because building the package fills them in. A quick add (title and company only)
+    has nothing to build from, so it goes straight to stage "ready" without a package. app_status puts it on a Tracker
+    column ("new" keeps it on the Leads page only)."""
     existing = saved_manual_lead(url, text, title, company, location)
     if existing:
         return existing
@@ -107,9 +111,12 @@ def add_manual_lead(url: str = "", text: str = "", title: str = "", company: str
     found = [{"source": "manual", "label": "Added by you", "url": url}] if url else []
     lead_id = insert_lead({"fingerprint": key, "url_key": url_key(url), "url": url, "title": title, "company": company,
                            "location": location, "kind": kind, "source": "manual", "sources": '["manual"]',
-                           "source_detail": "Added manually", "description": text, "score": 0, "stage": "qualified",
+                           "source_detail": "Added manually", "description": text, "score": 0,
+                           "stage": "qualified" if url or text else "ready", "app_status": app_status,
                            "created_at": now, "updated_at": now, "found": json.dumps(found)})
     db.add_event(lead_id, "created", "Added manually")
+    if app_status == "applied":  # added after applying: start the follow-up clock, like marking it applied on its page
+        db.update_lead(lead_id, applied_at=date.today().isoformat(), follow_up_at=(date.today() + timedelta(days=7)).isoformat())
     return lead_id
 
 

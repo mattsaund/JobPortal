@@ -49,7 +49,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 
-from jobportal.core.config import DATA, DB_PATH
+from jobportal.core.config import DATA, DB_PATH, OLD_STATUSES
 from jobportal.core.genres import classify_industry
 
 _lock = threading.RLock()  # held for every query; re-entrant, so code holding it can call q() and ex()
@@ -167,6 +167,10 @@ def _migrate(c: sqlite3.Connection) -> None:
         for row in c.execute("SELECT id, company, title, description FROM leads").fetchall():
             industry = classify_industry(row["company"], row["title"], row["description"])
             c.execute("UPDATE leads SET industry=? WHERE id=?", (industry, row["id"]))
+    # v0.3.0 cut the application statuses down to the Tracker's five columns (config.OLD_STATUSES). This is a row update,
+    # not a column change, and it finds nothing to change once it has run.
+    for old, new in OLD_STATUSES.items():
+        c.execute("UPDATE leads SET app_status=? WHERE app_status=?", (new, old))
 
 
 def _columns(c: sqlite3.Connection, table: str) -> set[str]:
