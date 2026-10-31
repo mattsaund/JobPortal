@@ -1569,3 +1569,152 @@ dialog .button {
   white-space: nowrap;
   border: 0;
 }
+
+/* Charcoal gray and green theme */
+:root {
+  --bg: #f5f5f5;
+  --panel: #ffffff;
+  --panel2: #eeeeee;
+  --panel3: #e5e5e5;
+
+  --text: #252525;
+  --text2: #454545;
+  --muted: #686868;
+
+  --line: #dddddd;
+  --line2: #c7c7c7;
+
+  --act: #008568;
+  --act-dim: rgba(0, 133, 104, 0.1);
+  --act-line: rgba(0, 133, 104, 0.4);
+
+  --info: #00765d;
+  --info-dim: rgba(0, 118, 93, 0.1);
+  --info-line: rgba(0, 118, 93, 0.35);
+
+  color-scheme: light;
+}
+
+/* Main content */
+html,
+body,
+main {
+  background: #f5f5f5;
+  color: #252525;
+}
+
+/* Sidebar */
+.side,
+.sidebar {
+  background: #252525;
+  color: #eeeeee;
+  border-right: 1px solid #414141;
+
+  /* Keep sidebar components using dark surfaces */
+  --bg: #252525;
+  --panel: #252525;
+  --panel2: #303030;
+  --panel3: #383838;
+
+  --text: #f5f5f5;
+  --text2: #dddddd;
+  --muted: #b5b5b5;
+
+  --line: #414141;
+  --line2: #565656;
+
+  --act: #35e3ad;
+  --act-dim: rgba(53, 227, 173, 0.12);
+  --act-line: rgba(53, 227, 173, 0.4);
+
+  color-scheme: dark;
+}
+
+/* Sidebar links */
+.side .nav a,
+.sidebar .nav a {
+  color: #dddddd;
+}
+
+.side .nav a:hover,
+.sidebar .nav a:hover {
+  background: #333333;
+  color: #ffffff;
+}
+
+.side .nav a.on,
+.side .nav a.active,
+.sidebar .nav a.on,
+.sidebar .nav a.active {
+  background: rgba(53, 227, 173, 0.12);
+  color: #35e3ad;
+  box-shadow: inset 3px 0 0 #35e3ad;
+}
+
+/* Sidebar account panel */
+.side .usage,
+.sidebar .usage {
+  background: #292929;
+  border-color: #454545;
+  color: #b5b5b5;
+}
+
+/* Main cards */
+main .card {
+  background: #ffffff;
+  border-color: #dddddd;
+  color: #252525;
+}
+
+/* Setup steps */
+.stepper .step {
+  background: #f5f5f5;
+  border-color: #cccccc;
+  color: #555555;
+}
+
+.stepper .step.on {
+  background: rgba(0, 133, 104, 0.1);
+  border-color: #008568;
+  color: #006b54;
+}
+
+.stepper .step .num {
+  background: #e3f4ee;
+  color: #006b54;
+}
+
+.stepper .step.on .num {
+  background: #008568;
+  color: #ffffff;
+}
+
+/* Primary actions */
+main .btn.primary {
+  background: #008568;
+  border-color: #008568;
+  color: #ffffff;
+}
+
+main .btn.primary:hover {
+  background: #006e56;
+  border-color: #006e56;
+}
+
+/* Sidebar sign-in action */
+.side .btn.primary,
+.sidebar .btn.primary {
+  background: #35e3ad;
+  border-color: #35e3ad;
+  color: #123329;
+}
+
+/* Clear keyboard focus */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #008568;
+  outline-offset: 3px;
+}
