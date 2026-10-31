@@ -6,9 +6,9 @@ If you're not sure where something goes, put it here and mention it in the group
 | Folder or file | What goes in it |
 |---|---|
 | [school/](school/) | CMSC 495 7304 work: the proposal, reports, presentations, meeting notes and the final submission |
-| [design/logos/](design/logos/) | logo ideas and sketches. The app's logo today is a placeholder in `jobportal/web/static/icon.svg`, and the app icons in `packaging/icons/` are made from it. |
-| [design/colors/](design/colors/) | color scheme ideas, as images or hex codes like `#ff7a1a`. The dashboard's colors are set at the top of `jobportal/web/static/style.css`. |
-| [design/fonts/](design/fonts/) | font ideas and font files. Check that the license lets us ship the font. The dashboard uses JetBrains Mono today, from `jobportal/web/static/fonts/`. |
+| [design/logos/](design/logos/) | logo ideas and sketches. The app uses Becca's JP ring logo: `jobportal/web/static/logo.png` (sidebar), `icon.png` and `favicon.png` next to it, and the app icons in `packaging/icons/` are made from it. |
+| [design/colors/](design/colors/) | color scheme ideas, as images or hex codes like `#00c890`. The dashboard's colors are set at the top of `jobportal/web/static/style.css`. |
+| [design/fonts/](design/fonts/) | font ideas and font files. Check that the license lets us ship the font. The dashboard uses Arial (Helvetica where Arial is missing), so there's no font file to ship. |
 
 The README and CONTRIBUTING guide stay at the top of the repo, because GitHub shows them from there.
 

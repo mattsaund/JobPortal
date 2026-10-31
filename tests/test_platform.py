@@ -124,7 +124,7 @@ def test_appimage_adds_itself_to_the_app_menu(tmp_path, monkeypatch):
     entry = tmp_path / "applications" / "jobportal.desktop"
     assert desktop.add_to_app_menu()
     assert 'Exec="/home/jordan/Apps/JobPortal.AppImage"' in entry.read_text(encoding="utf-8")
-    assert (tmp_path / "icons" / "hicolor" / "scalable" / "apps" / "jobportal.svg").is_file()
+    assert (tmp_path / "icons" / "hicolor" / "512x512" / "apps" / "jobportal.png").is_file()
     assert not desktop.add_to_app_menu()  # already up to date
     monkeypatch.setenv("APPIMAGE", "/home/jordan/Downloads/JobPortal.AppImage")
     assert desktop.add_to_app_menu() and "Downloads" in entry.read_text(encoding="utf-8")  # the entry follows a moved file

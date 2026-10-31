@@ -36,7 +36,7 @@ from jobportal.core.config import CACHE, DATA, HOST, PORT, RESOURCES, STATIC
 os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
 
 BASE = f"http://{HOST}:{PORT}"
-ICON = STATIC / "icon.svg"
+ICON = STATIC / "icon.png"  # the JP ring app icon (512 px), for the Linux window, menu entry and notifications
 
 
 # ---------------------------------------------------------------- the server
@@ -246,7 +246,8 @@ def add_to_app_menu() -> bool:
         return False
     share = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
     entry = share / "applications" / "jobportal.desktop"
-    icon = share / "icons" / "hicolor" / "scalable" / "apps" / "jobportal.svg"
+    icon = share / "icons" / "hicolor" / "512x512" / "apps" / "jobportal.png"
+    old_icon = share / "icons" / "hicolor" / "scalable" / "apps" / "jobportal.svg"  # v0.2.0's icon, which would win over the PNG
     try:
         old = entry.read_text(encoding="utf-8") if entry.is_file() else None
     except (OSError, UnicodeDecodeError):
@@ -261,6 +262,7 @@ def add_to_app_menu() -> bool:
         entry.parent.mkdir(parents=True, exist_ok=True)
         icon.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ICON, icon)
+        old_icon.unlink(missing_ok=True)
         entry.write_text(text, encoding="utf-8")
     except OSError:
         return False
