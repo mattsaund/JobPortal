@@ -206,3 +206,36 @@ onAction("ai-signout", async () => {
   toast("Signed out of ChatGPT", r.note || "JobPortal no longer uses your plan.");
   if (S.route[0] === "settings") renderSettings();
 });
+
+// ---------------------------------------------------------------- theme
+// Save only the display preference. Storage may be unavailable in some windows.
+function setDisplayTheme(theme) {
+  const selected = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = selected;
+
+  const button = $("#theme-toggle");
+  if (button) {
+    const dark = selected === "dark";
+    button.textContent = dark ? "Switch to light theme" : "Switch to dark theme";
+    button.setAttribute("aria-pressed", String(dark));
+  }
+
+  try {
+    localStorage.setItem("jobportal-theme", selected);
+  } catch (_) {}
+}
+
+onAction("theme-toggle", () => {
+  const current = document.documentElement.dataset.theme;
+  setDisplayTheme(current === "dark" ? "light" : "dark");
+});
+
+// The sidebar sits outside main, so its theme button needs a separate listener.
+const displayThemeButton = $("#theme-toggle");
+if (displayThemeButton) {
+  displayThemeButton.addEventListener("click", () => {
+    ACTIONS["theme-toggle"]();
+  });
+}
+
+setDisplayTheme(document.documentElement.dataset.theme);
