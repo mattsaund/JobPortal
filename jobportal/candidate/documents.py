@@ -119,6 +119,12 @@ def for_prompt() -> str:
     return "\n\n".join(parts)
 
 
+def best_resume() -> dict | None:
+    """The document most likely to be the user's main resume: of the ones that look like a resume, the longest (a full
+    resume beats a one-page variant). None when no document looks like a resume."""
+    return max((doc for doc in all_documents() if doc["kind"] == "resume"), key=lambda doc: doc["chars"], default=None)
+
+
 def changed_at() -> float | None:
     """When the documents last changed (seconds since the epoch), or None when they never have."""
     return db.kv_get("profile.documents_changed_at")

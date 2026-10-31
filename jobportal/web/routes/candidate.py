@@ -119,6 +119,22 @@ async def use_document_as_main_resume(doc_id: str):
         raise HTTPException(400, str(e))
 
 
+@router.post("/api/profile/documents/auto-main")
+async def pick_main_resume():
+    """After a drop of several files on Home: when there's no main resume yet, make the best resume among the documents the
+    main one (documents.best_resume). Returns {"resume": the main resume's details or null, "picked": the file name picked,
+    or null when a main resume was already there or no document looks like a resume}."""
+    if profile.resume():
+        return {"resume": profile.resume_info(), "picked": None}
+    best = documents.best_resume()
+    if not best:
+        return {"resume": None, "picked": None}
+    try:
+        return {"resume": await documents.make_main(best["id"]), "picked": best["name"]}
+    except ValueError as e:  # extract.ExtractError: too short to be a resume
+        raise HTTPException(400, str(e))
+
+
 @router.delete("/api/profile/documents/{doc_id}")
 def remove_document(doc_id: str):
     if not documents.remove(doc_id):

@@ -221,3 +221,15 @@ def test_home_saves_answers_one_at_a_time(client, fake_ai, sample_resume):
     fake_ai.responses["profile-build"] = PROFILE_OUT
     out = client.patch("/api/onboarding/answers", json={"answers": STANDARD_ANSWERS}).json()
     assert out["complete"] and out["building"] and out["missing"] == []
+
+
+def test_dropping_several_files_picks_the_main_resume(client, fake_ai, sample_resume):
+    upload = lambda name, data: client.put(f"/api/profile/documents?filename={name}", content=data)  # noqa: E731
+    upload("Food handler certificate.txt", b"Certificate of completion: Food Handler Training. Issued March 2025.")
+    upload("short resume.md", sample_resume[:900].encode())
+    upload("full resume.md", sample_resume.encode())
+    fake_ai.responses["onboarding-prefill"] = {}
+    out = client.post("/api/profile/documents/auto-main").json()
+    assert out["picked"] == "full resume.md" and out["resume"]["filename"] == "full resume.md"
+    assert sorted(d["name"] for d in client.get("/api/profile/documents").json()) == ["Food handler certificate.txt", "short resume.md"]
+    assert client.post("/api/profile/documents/auto-main").json()["picked"] is None  # there's a main resume now
