@@ -1,6 +1,6 @@
 "use strict";
 
-// SAMPLE JOBS
+// Fictional listings, salaries, and scores for the interface demo.
 const jobs = [
   {
     id: 1,
@@ -124,8 +124,6 @@ const jobs = [
   }
 ];
 
-// These listings, salaries, and match scores are fictional demo data.
-
 const state = {
   page: "dashboard",
   filter: "All",
@@ -186,6 +184,40 @@ function renderIcons() {
   });
 }
 
+// THEME SWITCHING
+const themeToggle = $("#theme-toggle");
+
+function applyTheme(theme) {
+  const dark = theme === "dark";
+
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  themeToggle.setAttribute("aria-pressed", String(dark));
+  themeToggle.title = dark
+    ? "Switch to light theme"
+    : "Switch to dark theme";
+
+  themeToggle.querySelector(".theme-label").textContent =
+    dark ? "Light theme" : "Dark theme";
+}
+
+applyTheme(document.documentElement.dataset.theme);
+
+themeToggle.addEventListener("click", () => {
+  const next =
+    document.documentElement.dataset.theme === "dark"
+      ? "light"
+      : "dark";
+
+  applyTheme(next);
+
+  try {
+    localStorage.setItem("jobportal-theme", next);
+  } catch (_) {
+    // Switching still works if browser storage is unavailable.
+  }
+});
+
+// STATUS MESSAGES
 let toastTimer;
 
 function notify(message) {
@@ -193,7 +225,6 @@ function notify(message) {
   $("#toast").classList.add("show");
 
   clearTimeout(toastTimer);
-
   toastTimer = setTimeout(() => {
     $("#toast").classList.remove("show");
   }, 3500);
@@ -203,13 +234,8 @@ function notify(message) {
 function renderProfile() {
   const profile = state.profile;
 
-  const initials = profile.name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase();
+  const initials = profile.name.trim().split(/\s+/)
+    .slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 
   $("#header-name").textContent = profile.name;
   $("#profile-name").textContent = profile.name;
@@ -228,7 +254,7 @@ function renderProfile() {
   ];
 
   const completed = checks.filter(([, done]) => done).length;
-  const percentage = Math.round((completed / checks.length) * 100);
+  const percentage = Math.round(completed / checks.length * 100);
 
   $("#completion").textContent = `${percentage}%`;
   $("#profile-progress").value = completed;
@@ -246,7 +272,7 @@ function renderProfile() {
   `).join("");
 }
 
-// DASHBOARD STATISTICS
+// STATISTICS
 function renderStats() {
   const stats = [
     {
@@ -313,7 +339,6 @@ function jobCard(job) {
     <article class="job-card">
       <div class="job-top">
         ${companyLogo(job)}
-
         <div class="job-title">
           <h3>${job.title}</h3>
           <div class="company-line">
@@ -321,7 +346,6 @@ function jobCard(job) {
             <span class="new-tag">DEMO LISTING</span>
           </div>
         </div>
-
         <div class="match">
           <strong>${job.match}</strong><small>%</small>
           <span>SAMPLE MATCH</span>
@@ -338,9 +362,9 @@ function jobCard(job) {
 
       <div class="job-bottom">
         <div class="tags">
-          ${job.skills.map((skill) => `
-            <span class="tag">${skill}</span>
-          `).join("")}
+          ${job.skills.map((skill) =>
+            `<span class="tag">${skill}</span>`
+          ).join("")}
         </div>
 
         <div class="job-actions">
@@ -350,8 +374,7 @@ function jobCard(job) {
             aria-pressed="${saved}"
             aria-label="${saved ? "Unsave" : "Save"} ${job.title}"
           >
-            ${icon("heart")}
-            ${saved ? "Saved" : "Save"}
+            ${icon("heart")}${saved ? "Saved" : "Save"}
           </button>
 
           <button class="button primary" data-details="${job.id}">
@@ -385,18 +408,11 @@ function filteredJobs() {
       (state.filter === "Remote" ? job.remote : job.type === state.filter);
 
     const searchableText = [
-      job.title,
-      job.company,
-      job.location,
-      job.type,
-      ...job.skills
+      job.title, job.company, job.location, job.type, ...job.skills
     ].join(" ").toLowerCase();
 
-    return (
-      matchesPage &&
-      matchesFilter &&
-      searchableText.includes(state.search.toLowerCase().trim())
-    );
+    return matchesPage && matchesFilter &&
+      searchableText.includes(state.search.toLowerCase().trim());
   });
 }
 
@@ -454,7 +470,6 @@ function renderEvents() {
       <p>A sample event for meeting employers and exploring entry-level roles.</p>
       <span class="tag">DEMO EVENT · DATE TO BE ANNOUNCED</span>
     </article>
-
     <article class="content-card">
       <h3>Resume Review Workshop</h3>
       <p>A sample workshop for reviewing resume structure and highlighting your projects.</p>
@@ -479,31 +494,26 @@ function renderSettings() {
           <input name="name" value="${escapeHTML(profile.name)}"
                  maxlength="80" required>
         </label>
-
         <label>
           Email address
           <input name="email" type="email"
                  value="${escapeHTML(profile.email)}" required>
         </label>
-
         <label>
           Skills
           <input name="skills" value="${escapeHTML(profile.skills)}"
                  placeholder="Python, Java, networking">
         </label>
-
         <label>
           Short bio
           <textarea name="bio" rows="4"
                     maxlength="600">${escapeHTML(profile.bio)}</textarea>
         </label>
-
         <label class="checkbox-row">
           <input name="education" type="checkbox"
                  ${profile.education ? "checked" : ""}>
           I have added my education
         </label>
-
         <button class="button primary" type="submit">
           Save profile ${icon("arrow")}
         </button>
@@ -576,22 +586,17 @@ function render() {
   $("#page-subtitle").textContent = page.subtitle;
   $("#section-title").textContent = page.section;
   $("#section-subtitle").textContent = page.detail;
-
   $("#filters").hidden = !isJobPage;
   $("#view-all").hidden = state.page !== "dashboard";
   $("#results-footer").hidden = !isJobPage;
-
   $("#search").disabled = !isJobPage;
 
   document.querySelectorAll("#navigation .nav-item").forEach((button) => {
     const active = button.dataset.page === state.page;
     button.classList.toggle("active", active);
 
-    if (active) {
-      button.setAttribute("aria-current", "page");
-    } else {
-      button.removeAttribute("aria-current");
-    }
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
   });
 
   document.querySelectorAll("[data-filter]").forEach((button) => {
@@ -645,9 +650,7 @@ function navigate(page) {
   state.page = page;
   state.filter = "All";
   state.search = "";
-
   $("#search").value = "";
-
   render();
   $("#page-title").focus();
 }
@@ -669,19 +672,18 @@ function showDetails(id) {
     </div>
 
     <p>${job.description}</p>
-
     <h3>What you will bring</h3>
     <ul>
-      ${job.requirements.map((requirement) => `
-        <li>${requirement}</li>
-      `).join("")}
+      ${job.requirements.map((requirement) =>
+        `<li>${requirement}</li>`
+      ).join("")}
     </ul>
 
     <h3>Skills</h3>
     <div class="tags">
-      ${job.skills.map((skill) => `
-        <span class="tag">${skill}</span>
-      `).join("")}
+      ${job.skills.map((skill) =>
+        `<span class="tag">${skill}</span>`
+      ).join("")}
     </div>
 
     <p style="margin-top:20px">
@@ -703,14 +705,12 @@ function showDetails(id) {
 // BUTTON EVENTS
 document.addEventListener("click", (event) => {
   const pageButton = event.target.closest("[data-page]");
-
   if (pageButton) {
     navigate(pageButton.dataset.page);
     return;
   }
 
   const filterButton = event.target.closest("[data-filter]");
-
   if (filterButton) {
     state.filter = filterButton.dataset.filter;
     render();
@@ -718,20 +718,15 @@ document.addEventListener("click", (event) => {
   }
 
   const saveButton = event.target.closest("[data-save]");
-
   if (saveButton) {
     const id = Number(saveButton.dataset.save);
     const wasSaved = state.saved.has(id);
 
-    if (wasSaved) {
-      state.saved.delete(id);
-    } else {
-      state.saved.add(id);
-    }
+    if (wasSaved) state.saved.delete(id);
+    else state.saved.add(id);
 
     render();
 
-    // Keep keyboard focus on the saved button when it still exists.
     const replacement = document.querySelector(`[data-save="${id}"]`);
     if (replacement) replacement.focus();
     else $("#page-title").focus();
@@ -741,20 +736,16 @@ document.addEventListener("click", (event) => {
   }
 
   const detailsButton = event.target.closest("[data-details]");
-
   if (detailsButton) {
     showDetails(Number(detailsButton.dataset.details));
     return;
   }
 
   const applyButton = event.target.closest("[data-apply]");
-
   if (applyButton) {
     const id = Number(applyButton.dataset.apply);
-
     state.applications.add(id);
     $("#details-dialog").close();
-
     render();
 
     const replacement = document.querySelector(`[data-details="${id}"]`);
@@ -780,12 +771,10 @@ $("#notifications").addEventListener("click", () => {
 // PROFILE FORM
 document.addEventListener("submit", (event) => {
   if (event.target.id !== "profile-form") return;
-
   event.preventDefault();
 
   const form = event.target;
   const nameInput = form.elements.namedItem("name");
-
   nameInput.setCustomValidity("");
 
   if (!nameInput.value.trim()) {
@@ -806,7 +795,6 @@ document.addEventListener("submit", (event) => {
 
   render();
   $("#profile-form").querySelector('[name="name"]').focus();
-
   notify("Profile updated for this session.");
 });
 
@@ -820,9 +808,7 @@ document.addEventListener("input", (event) => {
 function selectResume(file) {
   if (!file) return;
 
-  const validExtension = /\.(pdf|doc|docx)$/i.test(file.name);
-
-  if (!validExtension) {
+  if (!/\.(pdf|doc|docx)$/i.test(file.name)) {
     $("#resume").value = "";
     notify("Please select a PDF, DOC, or DOCX file.");
     return;
@@ -836,7 +822,6 @@ function selectResume(file) {
 
   state.resume = file;
   $("#resume-label").textContent = file.name;
-
   renderProfile();
   notify("Resume selected for this session. No file was uploaded.");
 }
@@ -889,6 +874,6 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-// START THE INTERFACE
+// START
 renderIcons();
 render();
