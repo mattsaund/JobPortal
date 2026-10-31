@@ -267,7 +267,7 @@ function renderProfile() {
     <li>
       <span class="check-circle ${done ? "done" : ""}"
             aria-hidden="true">${done ? "✓" : ""}</span>
-      ${label}${done ? '<span class="sr-only"> — complete</span>' : ""}
+      ${label}${done ? '<span class="sr-only">, complete</span>' : ""}
     </li>
   `).join("");
 }
@@ -468,12 +468,12 @@ function renderEvents() {
     <article class="content-card">
       <h3>Student Career Fair</h3>
       <p>A sample event for meeting employers and exploring entry-level roles.</p>
-      <span class="tag">DEMO EVENT · DATE TO BE ANNOUNCED</span>
+      <span class="tag">DEMO EVENT: DATE TO BE ANNOUNCED</span>
     </article>
     <article class="content-card">
       <h3>Resume Review Workshop</h3>
       <p>A sample workshop for reviewing resume structure and highlighting your projects.</p>
-      <span class="tag">DEMO EVENT · DATE TO BE ANNOUNCED</span>
+      <span class="tag">DEMO EVENT: DATE TO BE ANNOUNCED</span>
     </article>
   `;
 }
@@ -634,7 +634,7 @@ function render() {
     $("#results-footer").textContent =
       `${results.length} sample ${
         results.length === 1 ? "opportunity" : "opportunities"
-      } · Demo data`;
+      }. Demo data`;
   } else if (state.page === "companies") {
     renderCompanies();
   } else if (state.page === "resources") {
@@ -664,7 +664,7 @@ function showDetails(id) {
 
   $("#dialog-content").innerHTML = `
     <h2>${job.title}</h2>
-    <p>${job.company} · ${job.location}</p>
+    <p>${job.company}, ${job.location}</p>
 
     <div class="job-meta">
       <span>${icon("clock")}${job.type}</span>
