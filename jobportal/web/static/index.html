@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JobPortal</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230c0d10'/><circle cx='12.5' cy='16' r='7.5' fill='%23ff7a1a'/><circle cx='19.5' cy='16' r='7.5' fill='none' stroke='%23a98bff' stroke-width='2.4' stroke-dasharray='3.4 2.4'/></svg>">
+<!-- Restore the display preference before the styles load. -->
+<script>
+  try {
+    const savedTheme = localStorage.getItem("jobportal-theme");
+    document.documentElement.dataset.theme =
+      savedTheme === "dark" ? "dark" : "light";
+  } catch (_) {
+    document.documentElement.dataset.theme = "light";
+  }
+</script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -15,6 +25,16 @@
   <img src="/static/jobportal-brand.png" alt="JobPortal">
 </div>    <nav class="nav" id="nav"></nav>
     <a class="status-pill ok" id="profile-pill" href="#/profile"></a>
+   <button
+  type="button"
+  class="theme-toggle"
+  id="theme-toggle"
+  data-act="theme-toggle"
+  aria-label="Dark theme"
+  aria-pressed="false"
+>
+  Switch to dark theme
+</button>
     <div class="grow"></div>
     <div class="agents" id="agents"></div>
     <div class="usage" id="usage" title="Your ChatGPT sign-in and the AI tokens used this session"></div>
