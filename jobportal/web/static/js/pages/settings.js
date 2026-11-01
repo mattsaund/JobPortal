@@ -25,7 +25,9 @@ const SETTINGS_TABS = [
   ["data", "Data", "folder", (box) => renderDataSettings(box)],
 ];
 
-// Draws the page frame once, then the tab the address names.
+// Draws the page frame once, then the tab the address names. Opening a tab shows "Loading" until its data is in; the
+// same tab drawn again (another part of it, a live update) keeps what's on screen until the new content replaces it, so
+// it doesn't flash or jump to the top. A tab whose data didn't load says so, with Try again.
 async function renderSettings(tab, item) {
   const current = SETTINGS_TABS.find(([key]) => key === tab);
   if (!current) {
@@ -47,8 +49,15 @@ async function renderSettings(tab, item) {
     else link.removeAttribute("aria-current");
   });
   const box = $("#settings-body");
-  box.innerHTML = `<p class="loading">${spinner()} Loading</p>`;
-  await current[3](box, item);
+  if (box.dataset.tab !== tab) {
+    box.dataset.tab = tab;
+    box.innerHTML = `<p class="loading">${spinner()} Loading</p>`;
+  }
+  try {
+    await current[3](box, item);
+  } catch (err) {
+    if (S.route[1] === tab) box.innerHTML = loadError(err);
+  }
 }
 
 // A panel with a heading and a short note under it.
