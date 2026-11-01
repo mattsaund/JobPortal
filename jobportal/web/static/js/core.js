@@ -453,19 +453,32 @@ function closeDialog(dialog = $$("dialog[open]").at(-1)) {
 }
 
 // ---------------------------------------------------------------- pop-up menus
-// A button with data-act="menu" opens the .menu right after it (both inside a .menu-wrap). Picking an item, a click
-// anywhere else or Esc closes it.
-function closeMenus() {
+// A button with data-act="menu" opens the .menu right after it (both inside a .menu-wrap), and the focus moves to its
+// first item. The arrow keys, Home and End move between the items. Picking one, a click anywhere else, or the focus
+// moving out (Tab past the last item) closes it; Esc closes it too and puts the focus back on the button.
+function closeMenus(focusButton = false) {
   $$(".menu:not([hidden])").forEach((menu) => {
+    const button = menu.previousElementSibling, hadFocus = menu.contains(document.activeElement);
     menu.hidden = true;
-    menu.previousElementSibling?.setAttribute("aria-expanded", "false");
+    button?.setAttribute("aria-expanded", "false");
+    if (focusButton && hadFocus) button?.focus();
   });
 }
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".menu-wrap") || e.target.closest(".menu [data-act]")) closeMenus();
 });
+document.addEventListener("focusin", (e) => {
+  if (!e.target.closest?.(".menu-wrap")) closeMenus();
+});
+const MENU_KEYS = ["ArrowDown", "ArrowUp", "Home", "End"];
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeMenus();
+  if (e.key === "Escape") closeMenus(true);
+  const menu = MENU_KEYS.includes(e.key) && e.target.closest?.(".menu:not([hidden])");
+  if (!menu) return;
+  e.preventDefault();  // the arrows would scroll the page
+  const items = $$("[role=menuitem]", menu), at = items.indexOf(e.target);
+  const step = e.key === "ArrowDown" ? 1 : -1;
+  items[e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + step + items.length) % items.length]?.focus();
 });
 
 // ---------------------------------------------------------------- own window
@@ -548,4 +561,5 @@ onAction("menu", (el) => {
   closeMenus();
   menu.hidden = !opening;
   el.setAttribute("aria-expanded", String(opening));
+  if (opening) $("[role=menuitem]", menu)?.focus();
 });
