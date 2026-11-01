@@ -62,6 +62,9 @@ def trim(dest: Path) -> None:
 
 
 def main() -> None:
+    """Read the platform and destination folder from the command line (the usage at the top of this file), then replace
+    the folder with that platform's current Stable Chrome Headless Shell. Network calls: Google's feed and the download.
+    Exits with the usage text when the arguments are wrong."""
     if len(sys.argv) != 3:
         raise SystemExit(__doc__)
     platform, dest = sys.argv[1], Path(sys.argv[2])

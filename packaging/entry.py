@@ -5,22 +5,41 @@ Before handing over to the command line it fixes two things that only differ in 
 no console to print to, and on Linux the bundle's own library path would leak into the programs JobPortal starts.
 
 It must not import jobportal.core.config before cli.main() runs, because config reads JOBPORTAL_HOME once and --data-dir
-sets that variable. So _log_streams finds the cache folder the same way config does, by itself."""
+sets that variable. So _log_streams works out the cache folder by itself, with the same rules as config (and cli.main()
+for --data-dir)."""
 import multiprocessing
 import os
 import sys
+from pathlib import Path
+
+
+def _data_dir() -> str | None:
+    """The data folder from --data-dir on the command line (as "--data-dir PATH" or "--data-dir=PATH"), else from
+    JOBPORTAL_HOME, else None. Read by hand, because argparse only runs later, in cli.main()."""
+    args = sys.argv[1:]
+    for i, arg in enumerate(args):
+        if arg == "--data-dir" and i + 1 < len(args):
+            return args[i + 1]
+        if arg.startswith("--data-dir="):
+            return arg.split("=", 1)[1]
+    return os.environ.get("JOBPORTAL_HOME")
 
 
 def _log_streams() -> None:
     """When the app starts without a console (a windowed app on Windows, for example), sys.stdout and sys.stderr are None
-    and the first print would crash. Send output to app.log in the cache folder instead."""
+    and the first print would crash. Send output to app.log in the cache folder instead: DATA/cache with a data folder
+    given, else the system's cache folder for JobPortal, as config.CACHE has it. When that folder can't be made, output
+    is thrown away rather than keeping the app from starting."""
     if sys.stdout is not None and sys.stderr is not None:
         return
     from platformdirs import user_cache_dir
-    home = os.environ.get("JOBPORTAL_HOME")
-    folder = os.path.join(home, "cache") if home else user_cache_dir("JobPortal", appauthor=False)
-    os.makedirs(folder, exist_ok=True)
-    log = open(os.path.join(folder, "app.log"), "a", encoding="utf-8", buffering=1)  # noqa: SIM115 (lives as long as the app)
+    home = _data_dir()
+    folder = Path(home).expanduser().resolve() / "cache" if home else Path(user_cache_dir("JobPortal", appauthor=False))
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        log = open(folder / "app.log", "a", encoding="utf-8", buffering=1)  # noqa: SIM115 (lives as long as the app)
+    except OSError:
+        log = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
     sys.stdout = sys.stdout or log
     sys.stderr = sys.stderr or log
 
