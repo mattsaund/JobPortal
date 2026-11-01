@@ -20,6 +20,15 @@ def test_dashboard_and_meta(client):
     assert meta["version"] and meta["os"] in ("windows", "macos", "linux") and meta["data_dir"]
 
 
+def test_equity_mining_is_gone(client):
+    from jobportal.core import db
+    db.kv_set("crm.snoozed", {"move:1": "2099-01-01"})  # what an older version saved
+    db.close()  # reopening runs the migration, which drops the old value
+    assert db.kv_get("crm.snoozed") is None
+    assert client.get("/api/crm").status_code == 404 and client.post("/api/crm/snooze", json={"key": "x"}).status_code == 404
+    assert client.get("/api/dreams").status_code == 200  # the Dream list stays
+
+
 def test_refuses_foreign_host_headers(client):
     assert client.get("/api/meta", headers={"host": "evil.example:8788"}).status_code == 403
     assert client.get("/api/meta", headers={"host": "localhost:8788"}).status_code == 200

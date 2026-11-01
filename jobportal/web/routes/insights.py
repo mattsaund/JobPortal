@@ -1,9 +1,9 @@
-"""The Analysis, Equity mining and Dream list pages."""
+"""The Analysis and Dream list pages."""
 from fastapi import APIRouter
 
 from jobportal.candidate import profile
 from jobportal.core import background, db, settings
-from jobportal.insights import analysis, crm
+from jobportal.insights import analysis
 from jobportal.search import pipeline, plan
 
 router = APIRouter()
@@ -18,18 +18,6 @@ def get_analysis():
 async def run_analysis():
     """Ask the AI for a fresh fit-and-demand assessment, in the background (it toasts its own result or error)."""
     background.spawn(analysis.run_ai("manual"))
-    return {"ok": True}
-
-
-@router.get("/api/crm")
-def equity_book():
-    """The Equity mining page: the ranked worklist of next moves and the companies rolled up as accounts."""
-    return crm.book()
-
-
-@router.post("/api/crm/snooze")
-def snooze_move(body: dict):
-    crm.snooze(body["key"], int(body.get("days", 3)))
     return {"ok": True}
 
 
