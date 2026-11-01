@@ -379,13 +379,14 @@ function renderContactsTab(box, l, pkg) {
   });
 }
 
-// Interview prep and the company brief: Markdown documents with a preview, downloads and "Revise with AI".
+// Interview prep and the company brief: Markdown documents with a preview, downloads and "Revise with AI". For each tab:
+// key (where the package keeps it), name (what the empty tab and the AI call it) and stem (the download's file name).
 const NOTES_DOCS = {
-  intel: { key: "company_brief_md", name: "company brief", stem: "company_intel", doc: "company brief" },
-  prep: { key: "interview_prep_md", name: "interview prep", stem: "interview_prep", doc: "interview prep" },
+  intel: { key: "company_brief_md", name: "company brief", stem: "company_intel" },
+  prep: { key: "interview_prep_md", name: "interview prep", stem: "interview_prep" },
 };
 function renderNotesTab(box, l, pkg, tab) {
-  const { key, name, stem, doc } = NOTES_DOCS[tab];
+  const { key, name, stem } = NOTES_DOCS[tab];
   if (!pkg[key]) {
     box.innerHTML = noneYet(name);
     return;
@@ -394,7 +395,7 @@ function renderNotesTab(box, l, pkg, tab) {
     text: pkg[key],
     leadId: l.id,
     stem,
-    doc,
+    doc: name,
     save: async (value) => {
       await api(`/api/leads/${l.id}`, { method: "PATCH", body: { package: { [key]: value } } });
       pkg[key] = value;
@@ -712,12 +713,13 @@ function showFit(frame, doc, pages, tag) {
     // The tallest the preview may be: PAGE_H per page plus a few pixels of slack. When the page has
     // box-decoration-break: clone (render.py sets it), every printed page repeats the top and bottom margins, but the
     // preview is one tall sheet that has them once. So a two-page resume loses one set of margins at the page break.
+    const tallest = (PAGE_H + 4) * pages;
     const limit = () => {
-      if (!page) return 1060 * pages;
+      if (!page) return tallest;
       const css = getComputedStyle(page);  // this window's: the sandboxed preview runs no script of its own
       const repeats = (css.boxDecorationBreak || css.webkitBoxDecorationBreak) === "clone";
       const margins = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
-      return 1060 * pages - (repeats ? (pages - 1) * margins : 0);
+      return tallest - (repeats ? (pages - 1) * margins : 0);
     };
     let fit = 1;
     if (doc === "resume" && page) {
@@ -740,7 +742,6 @@ function showFit(frame, doc, pages, tag) {
 }
 
 // ---------------------------------------------------------------- the resume's strategy and check
-// Names for the resume strategies (archetypes) the AI picks. A strategy not listed here shows its key, made readable.
 // The kinds of resume the AI writes (resume_strategy.archetype, from the package prompt in ai/prompts.py). A key that isn't
 // here, such as one from a lead tailored by an older version, shows as its words with the first letter capitalized.
 const ARCHETYPE_LABEL = { large_employer: "Large employer", small_business: "Small business or startup", public_sector: "Public sector",
