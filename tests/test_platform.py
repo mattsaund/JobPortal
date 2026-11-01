@@ -1,3 +1,5 @@
+"""The cross-platform pieces: the command line and its server modes, the app window and its bridge, the Linux app menu
+entry and the PDF engine lookup. (The notification commands are tested in test_core.py.)"""
 import os
 import subprocess
 import sys
@@ -116,13 +118,15 @@ class FakeThread:
         self.server = server
 
     def is_alive(self):
+        """Alive until the server is told to exit."""
         return not self.server.should_exit
 
     def join(self, timeout=None):
-        pass
+        """Nothing to wait for."""
 
 
 class FakeServer:
+    """Stands in for the uvicorn server: only its should_exit flag matters to the window code."""
     should_exit = False
 
 

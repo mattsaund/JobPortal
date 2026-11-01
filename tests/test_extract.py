@@ -1,3 +1,5 @@
+"""Reading imported files (documents/extract.py): PDF, DOCX, ODT, RTF, plain text in several encodings, old formats
+through LibreOffice, and the files it must refuse. The test files are built by hand, so no tools are needed."""
 import io
 import zipfile
 

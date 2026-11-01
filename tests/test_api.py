@@ -1,3 +1,5 @@
+"""The HTTP API through FastAPI's test client: setup, documents, downloads, leads, the Tracker, the Dream list, sources,
+the security checks and Quit. No network: the AI is the fake_ai fixture."""
 import copy
 import json
 import time
@@ -9,6 +11,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client():
+    """A test client for the dashboard's server, with its startup and shutdown run around the test."""
     from jobportal.web.server import app
     with TestClient(app) as c:
         yield c

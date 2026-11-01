@@ -1,3 +1,5 @@
+"""Setup (candidate/onboarding.py): the standard questions, importing a resume and pre-filling the answers from it,
+saving the answers in full or one at a time, and what the answers change in the profile and the settings."""
 import asyncio
 import re
 

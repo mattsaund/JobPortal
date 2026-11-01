@@ -1,3 +1,5 @@
+"""The profile (candidate/profile.py) and its inputs: building and updating it, the questions asked along the way,
+the background sync of documents and answers, the extra documents, and that only the user's own material feeds it."""
 import asyncio
 import copy
 import time

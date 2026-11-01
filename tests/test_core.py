@@ -190,6 +190,7 @@ CREATE TABLE ai_calls (id INTEGER PRIMARY KEY, ts TEXT, run_id INTEGER, lead_id 
 
 
 def columns(table: str) -> set[str]:
+    """The column names of a database table."""
     return {r["name"] for r in db.q(f"PRAGMA table_info({table})")}
 
 

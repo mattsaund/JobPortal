@@ -1,3 +1,5 @@
+"""Rendering (documents/render.py) and the resume checks (documents/resumecheck.py): HTML, Word and PDF files, links,
+the fit loop, and the rules a resume is scored by. The PDF tests need Chrome, Edge or Chromium and skip without one."""
 import asyncio
 from datetime import date
 

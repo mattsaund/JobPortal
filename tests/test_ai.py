@@ -13,11 +13,13 @@ from jobportal.core import bus, db
 
 
 def jwt(claims: dict) -> str:
+    """An unsigned JWT holding these claims, as the fake token endpoint hands out."""
     enc = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()  # noqa: E731
     return f"{enc({'alg': 'none'})}.{enc(claims)}.sig"
 
 
 def query(url: str) -> dict:
+    """The query parameters of a URL as a plain dict (first value of each)."""
     return {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
 
 
@@ -159,14 +161,17 @@ def test_not_signed_in_is_a_clear_error():
 # ---------------------------------------------------------------- the Responses loop
 
 def sse(*events) -> bytes:
+    """Events as the body of a streamed Responses API reply: an "event:" line and a "data:" line for each."""
     return "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
 
 
 def done(tokens=50):
+    """The event that ends a streamed reply, with its token count."""
     return {"type": "response.completed", "response": {"usage": {"total_tokens": tokens}, "output": []}}
 
 
 def item(i):
+    """The event that hands over one finished output item."""
     return {"type": "response.output_item.done", "item": i}
 
 
@@ -197,6 +202,7 @@ SCHEMA = {"type": "object", "properties": {"score": {"type": "integer"}}, "requi
 
 
 def call(name, args, call_id="c1"):
+    """The event for the model calling one of JobPortal's tools with these arguments."""
     return item({"type": "function_call", "id": "fc_1", "call_id": call_id, "name": name, "arguments": json.dumps(args), "namespace": "jobportal"})
 
 

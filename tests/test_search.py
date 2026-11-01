@@ -41,6 +41,7 @@ def verdict(cfg: dict, j: RawJob) -> str:
 
 
 def skills(*entries: tuple[str, str]) -> None:
+    """Save a skills inventory of (skill, level) pairs to the profile."""
     profile.save("skills_inventory", [{"skill": s, "category": "Languages", "level": level, "evidence": []} for s, level in entries])
 
 
@@ -429,6 +430,7 @@ def fake_source(monkeypatch, *jobs: RawJob) -> None:
 
 
 async def run_to_the_end(mode: str) -> int:
+    """Start a search run in this mode and wait for it to finish. Returns its run id."""
     run_id = await pipeline.start(mode)
     await pipeline._current.task
     return run_id
