@@ -96,7 +96,8 @@ def _kind(filename: str, text: str) -> str:
 # ---------------------------------------------------------------- the rule-based reading
 
 _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
-_MONTH = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?"
+# A month name or its abbreviation. It must start a word, or the end of "Grammar 2025" would read as March 2025.
+_MONTH = r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?"
 # A date as certificates write them: "March 15, 2025", "15 March 2025", "Mar 2025", "03/15/2025", "03/2025", "2025-03-15",
 # "Fall 2025" or a lone year.
 _DATE = (rf"(?:{_MONTH}\s+(?:\d{{1,2}}(?:st|nd|rd|th)?,?\s+)?\d{{4}}|\d{{1,2}}\s+{_MONTH},?\s+\d{{4}}|\d{{1,2}}[/.-]\d{{1,2}}[/.-]\d{{4}}"
@@ -438,7 +439,8 @@ def remove(doc_id: str) -> bool:
         doc = next((d for d in docs if d["id"] == doc_id), None)
         if not doc:
             return False
-        (DOCS_DIR / doc.get("stored_as", "")).unlink(missing_ok=True)
+        if doc.get("stored_as"):  # without a name, DOCS_DIR / "" would be the documents folder itself
+            (DOCS_DIR / doc["stored_as"]).unlink(missing_ok=True)
         _save([d for d in docs if d["id"] != doc_id])
         return True
 

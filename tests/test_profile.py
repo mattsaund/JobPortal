@@ -179,6 +179,21 @@ def test_document_kinds_cover_british_spelling_and_resumes():
     assert documents.recipients("This certifies that\nJordan Rivera\nhas completed CPR") == ["Jordan Rivera"]
 
 
+def test_a_word_that_ends_like_a_month_is_not_a_date():
+    from jobportal.candidate import documents
+    text = "Certificate of Completion\nAdvanced Grammar 2025\nExample Learning Center"
+    assert documents._rule_dates(text, "certificate") == ("2025", "")  # not March 2025
+    assert documents._rule_dates("Issued: Mar. 3, 2025\nExpires Dec 2027", "certificate") == ("2025-03", "2027-12")
+
+
+def test_a_document_without_a_stored_copy_can_still_be_removed():
+    from jobportal.candidate import documents
+    documents.DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    db.kv_set("profile.documents", [{"id": "d1", "name": "CPR card.txt", "kind": "certificate", "text": "CPR certified, 2025",
+                                     "chars": 19, "added_at": db.now(), "sha1": "x", "parsed": {"kind": "certificate"}}])
+    assert documents.remove("d1") and documents.all_documents() == [] and documents.DOCS_DIR.is_dir()
+
+
 def test_answers_used_in_a_resume_are_marked_applied():
     profile.ask("Have you used ROS?", "The posting asks for it.", source="Example Robotics application", lead_id=3)
     profile.answer_question("Have you used ROS?", "Yes, in a class project.")
