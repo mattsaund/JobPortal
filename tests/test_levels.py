@@ -38,8 +38,28 @@ def test_mid_and_senior_levels_drop_the_title_requirement():
 
 def test_target_roles_keep_their_own_words():
     assert passes("Staff Accountant", ["entry"], roles=["Staff Accountant"])
-    assert not passes("Staff Accountant", ["entry"])
+    assert not passes("Staff Accountant", ["entry"])  # no level word, and not one of the user's roles
     assert passes("Associate Product Manager", ["entry"], roles=["Associate Product Manager"])
+    assert passes("Lead Teacher", ["entry"], roles=["Lead Teacher"]) and not passes("Lead Teacher", ["entry"])
+
+
+def test_levels_for_every_career():
+    early = ["internship", "apprenticeship", "entry"]
+    for title in ("Electrician Apprentice", "Pharmacy Technician Trainee", "Accountant I", "Medical Assistant", "Teacher Aide",
+                  "Staff Nurse, New Grad", "Line Cook - Team Member"):
+        assert passes(title, early), title
+    for title in ("Journeyman Electrician", "Accountant II", "Shift Supervisor", "Construction Foreman", "Staff Software Engineer",
+                  "Director of Nursing", "Master Electrician"):
+        assert not passes(title, early), title
+    assert passes("RN Case Manager", early, roles=["RN"]) and passes("Assistant Manager", early, roles=["Assistant Manager"])
+    assert passes("Teacher - Grade 3", ["mid"]) and not passes("Apprentice Plumber", ["mid", "senior"])
+    assert passes("Store Manager", ["mid"]) and not passes("Vice President of Sales", ["mid"])
+
+
+def test_nothing_is_assumed_before_the_user_picks_levels():
+    assert levels.clean(["bogus"]) == levels.DEFAULT_LEVELS == levels.LEVEL_IDS
+    assert levels.title_filters(levels.DEFAULT_LEVELS) == ([], [])  # every title passes: no student or tech assumption
+    assert not levels.early_career(levels.DEFAULT_LEVELS)
 
 
 def test_filters_have_no_repeats():
@@ -51,10 +71,12 @@ def test_filters_have_no_repeats():
 def test_board_filters_and_terms():
     assert levels.linkedin_experience(["internship", "entry"]) == "1,2"
     assert levels.linkedin_experience(["mid"]) == "3,4"
+    assert levels.linkedin_experience(["apprenticeship"]) == "1,2"  # LinkedIn has no apprenticeship level
     assert levels.muse_levels(["senior"]) == ["Senior Level"]
+    assert levels.muse_levels(["apprenticeship", "entry"]) == ["Internship", "Entry Level"]
     assert "intern" in levels.ats_search_terms(["internship"])
+    assert levels.ats_search_terms(["apprenticeship"], ["electrician apprentice"]) == ["apprentice", "trainee", "electrician apprentice"]
     assert levels.ats_search_terms(["mid"], ["data engineer", "analytics engineer"])[:2] == ["data engineer", "analytics engineer"]
-    assert levels.clean(["bogus"]) == levels.DEFAULT_LEVELS
 
 
 def test_ats_terms_are_capped():
@@ -69,3 +91,6 @@ def test_posting_regex():
     rx = levels.posting_regex(["senior"], ["Site Reliability Engineer"])
     assert rx.search("Hiring a reliability engineer for our platform team")
     assert not rx.search("Looking for a pastry chef")
+    assert levels.posting_regex(["mid"], ["Pastry Chef"]).search("Looking for a pastry chef")
+    assert levels.posting_regex(["mid"]).search("Now hiring a pastry chef")  # no roles yet: job words from every field
+    assert levels.posting_regex(["apprenticeship"]).search("Our union is taking apprentices this spring")

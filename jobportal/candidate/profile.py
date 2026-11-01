@@ -197,6 +197,8 @@ def digest() -> str:
         f"JOB TYPES: {label_of('job_types', answers.get('job_types') or []) or 'any'}. "
         f"WORK ARRANGEMENT: {label_of('work_modes', answers.get('work_modes') or []) or 'any'}",
         f"SKILLS: {_field(facts, 'skills')}",
+        # Many jobs need a license or certification on day one (RN, CDL, a teaching license), so triage needs to see them.
+        f"LICENSES AND CERTIFICATIONS: {'; '.join(answers.get('licenses') or []) or 'none listed in the standard answers'}",
         f"PROJECTS AND ROLES: {names}",
         f"ROLE FAMILIES TO PURSUE: {'; '.join(plan.get('role_families', []))}",
     ]
@@ -447,7 +449,7 @@ def _prompt_head() -> str:
 === RESUME ({imported.get('filename', 'none')}, imported {str(imported.get('imported_at', ''))[:10]}) ===
 {(imported.get('text') or '(no resume imported)')[:60000]}
 
-=== EXTRA DOCUMENTS (other resumes, certificates, cover letters, awards, transcripts) ===
+=== EXTRA DOCUMENTS (other resumes, certificates, licenses, cover letters, awards, transcripts; each with a DETAILS line read from it) ===
 {documents.for_prompt()}
 
 === STANDARD ANSWERS (saved {str(answers.get('_saved_at', ''))[:10]}) ===

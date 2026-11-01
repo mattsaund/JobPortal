@@ -26,9 +26,10 @@ WORKDAY_MAX = 100  # postings read per search term on one Workday board
 
 
 def search_terms(cfg: dict) -> list[str]:
-    """Search words for boards that need one (Workday, iCIMS): level words such as "intern" for early-career users, the
-    search queries for everyone else, and "engineer" and "analyst" when neither gives anything."""
-    return ats_search_terms(plan.levels(cfg), plan.all_queries(cfg)) or ["engineer", "analyst"]
+    """Search words for boards that need one (Workday, iCIMS): level words such as "intern" or "apprentice" for
+    early-career users, then the search queries. When neither gives anything, one empty search reads the board's newest
+    openings of every kind, so no field is assumed."""
+    return ats_search_terms(plan.levels(cfg), plan.all_queries(cfg)) or [""]
 
 
 def _wd_parts(url: str) -> tuple[str, str, str]:

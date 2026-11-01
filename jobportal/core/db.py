@@ -16,8 +16,8 @@ Key ideas:
 
 The tables (columns not listed are plain and named for what they hold):
   kv               one JSON value per key: "settings" (settings.py), "profile.<section>", "profile.answers",
-                   "profile.questions" and the other profile keys (candidate/), "analysis.latest" and "analysis.history"
-                   (insights/analysis.py), "crm.snoozed" (insights/crm.py), "hunt.rotation" (where the AI missions rotation resumes)
+                   "profile.questions", "profile.documents" and the other profile keys (candidate/), "analysis.latest" and
+                   "analysis.history" (insights/analysis.py), "hunt.rotation" (where the AI missions rotation resumes)
   profile_history  the previous value of a profile section, saved before every change (candidate/profile.py)
   leads            one row per job (or program, event or company lead) JobPortal found. Important columns:
                      fingerprint       company + title + state, hashed (textutil.fingerprint): one row per job
@@ -50,7 +50,7 @@ import threading
 from datetime import datetime, timezone
 
 from jobportal.core.config import DATA, DB_PATH, OLD_STATUSES
-from jobportal.core.genres import classify_industry
+from jobportal.core.genres import OLD_INDUSTRIES, classify_industry
 
 _lock = threading.RLock()  # held for every query; re-entrant, so code holding it can call q() and ex()
 _conn: sqlite3.Connection | None = None  # the shared connection, opened by conn()
@@ -171,6 +171,12 @@ def _migrate(c: sqlite3.Connection) -> None:
     # not a column change, and it finds nothing to change once it has run.
     for old, new in OLD_STATUSES.items():
         c.execute("UPDATE leads SET app_status=? WHERE app_status=?", (new, old))
+    # v0.3.0 also replaced the tech-heavy industry list with one for every field (genres.OLD_INDUSTRIES says what each old
+    # name became). Another row update that finds nothing to change once it has run.
+    for old, new in OLD_INDUSTRIES.items():
+        c.execute("UPDATE leads SET industry=? WHERE industry=?", (new, old))
+    # v0.3.0 dropped the Equity mining page. Its only saved value was the list of snoozed moves, which nothing reads now.
+    c.execute("DELETE FROM kv WHERE key='crm.snoozed'")
 
 
 def _columns(c: sqlite3.Connection, table: str) -> set[str]:

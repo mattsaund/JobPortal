@@ -112,6 +112,55 @@ def test_the_profile_reads_documents_but_never_saved_resumes(fake_ai, sample_res
     assert db.kv_get("profile.documents_built") == documents.changed_at()
 
 
+def test_document_details_reach_the_profile_build(fake_ai, sample_resume):
+    from jobportal.candidate import documents
+    _setup(fake_ai, sample_resume)
+    documents.add("RN license.txt", b"Ohio Board of Nursing\nThis certifies that\nJordan Rivera\nis licensed as a Registered Nurse\n"
+                                    b"Issued: 06/15/2024 Expires: 08/31/2026")
+    asyncio.run(profile.build("test"))
+    call = next(c for c in fake_ai.calls if c["purpose"] == "profile-build")
+    assert ("DETAILS (a rough reading by patterns; the text wins): kind: license; title: Registered Nurse License; "
+            "issuer: Ohio Board of Nursing; issued: 2024-06; expires: 2026-08") in call["prompt"]
+    assert "## Licenses & Certifications" in call["system"] and "## Awards & Honors" in call["system"]  # where they land
+
+
+def test_documents_from_before_readings_existed_are_read_lazily():
+    from jobportal.candidate import documents
+    db.kv_set("profile.answers", {"name": "Jordan Rivera"})
+    db.kv_set("profile.documents", [{"id": "old1", "name": "Jordan Rivera.txt", "kind": "award", "text": "Jordan Rivera\n"
+                                     "Example State University\nDean's List, Spring 2025", "chars": 60, "added_at": db.now(),
+                                     "sha1": "x", "stored_as": "old1 Jordan Rivera.txt"}])
+    (entry,) = documents.listing()
+    assert entry["parsed_by"] == "rules" and entry["parsing"] is False
+    assert entry["parsed"]["title"] == "Dean's List" and entry["parsed"]["issuer"] == "Example State University"
+    assert "Jordan" not in entry["parsed"]["title"] and entry["parsed"]["issued"] == "2025"  # never the user's own name
+    assert db.kv_get("profile.documents")[0]["parsed"] == entry["parsed"]  # saved, so it's read only once
+    assert db.kv_get("profile.documents_changed_at") is None  # nothing about the document changed: no rebuild
+
+
+def test_parse_pending_reads_what_only_the_rules_read(fake_ai, monkeypatch):
+    from jobportal.candidate import documents
+    documents.add("cpr.txt", b"American Heart Association\nBLS Provider\nIssue Date 2/2025 Renew By 2/2027")
+    documents.add("food.txt", b"Certificate of completion: Food Handler Training. Issued March 2025.")
+    assert asyncio.run(documents.parse_pending()) == 0  # nobody is signed in
+    monkeypatch.setattr(documents, "_signed_in", lambda: True)
+    assert asyncio.run(documents.parse_pending()) == 0  # the fake AI has no answer: the first failure ends the round
+    assert all(d["parsed_by"] == "rules" for d in documents.listing())
+    fake_ai.responses["document-parse"] = {"kind": "certificate", "title": "BLS Provider", "issuer": "American Heart Association",
+                                           "issued": "2025-02", "expires": "2027-02", "skills": ["CPR"], "summary": "A BLS card."}
+    assert asyncio.run(documents.parse_pending()) == 2 and all(d["parsed_by"] == "ai" for d in documents.listing())
+    assert asyncio.run(documents.parse_pending()) == 0  # nothing left to read
+
+
+def test_document_kinds_cover_british_spelling_and_resumes():
+    from jobportal.candidate import documents
+    british = "licen" + "ce"  # spelled out in pieces: the repo's own text sticks to American spelling
+    assert documents._kind("permit.txt", f"Driving {british} issued 2024 by the state") == "license"
+    resume_text = "Jordan Rivera\n## Experience\nCashier\n## Education\nExample High School\nFood handler certification"
+    assert documents._kind("Jordan Rivera.md", resume_text) == "resume"  # a resume that mentions a certificate is a resume
+    assert documents.recipients("This certifies that\nJordan Rivera\nhas completed CPR") == ["Jordan Rivera"]
+
+
 def test_answers_used_in_a_resume_are_marked_applied():
     profile.ask("Have you used ROS?", "The posting asks for it.", source="Example Robotics application", lead_id=3)
     profile.answer_question("Have you used ROS?", "Yes, in a class project.")

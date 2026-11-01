@@ -13,15 +13,23 @@ import re
 from jobportal.core.textutil import coverage
 from jobportal.documents.render import parse_resume
 
-# Section names an ATS maps to its own fields without guessing (compared in lowercase).
+# Section names an ATS maps to its own fields without guessing (compared in lowercase). They cover every field: clinical
+# and teaching experience, licenses, exhibitions and performances count as much as technical projects.
 STANDARD_HEADINGS = {
-    "summary", "professional summary", "education", "experience", "work experience", "professional experience",
-    "technical experience", "relevant experience", "projects", "technical projects", "research & technical projects",
-    "research and technical projects", "research experience", "skills", "technical skills", "certifications",
-    "certifications & training", "licenses & certifications", "relevant coursework", "coursework", "leadership",
-    "leadership & activities", "activities", "extracurricular and volunteer work", "volunteer work", "volunteer experience",
-    "awards", "honors & awards", "awards & honors", "publications", "clearance", "additional information",
+    "summary", "professional summary", "summary of qualifications", "qualifications", "core competencies", "education",
+    "experience", "work experience", "professional experience", "relevant experience", "technical experience",
+    "clinical experience", "clinical rotations", "teaching experience", "student teaching", "military experience",
+    "projects", "selected projects", "technical projects", "research & technical projects", "research and technical projects",
+    "research experience", "skills", "technical skills", "key skills", "skills & certifications", "skills and certifications",
+    "certifications", "certifications & training", "licenses & certifications", "licenses and certifications",
+    "certifications & licenses", "certifications and licenses", "licenses", "training", "professional development",
+    "relevant coursework", "coursework", "leadership", "leadership & activities", "activities",
+    "extracurricular and volunteer work", "volunteer work", "volunteer experience", "awards", "honors", "honors & awards",
+    "awards & honors", "publications", "exhibitions", "performances", "portfolio", "selected work", "languages",
+    "professional affiliations", "affiliations", "memberships", "clearance", "additional information",
 }
+# Headings that count as the Skills section an ATS looks for.
+SKILLS_HEADINGS = ("skills", "technical skills", "key skills", "core competencies", "skills & certifications", "skills and certifications")
 
 _PHONE_RE = re.compile(r"(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}")
 _EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27bf]")  # emoji, plus the older symbol and dingbat blocks
@@ -45,7 +53,7 @@ def _listed_skills(resume: dict) -> list[str]:
     splits at commas, semicolons and middle dots."""
     skills = []
     for section in resume["sections"]:
-        if "skill" not in section["title"].lower():
+        if "skill" not in section["title"].lower() and "competenc" not in section["title"].lower():
             continue
         for entry in section["entries"]:
             for _, text in entry:
@@ -108,7 +116,7 @@ def check(md: str, *, inventory: list[dict] | None = None, keywords: list[str] |
     for heading in headings:
         if heading.lower().strip() not in STANDARD_HEADINGS:
             add("warn", f"Non-standard heading “{heading}”; an ATS may not map it. Use a standard name.")
-    for need, names in (("Education", ("education",)), ("Skills", ("skills", "technical skills"))):
+    for need, names in (("Education", ("education",)), ("Skills", SKILLS_HEADINGS)):
         if not any(heading.lower() in names for heading in headings):
             add("error", f"Missing a {need} section.")
     if not any(re.search(r"experience|projects", heading, re.I) for heading in headings):

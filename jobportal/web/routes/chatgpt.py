@@ -7,7 +7,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from jobportal.ai import client as ai, signin
-from jobportal.core import bus
+from jobportal.candidate import documents
+from jobportal.core import background, bus
 from jobportal.core.config import PORT
 from jobportal.web.common import ai_error
 
@@ -53,6 +54,7 @@ async def ai_callback(request: Request):
         status = await signin.finish(dict(request.query_params))
         who = f" ({status['email']})" if status.get("email") else ""
         title, body = "You're signed in", f"JobPortal can now use your ChatGPT plan{who}. You can close this tab and go back to JobPortal."
+        background.spawn(documents.parse_pending())  # documents added while signed out get their AI reading now
     except signin.AuthError as e:
         message = str(e)
         # Most of signin's messages already say what to do next; add it only to the ones that don't.

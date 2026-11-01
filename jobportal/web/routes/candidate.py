@@ -94,18 +94,33 @@ def get_profile():
 
 @router.get("/api/profile/documents")
 def list_documents():
-    """The extra documents: other resumes, certificates, cover letters, awards and transcripts (without their text)."""
+    """The extra documents: other resumes, certificates, licenses, cover letters, awards and transcripts, without their
+    text. Each has its details read from it ("parsed": kind, title, issuer, issued, expires, skills, summary), who read them
+    ("parsed_by": "rules" or "ai") and whether an AI reading runs now ("parsing")."""
     return documents.listing()
 
 
 @router.put("/api/profile/documents")
 async def add_document(request: Request, filename: str):
-    """Add one document, sent as the raw request body. The profile rebuilds about a minute after the user stops adding."""
+    """Add one document, sent as the raw request body. Its details are read by patterns right away and, when the user is
+    signed in with ChatGPT, by AI in the background (a "documents" event says when). The profile rebuilds about a minute
+    after the user stops adding."""
     data = await read_upload(request)
     try:
         return documents.add(filename, data)
     except ValueError as e:  # extract.ExtractError (no readable text, unsupported type) or the document limit
         raise HTTPException(400, str(e))
+
+
+@router.post("/api/profile/documents/{doc_id}/parse")
+async def read_document_details(doc_id: str):
+    """Read one document's details again with AI, now. Returns its listing entry with the new details."""
+    try:
+        return await documents.parse_with_ai(doc_id)
+    except KeyError:
+        raise HTTPException(404, "no such document")
+    except ai.AIError as e:
+        raise ai_error(e)
 
 
 @router.post("/api/profile/documents/{doc_id}/main")

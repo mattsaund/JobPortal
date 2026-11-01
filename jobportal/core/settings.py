@@ -8,16 +8,35 @@ Key ideas:
   saved their settings long ago.
 - A stored list replaces the default list as a whole. That keeps deletions: a company board the user removed stays
   removed. The catch is that boards and AI missions added in later versions would never reach anyone who saved their
-  settings, so migrate_defaults() adds those once, at startup.
+  settings, so migrate_defaults() adds those once, at startup. It also retires the tech-only defaults versions before
+  v0.3.0 saved (the genre and industry lists, the tech-title filter, the tech subreddits and Mastodon instances), but
+  only where the stored value is still exactly the old default, so nothing the user chose is lost.
 - The dashboard always saves the whole document (it loads GET /api/settings, edits it, and sends it back with PUT), so
   save() replaces what is stored instead of merging.
 
 Who calls it: almost every package reads settings with get(). web/routes/settings.py saves and resets them for the
 Settings and Sources pages, and web/server.py runs migrate_defaults() at startup."""
 import copy
+import hashlib
 
 from jobportal.core import db
 from jobportal.core.config import DEFAULT_SETTINGS, RESOURCES
+from jobportal.core.genres import LEGACY_GENRE_IDS, LEGACY_INDUSTRIES, OLD_INDUSTRIES
+
+# Social-source defaults every version before v0.3.0 saved. _retire_tech_defaults() drops a stored list that still equals
+# one of these, so the job-agnostic defaults in config.py show through.
+_LEGACY_SUBREDDITS = ["forhire", "jobbit", "hiring", "cscareerquestions", "internships", "EngineeringStudents", "remotejs", "techjobs"]
+_LEGACY_MASTODON = {"instances": ["mastodon.social", "hachyderm.io", "fosstodon.org"],
+                    "tags": ["hiring", "internship", "internships", "getfedihired", "fedihired", "techjobs", "jobs"]}
+# The start of the sha1 of each built-in AI hunt mission prompt before v0.3.0, when several leaned on tech (tech staffing
+# firms, SBIR grants, Hacker News, tech job boards). A saved mission whose prompt still hashes to its old value was never
+# edited, so _retire_tech_defaults() gives it the current wording.
+_LEGACY_MISSION_PROMPTS = {
+    "broad": "e9e89b9cb095540b", "social": "e15ad55b981676b0", "recruiters": "fde7ee780348b321", "public": "593d760f8067df11",
+    "local": "cd8ec20ffe1f5304", "research": "5ccc96b937c0a770", "intel": "8372cf89cd1d3851", "events": "5d9c4e773da80920",
+    "insiders": "8a6a971b438e8dfb", "forums": "22ef343ad9c37101", "aggregators": "187beb84ec3f4f0c", "campus": "ceeb2353fe188f01",
+    "news": "ee6face50ab21600", "dream": "5952781c44068bb4",
+}
 
 
 def _merge(base, over):
@@ -81,19 +100,19 @@ def resume_playbook(cfg: dict | None = None) -> str:
 
 
 def migrate_defaults() -> list[str]:
-    """Add the built-in company boards and AI hunt missions this user hasn't been offered yet. web/server.py calls it at
-    every startup.
+    """Add the built-in company boards and AI hunt missions this user hasn't been offered yet, and retire the tech-only
+    defaults of versions before v0.3.0 (_retire_tech_defaults). web/server.py calls it at every startup.
 
     Each default is offered only once. Its key ("board:<slug or url>" or "mission:<id>") goes into the stored
     "_defaults_seen" list, so a board or mission the user deletes is never added back. Returns a short note for each
-    item added, such as "board SpaceX". Side effect: rewrites the stored settings. Does nothing until the user has saved
-    settings at least once, because until then the defaults apply anyway."""
+    change, such as "mission Apprenticeships and trainee programs". Side effect: rewrites the stored settings. Does nothing
+    until the user has saved settings at least once, because until then the defaults apply anyway."""
     from jobportal.ai.prompts import DEFAULT_MISSIONS  # inside the function for the same reason as in get()
     stored = db.kv_get("settings", {})
     if not stored:
         return []
     seen = set(stored.get("_defaults_seen", []))
-    added = []
+    added = _retire_tech_defaults(stored)
     boards = stored.get("sources", {}).get("ats_boards", {}).get("boards")
     if boards is not None:
         have = {_board_id(b) for b in boards}
@@ -120,3 +139,66 @@ def migrate_defaults() -> list[str]:
 def _board_id(board: dict) -> str | None:
     """What identifies a company board: its slug (Greenhouse, Lever, Ashby) or its URL (Workday, UKG, iCIMS)."""
     return board.get("slug") or board.get("url")
+
+
+def _retire_tech_defaults(stored: dict) -> list[str]:
+    """Move settings saved by a version before v0.3.0 off its tech-only defaults, in place, and return a note per change.
+
+    Before v0.3.0 the dashboard saved the whole settings document, defaults included, so these were stored for everyone:
+    - analysis.genres: no page edits it, so a list of only the old genre ids is dropped and the genres for every field
+      (core/genres.py) show through. The old ids are part of the new list, so the Analysis history keeps lining up.
+    - industries: the old default list is dropped the same way. A list the user edited keeps their choices, with the old
+      names renamed (genres.OLD_INDUSTRIES), the way db._migrate() renames them on saved leads.
+    - filters.require_tech_title and filters.tech_title: the tech-title filter is gone. Someone who had switched it off
+      gets the target-role filter that replaced it switched off too.
+    - sources.reddit.subreddits and the Mastodon instances and tags: dropped when they still equal the old tech-leaning
+      defaults, so the general defaults show through (the collectors add the user's fields on top).
+    - the AI hunt missions: a built-in mission whose prompt was never edited (_LEGACY_MISSION_PROMPTS) gets the current
+      prompt and level and field limits. Its name and on or off switch stay as the user left them.
+    Running it again changes nothing, because nothing it leaves behind matches an old default."""
+    from jobportal.ai.prompts import DEFAULT_MISSIONS  # inside the function for the same reason as in get()
+    notes = []
+    current = {m["id"]: m for m in DEFAULT_MISSIONS}
+    updated = 0
+    for mission in (stored.get("sources") or {}).get("ai_hunt", {}).get("missions") or []:
+        old_hash = _LEGACY_MISSION_PROMPTS.get(mission.get("id"))
+        new = current.get(mission.get("id"))
+        prompt = str(mission.get("prompt", ""))
+        if new and old_hash and prompt != new["prompt"] and hashlib.sha1(prompt.encode()).hexdigest()[:16] == old_hash:
+            mission["prompt"] = new["prompt"]
+            for limit in ("only_levels", "only_groups"):
+                if limit in new:
+                    mission[limit] = list(new[limit])
+            updated += 1
+    if updated:
+        notes.append(f"{updated} built-in AI missions reworded for every field")
+    analysis = stored.get("analysis") or {}
+    genres = analysis.get("genres")
+    if isinstance(genres, list) and genres and {g.get("id") for g in genres} <= LEGACY_GENRE_IDS:
+        analysis.pop("genres")
+        notes.append("genres for every field")
+    industries = stored.get("industries")
+    if industries == LEGACY_INDUSTRIES:
+        stored.pop("industries")
+        notes.append("industries for every field")
+    elif isinstance(industries, list) and any(name in OLD_INDUSTRIES for name in industries):
+        renamed = [OLD_INDUSTRIES.get(name, name) for name in industries]
+        stored["industries"] = [name for i, name in enumerate(renamed) if name not in renamed[:i]]
+        notes.append("industry names updated")
+    filters = stored.get("filters") or {}
+    filters.pop("tech_title", None)
+    if "require_tech_title" in filters:
+        if filters.pop("require_tech_title") is False:
+            filters["require_target_match"] = False
+        notes.append("tech-title filter replaced by the target-role filter")
+    sources = stored.get("sources") or {}
+    reddit = sources.get("reddit") or {}
+    if reddit.get("subreddits") == _LEGACY_SUBREDDITS:
+        reddit.pop("subreddits")
+        notes.append("general subreddits")
+    mastodon = sources.get("mastodon") or {}
+    for key, old in _LEGACY_MASTODON.items():
+        if mastodon.get(key) == old:
+            mastodon.pop(key)
+            notes.append(f"general Mastodon {key}")
+    return notes

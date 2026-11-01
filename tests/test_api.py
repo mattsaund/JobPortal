@@ -1,4 +1,5 @@
 import copy
+import json
 import time
 
 import pytest
@@ -18,6 +19,38 @@ def test_dashboard_and_meta(client):
     assert r.status_code == 200 and "JobPortal" in r.text
     meta = client.get("/api/meta").json()
     assert meta["version"] and meta["os"] in ("windows", "macos", "linux") and meta["data_dir"]
+
+
+def test_equity_mining_is_gone(client):
+    from jobportal.core import db
+    db.kv_set("crm.snoozed", {"move:1": "2099-01-01"})  # what an older version saved
+    db.close()  # reopening runs the migration, which drops the old value
+    assert db.kv_get("crm.snoozed") is None
+    assert client.get("/api/crm").status_code == 404 and client.post("/api/crm/snooze", json={"key": "x"}).status_code == 404
+    assert client.get("/api/dreams").status_code == 200  # the Dream list stays
+
+
+def test_analysis_shows_the_genres_of_the_users_own_fields(client, fake_ai):
+    import asyncio
+
+    from jobportal.core import db
+    from jobportal.insights import analysis
+    market = client.get("/api/analysis").json()["market"]
+    groups = [row["group"] for row in market["genres"]]
+    assert len(groups) == len(set(groups)) >= 6  # a new user: one genre from each field group, so no field is favored
+    assert market["genres_total"] == len(client.get("/api/analysis").json()["genres"])
+    db.kv_set("profile.answers", {"target_roles": ["Registered Nurse", "Home Health Aide"]})
+    rows = client.get("/api/analysis").json()["market"]["genres"]
+    assert {"nursing", "caregiving"} <= {r["id"] for r in rows} and {r["group"] for r in rows} == {"healthcare"}
+    fake_ai.responses["analysis"] = {"genres": [{"id": "nursing", "fit": 140, "interest": 80, "confidence": "high", "evidence": [],
+                                                 "gaps": [], "moves": []}, {"id": "swe", "fit": 50, "interest": 10, "confidence": "low",
+                                                                            "evidence": [], "gaps": [], "moves": []}],
+                                     "summary": "", "top_priorities": [], "profile_suggestions": [],
+                                     "search_steering": {"emphasize": [], "deemphasize": [], "add_queries": [], "add_companies": [], "notes": ""}}
+    result = asyncio.run(analysis.run_ai("test"))["result"]
+    prompt = next(c for c in fake_ai.calls if c["purpose"] == "analysis")["prompt"]
+    assert "- nursing: Nursing" in prompt and "- swe:" not in prompt  # only the user's genres are assessed
+    assert result["genres"] == [{**fake_ai.responses["analysis"]["genres"][0], "fit": 100}]  # unknown ids dropped, scores held
 
 
 def test_refuses_foreign_host_headers(client):
@@ -172,6 +205,10 @@ def test_extra_documents(client, fake_ai, sample_resume):
     upload = lambda name, data: client.put(f"/api/profile/documents?filename={name}", content=data)  # noqa: E731
     cert = upload("AWS certificate.txt", b"AWS Certified Cloud Practitioner. Jordan Rivera, 2025.")  # one line is enough
     assert cert.status_code == 200 and cert.json()["kind"] == "certificate"
+    # Its details are read right away by patterns (no AI: nobody is signed in), so the dashboard has something to show.
+    assert cert.json()["parsing"] is False and cert.json()["parsed_by"] == "rules"
+    assert {k: cert.json()["parsed"][k] for k in ("title", "issuer", "issued", "expires")} == {
+        "title": "AWS Certified Cloud Practitioner", "issuer": "Amazon Web Services", "issued": "2025", "expires": ""}
     assert upload("AWS certificate.txt", b"AWS Certified Cloud Practitioner. Jordan Rivera, 2025.").json()["duplicate"] is True
     assert upload("photo.png", b"\x89PNG not text").status_code == 400  # images can't be read
     letter = upload("cover letter.txt", b"Dear Hiring Team, I build robots and tools people use every day.").json()
@@ -186,6 +223,54 @@ def test_extra_documents(client, fake_ai, sample_resume):
     newer = upload("newer resume.md", sample_resume.replace("Budget Buddy", "Budget Buddy 2").encode()).json()
     assert client.post(f"/api/profile/documents/{newer['id']}/main").json()["resume"]["filename"] == "newer resume.md"
     assert "old resume.md" in [d["name"] for d in client.get("/api/profile/documents").json()]
+
+
+AI_DETAILS = {"kind": "license", "title": "Registered Nurse License", "issuer": "Ohio Board of Nursing", "issued": "June 2024",
+              "expires": "2026-08-31", "skills": ["patient care", "Jordan Rivera", "medication administration"],
+              "summary": "An active Ohio RN license."}
+LICENSE = b"Ohio Board of Nursing\nThis certifies that\nJordan Rivera\nis licensed as a Registered Nurse\nIssued: 06/15/2024"
+
+
+def test_reading_a_document_with_ai(client, fake_ai):
+    upload = client.put("/api/profile/documents?filename=RN license.txt", content=LICENSE).json()
+    assert upload["parsed"]["title"] == "Registered Nurse License" and upload["parsed_by"] == "rules"
+    assert client.post("/api/profile/documents/nope/parse").status_code == 404
+    fake_ai.responses["document-parse"] = AI_DETAILS
+    read = client.post(f"/api/profile/documents/{upload['id']}/parse").json()
+    assert read["parsed_by"] == "ai" and read["parsing"] is False and read["kind"] == "license"
+    assert read["parsed"] == {**AI_DETAILS, "issued": "2024-06", "expires": "2026-08",  # dates as YYYY-MM
+                              "skills": ["patient care", "medication administration"]}  # never the user's own name
+    call = next(c for c in fake_ai.calls if c["purpose"] == "document-parse")
+    assert call["stage"] == "documents" and "is licensed as a Registered Nurse" in call["prompt"]
+    assert client.get("/api/profile/documents").json() == [read] == client.get("/api/onboarding").json()["documents"]
+
+
+def test_a_signed_out_reading_asks_to_sign_in(client):
+    upload = client.put("/api/profile/documents?filename=RN license.txt", content=LICENSE).json()
+    r = client.post(f"/api/profile/documents/{upload['id']}/parse")
+    assert r.status_code == 401 and client.get("/api/profile/documents").json()[0]["parsed_by"] == "rules"  # the rules reading stays
+
+
+def test_documents_are_read_by_ai_in_the_background_when_signed_in(client, fake_ai, monkeypatch):
+    from jobportal.candidate import documents
+    from jobportal.core import bus
+    monkeypatch.setattr(documents, "_signed_in", lambda: True)
+    fake_ai.responses["document-parse"] = AI_DETAILS
+    events = bus.subscribe()
+    upload = client.put("/api/profile/documents?filename=RN license.txt", content=LICENSE).json()
+    assert upload["parsing"] is True  # the AI reading has started
+    for _ in range(100):
+        listed = client.get("/api/profile/documents").json()[0]
+        if not listed["parsing"]:
+            break
+        time.sleep(0.02)
+    assert listed["parsed_by"] == "ai" and listed["parsed"]["issuer"] == "Ohio Board of Nursing"
+    seen = []
+    while not events.empty():
+        seen.append(json.loads(events.get_nowait()))
+    bus.unsubscribe(events)
+    documents_events = [e["data"] for e in seen if e["kind"] == "documents"]
+    assert documents_events[0][0]["parsing"] is True and documents_events[-1][0]["parsed_by"] == "ai"
 
 
 def test_quick_add_delete_and_tracker_columns(client, fake_ai):

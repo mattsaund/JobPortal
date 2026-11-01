@@ -51,180 +51,17 @@ STATUS_LABELS = {"new": "New", "ready": "Ready to apply", "applied": "Applicatio
 # Statuses from v0.2.0 and earlier, and the status each one became. db._migrate() moves old leads over.
 OLD_STATUSES = {"saved": "ready", "assessment": "interviewing", "offer": "accepted", "ghosted": "rejected", "withdrawn": "rejected"}
 
-# Company job boards searched by default (verified live in October 2026). Each entry has a name and an "ats", the hiring
+# Company job boards searched by default: none. Which companies are worth reading depends entirely on the person (a nurse
+# in Ohio and a designer in Denver share no employers), so the user adds their own: the Sources page turns any pasted
+# careers URL into a board (POST /api/sources/detect, search/sources.py), and the AI hunt's "Dream companies" mission
+# checks the careers sites of the user's dream companies either way. Each entry has a name and an "ats", the hiring
 # system the board runs on. Greenhouse, Lever and Ashby boards are found by "slug" (the company's id in that system's
 # public API). Workday, UKG and iCIMS boards are found by "url". The Sources page adds "enabled" and "dream" switches to
-# an entry, and adds any company from a pasted careers URL.
-ATS_BOARDS = [
-    # Space, defense and deep tech (Greenhouse)
-    {"name": "SpaceX", "ats": "greenhouse", "slug": "spacex"},
-    {"name": "Rocket Lab", "ats": "greenhouse", "slug": "rocketlab"},
-    {"name": "Astranis", "ats": "greenhouse", "slug": "astranis"},
-    {"name": "Varda Space", "ats": "greenhouse", "slug": "vardaspace"},
-    {"name": "Vast", "ats": "greenhouse", "slug": "vast"},
-    {"name": "Muon Space", "ats": "greenhouse", "slug": "muonspace"},
-    {"name": "Inversion Space", "ats": "greenhouse", "slug": "inversionspace"},
-    {"name": "Ursa Major", "ats": "greenhouse", "slug": "ursamajor"},
-    {"name": "Planet", "ats": "greenhouse", "slug": "planetlabs"},
-    {"name": "BlackSky", "ats": "greenhouse", "slug": "blacksky"},
-    {"name": "HawkEye 360", "ats": "greenhouse", "slug": "hawkeye360"},
-    {"name": "Spire Global", "ats": "greenhouse", "slug": "spire"},
-    {"name": "Epirus", "ats": "greenhouse", "slug": "epirus"},
-    {"name": "GITAI", "ats": "greenhouse", "slug": "gitai"},
-    {"name": "Divergent", "ats": "greenhouse", "slug": "divergent"},
-    {"name": "Momentus", "ats": "greenhouse", "slug": "momentus"},
-    {"name": "Albedo", "ats": "greenhouse", "slug": "albedo"},
-    {"name": "Voyager Technologies", "ats": "greenhouse", "slug": "voyagertechnologiesinc"},
-    {"name": "Scale AI", "ats": "greenhouse", "slug": "scaleai"},
-    # Lever
-    {"name": "Hermeus", "ats": "lever", "slug": "hermeus"},
-    {"name": "Loft Orbital", "ats": "lever", "slug": "loftorbital"},
-    {"name": "Shield AI", "ats": "lever", "slug": "shieldai"},
-    {"name": "Merlin Labs", "ats": "lever", "slug": "merlinlabs"},
-    {"name": "Palantir", "ats": "lever", "slug": "palantir"},
-    # Ashby
-    {"name": "Northwood Space", "ats": "ashby", "slug": "northwoodspace"},
-    {"name": "Astra", "ats": "ashby", "slug": "astra"},
-    {"name": "Radiant", "ats": "ashby", "slug": "radiant"},
-    {"name": "Outpost", "ats": "ashby", "slug": "outpost"},
-    {"name": "Quindar", "ats": "ashby", "slug": "quindar"},
-    {"name": "Lunar Outpost", "ats": "ashby", "slug": "lunar"},
-    {"name": "Saronic", "ats": "ashby", "slug": "saronic"},
-    {"name": "Skydio", "ats": "ashby", "slug": "skydio"},
-    # Defense tech, cyber, quantum and space
-    {"name": "Anduril", "ats": "greenhouse", "slug": "andurilindustries"},
-    {"name": "AST SpaceMobile", "ats": "greenhouse", "slug": "astspacemobile"},
-    {"name": "Relativity Space", "ats": "greenhouse", "slug": "relativity"},
-    {"name": "IonQ", "ats": "greenhouse", "slug": "ionq"},
-    {"name": "Dragos", "ats": "greenhouse", "slug": "dragos"},
-    {"name": "Huntress", "ats": "greenhouse", "slug": "huntress"},
-    {"name": "Two Six Technologies", "ats": "greenhouse", "slug": "twosixtechnologies"},
-    {"name": "Shift5", "ats": "greenhouse", "slug": "shift5"},
-    {"name": "Electra.aero", "ats": "greenhouse", "slug": "electraaero"},
-    {"name": "Expel", "ats": "greenhouse", "slug": "expel"},
-    {"name": "ICEYE", "ats": "ashby", "slug": "iceye"},
-    {"name": "Boom Supersonic", "ats": "ashby", "slug": "boom"},
-    {"name": "Skylo", "ats": "ashby", "slug": "skylo"},
-    # Social and consumer, fintech, AI, developer tools, health, gov-tech, media and edtech
-    {"name": "Reddit", "ats": "greenhouse", "slug": "reddit"},
-    {"name": "Discord", "ats": "greenhouse", "slug": "discord"},
-    {"name": "Pinterest", "ats": "greenhouse", "slug": "pinterest"},
-    {"name": "Nextdoor", "ats": "greenhouse", "slug": "nextdoor"},
-    {"name": "Twitch", "ats": "greenhouse", "slug": "twitch"},
-    {"name": "Duolingo", "ats": "greenhouse", "slug": "duolingo"},
-    {"name": "Figma", "ats": "greenhouse", "slug": "figma"},
-    {"name": "Robinhood", "ats": "greenhouse", "slug": "robinhood"},
-    {"name": "Stripe", "ats": "greenhouse", "slug": "stripe"},
-    {"name": "Coinbase", "ats": "greenhouse", "slug": "coinbase"},
-    {"name": "Affirm", "ats": "greenhouse", "slug": "affirm"},
-    {"name": "Chime", "ats": "greenhouse", "slug": "chime"},
-    {"name": "SoFi", "ats": "greenhouse", "slug": "sofi"},
-    {"name": "Brex", "ats": "greenhouse", "slug": "brex"},
-    {"name": "Block", "ats": "greenhouse", "slug": "block"},
-    {"name": "Mercury", "ats": "greenhouse", "slug": "mercury"},
-    {"name": "Betterment", "ats": "greenhouse", "slug": "betterment"},
-    {"name": "Carta", "ats": "greenhouse", "slug": "carta"},
-    {"name": "Databricks", "ats": "greenhouse", "slug": "databricks"},
-    {"name": "Datadog", "ats": "greenhouse", "slug": "datadog"},
-    {"name": "Cloudflare", "ats": "greenhouse", "slug": "cloudflare"},
-    {"name": "Twilio", "ats": "greenhouse", "slug": "twilio"},
-    {"name": "Okta", "ats": "greenhouse", "slug": "okta"},
-    {"name": "Elastic", "ats": "greenhouse", "slug": "elastic"},
-    {"name": "MongoDB", "ats": "greenhouse", "slug": "mongodb"},
-    {"name": "GitLab", "ats": "greenhouse", "slug": "gitlab"},
-    {"name": "Vercel", "ats": "greenhouse", "slug": "vercel"},
-    {"name": "Dropbox", "ats": "greenhouse", "slug": "dropbox"},
-    {"name": "Bitwarden", "ats": "greenhouse", "slug": "bitwarden"},
-    {"name": "Airbnb", "ats": "greenhouse", "slug": "airbnb"},
-    {"name": "Lyft", "ats": "greenhouse", "slug": "lyft"},
-    {"name": "Instacart", "ats": "greenhouse", "slug": "instacart"},
-    {"name": "Toast", "ats": "greenhouse", "slug": "toast"},
-    {"name": "Gusto", "ats": "greenhouse", "slug": "gusto"},
-    {"name": "Checkr", "ats": "greenhouse", "slug": "checkr"},
-    {"name": "Squarespace", "ats": "greenhouse", "slug": "squarespace"},
-    {"name": "Typeform", "ats": "greenhouse", "slug": "typeform"},
-    {"name": "Webflow", "ats": "greenhouse", "slug": "webflow"},
-    {"name": "Asana", "ats": "greenhouse", "slug": "asana"},
-    {"name": "Airtable", "ats": "greenhouse", "slug": "airtable"},
-    {"name": "Calendly", "ats": "greenhouse", "slug": "calendly"},
-    {"name": "Roblox", "ats": "greenhouse", "slug": "roblox"},
-    {"name": "Riot Games", "ats": "greenhouse", "slug": "riotgames"},
-    {"name": "Epic Games", "ats": "greenhouse", "slug": "epicgames"},
-    {"name": "Scopely", "ats": "greenhouse", "slug": "scopely"},
-    {"name": "Peloton", "ats": "greenhouse", "slug": "peloton"},
-    {"name": "Oscar", "ats": "greenhouse", "slug": "oscar"},
-    {"name": "Zocdoc", "ats": "greenhouse", "slug": "zocdoc"},
-    {"name": "Anthropic", "ats": "greenhouse", "slug": "anthropic"},
-    {"name": "Axios", "ats": "greenhouse", "slug": "axios"},
-    {"name": "Mozilla", "ats": "greenhouse", "slug": "mozilla"},
-    {"name": "Wikimedia", "ats": "greenhouse", "slug": "wikimedia"},
-    {"name": "Khan Academy", "ats": "greenhouse", "slug": "khanacademy"},
-    {"name": "Coursera", "ats": "greenhouse", "slug": "coursera"},
-    {"name": "2U", "ats": "greenhouse", "slug": "2u"},
-    {"name": "Nava PBC", "ats": "greenhouse", "slug": "navapbc"},
-    {"name": "Oddball", "ats": "greenhouse", "slug": "oddball"},
-    {"name": "Code for America", "ats": "greenhouse", "slug": "codeforamerica"},
-    {"name": "OpenAI", "ats": "ashby", "slug": "openai"},
-    {"name": "Perplexity", "ats": "ashby", "slug": "perplexity"},
-    {"name": "Notion", "ats": "ashby", "slug": "notion"},
-    {"name": "Linear", "ats": "ashby", "slug": "linear"},
-    {"name": "Miro", "ats": "ashby", "slug": "miro"},
-    {"name": "Replit", "ats": "ashby", "slug": "replit"},
-    {"name": "Supabase", "ats": "ashby", "slug": "supabase"},
-    {"name": "Warp", "ats": "ashby", "slug": "warp"},
-    {"name": "PostHog", "ats": "ashby", "slug": "posthog"},
-    {"name": "Zapier", "ats": "ashby", "slug": "zapier"},
-    {"name": "Plaid", "ats": "ashby", "slug": "plaid"},
-    {"name": "Ramp", "ats": "ashby", "slug": "ramp"},
-    {"name": "1Password", "ats": "ashby", "slug": "1password"},
-    {"name": "Confluent", "ats": "ashby", "slug": "confluent"},
-    {"name": "Benchling", "ats": "ashby", "slug": "benchling"},
-    {"name": "Headway", "ats": "ashby", "slug": "headway"},
-    {"name": "Patreon", "ats": "ashby", "slug": "patreon"},
-    {"name": "Substack", "ats": "ashby", "slug": "substack"},
-    {"name": "Quora", "ats": "ashby", "slug": "quora"},
-    {"name": "Strava", "ats": "ashby", "slug": "strava"},
-    {"name": "Spotify", "ats": "lever", "slug": "spotify"},
-    {"name": "Ro", "ats": "lever", "slug": "ro"},
-    {"name": "Wealthfront", "ats": "lever", "slug": "wealthfront"},
-    # Workday (defense contractors and large aerospace)
-    {"name": "Leidos", "ats": "workday", "url": "https://leidos.wd5.myworkdayjobs.com/External"},
-    {"name": "Northrop Grumman", "ats": "workday", "url": "https://ngc.wd1.myworkdayjobs.com/Northrop_Grumman_External_Site"},
-    {"name": "Boeing", "ats": "workday", "url": "https://boeing.wd1.myworkdayjobs.com/EXTERNAL_CAREERS"},
-    {"name": "RTX", "ats": "workday", "url": "https://globalhr.wd5.myworkdayjobs.com/REC_RTX_Ext_Gateway"},
-    {"name": "Booz Allen Hamilton", "ats": "workday", "url": "https://bah.wd1.myworkdayjobs.com/BAH_Jobs"},
-    {"name": "KBR", "ats": "workday", "url": "https://kbr.wd5.myworkdayjobs.com/KBR_Careers"},
-    {"name": "Blue Origin", "ats": "workday", "url": "https://blueorigin.wd5.myworkdayjobs.com/BlueOrigin"},
-    {"name": "GDIT", "ats": "workday", "url": "https://gdit.wd5.myworkdayjobs.com/External_Career_Site"},
-    {"name": "CACI", "ats": "workday", "url": "https://caci.wd1.myworkdayjobs.com/External"},
-    {"name": "Parsons", "ats": "workday", "url": "https://parsons.wd5.myworkdayjobs.com/Search"},
-    {"name": "Sierra Space", "ats": "workday", "url": "https://sierraspace.wd1.myworkdayjobs.com/Sierra_Space_External_Career_Site"},
-    {"name": "Maxar / Vantor", "ats": "workday", "url": "https://maxar.wd1.myworkdayjobs.com/Vantor"},
-    {"name": "Axiom Space", "ats": "workday", "url": "https://axiomspace.wd5.myworkdayjobs.com/External_Career_Site"},
-    {"name": "AeroVironment", "ats": "workday", "url": "https://avav.wd1.myworkdayjobs.com/AVAV"},
-    # UKG and iCIMS
-    {"name": "Space Telescope Science Institute", "ats": "ukg", "url": "https://recruiting2.ultipro.com/SPA1004AURA/JobBoard/93330e50-7b3a-4ba8-94f2-6f32360aa4e1"},
-    {"name": "Peraton", "ats": "icims", "url": "https://careers-peraton.icims.com"},
-    {"name": "General Dynamics Mission Systems", "ats": "icims", "url": "https://careers-gdms.icims.com"},
-]
+# an entry. core/settings.migrate_defaults() offers any board added here later to existing users once.
+ATS_BOARDS: list[dict] = []
 
-# The tech-role gate (filters.require_tech_title): a job-board title must contain one of these to pass. They are
-# case-insensitive regexes. Most are word stems ("comput" matches computer and computing). \b marks a word edge, so
-# r"\bit\b" matches "IT Specialist" but not "Digital".
-TECH_TITLE = [
-    r"software", r"engineer", r"develop", r"programm", r"\bdata\b", r"machine learning", r"\bml\b", r"\bai\b",
-    r"artificial intelligence", r"computer", r"comput", r"cyber", r"security", r"\bit\b", r"information technology",
-    r"system", r"network", r"cloud", r"devops", r"embedded", r"firmware", r"hardware", r"electrical", r"electronic",
-    r"aerospace", r"space", r"satellite", r"flight", r"\bgnc\b", r"guidance", r"navigation", r"control",
-    r"robot", r"autonom", r"research", r"scien", r"physic", r"math", r"analyst", r"analytics", r"quant",
-    r"\btest", r"\bqa\b", r"quality", r"technician", r"\brf\b", r"signal", r"radar", r"avionic", r"mission",
-    r"launch", r"propulsion", r"\bgis\b", r"remote sensing", r"geospatial", r"astro", r"\bweb\b", r"mobile",
-    r"\bios\b", r"\bapp", r"front[- ]?end", r"back[- ]?end", r"full[- ]?stack", r"infrastructure", r"\bsre\b",
-    r"platform", r"simulation", r"modeling", r"digital", r"technolog", r"\btech\b", r"stem\b", r"intelligence",
-    r"automation", r"integration", r"product development", r"r&d", r"lab\b",
-]
-
-# The title filters for the default levels (internship and entry level), used until the user saves the standard answers.
+# The title filters for the default levels (every level, so nothing is assumed), used until the user saves the standard
+# answers.
 _TITLE_INCLUDE, _TITLE_EXCLUDE = title_filters(DEFAULT_LEVELS)
 
 # Every setting and its default. settings.get() returns these merged with what the user saved. Comments name the page
@@ -241,6 +78,7 @@ DEFAULT_SETTINGS = {
             "revise": {"model": "", "effort": "low"},  # "Revise with AI", resume reviews and other document edits
             "profile": {"model": "", "effort": "medium"},  # builds and updates the profile, learns the writing voice
             "analysis": {"model": "", "effort": "medium"},  # the Analysis page's assessment
+            "documents": {"model": "", "effort": "low"},  # reads each extra document's details: title, issuer, dates
         },
         "max_parallel": 3,  # "Parallel agents": how many AI requests may run at the same time
     },
@@ -269,8 +107,9 @@ DEFAULT_SETTINGS = {
         # Saving the standard answers rebuilds both from the levels and target roles (levels.title_filters).
         "title_include": _TITLE_INCLUDE,
         "title_exclude": _TITLE_EXCLUDE,
-        "require_tech_title": True,  # job-board titles must contain a tech or science word from tech_title
-        "tech_title": TECH_TITLE,  # no page edits this list
+        # Job-board titles must share a word with the user's target roles, role families or search queries
+        # (textutil.TargetMatcher). It's lenient, and it lets everything through until the user has targets.
+        "require_target_match": True,
         "exclude_companies": [],  # "Never show these companies"
         "exclude_keywords": [],  # "Drop if description contains" (saving the standard answers adds clearance phrases)
     },
@@ -293,9 +132,14 @@ DEFAULT_SETTINGS = {
     "dream_companies": [],  # companies the user added (saving the standard answers sets it to their dream companies)
     "dream_jobs": [],  # title phrases that make a job a dream job at any company
     "dream_exclude": [],  # profile-suggested dream companies the user removed
-    # The Sources page: every job source, each with an "enabled" switch. search/collectors/ reads these.
+    # The Sources page: every job source, each with an "enabled" switch. search/collectors/ reads these. Sources that only
+    # carry one field's jobs adapt to the user (search/plan.py works out their fields from their targets): the GitHub lists
+    # and Hacker News carry tech jobs, so they skip themselves for everyone else, and Reddit, Mastodon, The Muse and the
+    # remote boards add communities, hashtags, categories and feeds for the user's fields on top of the general ones here.
     "sources": {
-        "github_lists": {"enabled": True, "urls": [  # community internship and new-grad lists (skipped above entry level)
+        # Community tech internship and new-grad lists. Used only when the user's targets are in tech and their levels
+        # include internship or entry level.
+        "github_lists": {"enabled": True, "urls": [
             "https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json",
             "https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json",
             "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json",
@@ -304,17 +148,20 @@ DEFAULT_SETTINGS = {
         # time_window is LinkedIn's "posted within" filter in seconds ("r2592000" = 30 days). experience is LinkedIn's
         # experience filter ("1,2" = internship and entry level); "" picks it from the levels (levels.linkedin_experience).
         "linkedin": {"enabled": True, "max_requests": 100, "time_window": "r2592000", "experience": ""},
-        "hackernews": {"enabled": True, "threads": 2},  # how many monthly "Who is hiring?" threads to read
+        # How many monthly "Who is hiring?" threads to read. Used only when the user's targets are in tech.
+        "hackernews": {"enabled": True, "threads": 2},
         "themuse": {"enabled": True, "pages": 8},  # result pages per run
         "usajobs": {"enabled": True, "api_key": "", "email": ""},  # free key from developer.usajobs.gov
         "adzuna": {"enabled": False, "app_id": "", "app_key": ""},  # needs a free key, so off by default
         "serpapi": {"enabled": False, "api_key": ""},  # Google Jobs through SerpAPI, needs a key
-        "remote_boards": {"enabled": True},  # Remotive and RemoteOK, used only when "Remote" is an allowed location
-        "reddit": {"enabled": True, "subreddits": ["forhire", "jobbit", "hiring", "cscareerquestions", "internships",
-                                                    "EngineeringStudents", "remotejs", "techjobs"]},
+        # Remotive, RemoteOK and We Work Remotely, used only when "Remote" is an allowed location.
+        "remote_boards": {"enabled": True},
+        # General hiring subreddits (each one checked to carry job posts). The collector adds the ones for the user's fields.
+        "reddit": {"enabled": True, "subreddits": ["forhire", "jobbit", "hiring"]},
+        # General instances and hiring hashtags. The collector adds instances and hashtags for the user's fields and levels.
         "mastodon": {"enabled": True,
-                     "instances": ["mastodon.social", "hachyderm.io", "fosstodon.org"],
-                     "tags": ["hiring", "internship", "internships", "getfedihired", "fedihired", "techjobs", "jobs"]},
+                     "instances": ["mastodon.social", "mastodon.online", "mas.to"],
+                     "tags": ["hiring", "jobs", "getfedihired", "fedihired", "nowhiring"]},
         "rss": {"enabled": True, "feeds": []},  # any RSS or Atom feeds: [{"name": ..., "url": ...}]
         "bluesky": {"enabled": False, "handle": "", "app_password": ""},  # needs the user's handle and an app password
         # AI hunt missions. depth is "quick", "standard" or "deep"; missions_per_run is how many missions an "Everything"

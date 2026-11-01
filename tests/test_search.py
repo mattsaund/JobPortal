@@ -9,7 +9,8 @@ import pytest
 
 from jobportal.ai import client as ai
 from jobportal.candidate import profile
-from jobportal.core import db, settings
+from jobportal.core import db, settings, textutil
+from jobportal.core.levels import title_filters
 from jobportal.core.textutil import fingerprint
 from jobportal.search import collectors, packages, pipeline
 from jobportal.search.collectors import ats, feeds, hunt, linkedin
@@ -17,10 +18,13 @@ from jobportal.search.collectors.base import Ctx, RawJob
 from jobportal.search.pipeline import RuleFilters
 
 
-def make_cfg(**locations) -> dict:
-    """Default settings with a search area of Ohio and Pittsburgh, plus any location settings given."""
+def make_cfg(levels=("internship", "entry"), **locations) -> dict:
+    """Default settings with a search area of Ohio and Pittsburgh, the given experience levels (a student's, unless a test
+    says otherwise) with the title filters they imply, and any location settings given."""
     cfg = settings.get()
     cfg["locations"].update({"allowed": ["Ohio", "Pittsburgh, PA"], **locations})
+    cfg["search"]["levels"] = list(levels)
+    cfg["filters"]["title_include"], cfg["filters"]["title_exclude"] = title_filters(levels)
     return cfg
 
 
@@ -83,10 +87,35 @@ def test_strict_titles_need_a_word_for_the_users_levels():
     assert verdict(cfg, job(title="Software Engineer", source="linkedin", strict_titles=False)) == "pass"
 
 
-def test_tech_gate_skips_social_posts():
-    cfg = make_cfg()
-    assert verdict(cfg, job(title="Barista Intern")) == "not a tech role"
-    assert verdict(cfg, job(title="Barista Intern", source="reddit", strict_titles=False)) == "pass"
+def test_target_roles_gate_job_board_titles_but_not_social_posts():
+    cfg = make_cfg(levels=["entry", "mid"])
+    assert verdict(cfg, job(title="Software Engineer")) == "pass"  # no targets yet: nothing is assumed, everything passes
+    db.kv_set("profile.answers", {"target_roles": ["Barista", "Line Cook"]})
+    profile.save("search_plan", {"role_families": ["Food service"], "queries": ["coffee shop jobs"], "dream_companies": [], "notes": ""})
+    for title in ("Barista", "Prep Cook", "Food Service Worker", "Coffee Bar Attendant"):
+        assert verdict(cfg, job(title=title)) == "pass", title
+    assert verdict(cfg, job(title="Software Engineer")) == "outside your target roles"
+    assert verdict(cfg, job(title="Software Engineer", source="reddit", strict_titles=False)) == "pass"  # a post's headline
+    assert verdict(cfg, job(title="Shift Lead", description="Make espresso drinks, prep food and cook breakfast.")) == "pass"
+    cfg["filters"]["require_target_match"] = False
+    assert verdict(cfg, job(title="Software Engineer")) == "pass"
+
+
+def test_filters_work_for_any_career():
+    def from_linkedin(title: str) -> RawJob:  # titles LinkedIn already narrowed to the levels, so only the exclusions apply
+        return job(title=title, source="linkedin", strict_titles=False)
+
+    db.kv_set("profile.answers", {"target_roles": ["Registered Nurse"]})
+    nurse = make_cfg(levels=["entry"])
+    assert verdict(nurse, job(title="Staff Nurse, New Grad Residency")) == "pass"  # "staff" isn't a senior word here
+    assert verdict(nurse, from_linkedin("Nurse Manager")) == "too senior / excluded title"
+    assert verdict(nurse, from_linkedin("RN Case Manager")) == "pass"  # front-line work, despite "manager"
+    db.kv_set("profile.answers", {"target_roles": ["Electrician"]})
+    apprentice = make_cfg(levels=["apprenticeship"])
+    assert verdict(apprentice, job(title="Electrician Apprentice")) == "pass"
+    assert verdict(apprentice, from_linkedin("Journeyman Electrician")) == "too senior / excluded title"
+    db.kv_set("profile.answers", {"target_roles": ["Kindergarten Teacher"]})
+    assert verdict(make_cfg(levels=["entry"]), from_linkedin("Teacher - Grade 3")) == "pass"  # a grade, not a level
 
 
 def test_excluded_companies_keywords_old_and_incomplete_postings():
@@ -233,7 +262,7 @@ def triage_answer(score_for) -> callable:
             score = score_for(item)
             results.append({"id": item["id"], "score": score, "verdict": "strong" if score >= 60 else "no", "eligibility": "eligible",
                             "category": "internship", "summary": "", "reasons": [], "red_flags": [], "genres": ["robotics"],
-                            "industry": "Robotics & Manufacturing"})
+                            "industry": "Manufacturing"})
         return {"results": results}
     return answer
 
@@ -286,7 +315,7 @@ def test_retag_industries_saves_only_valid_answers_for_leads_it_sent(fake_ai):
 
 
 PACKAGE_OUT = {
-    "title": "Software Engineering Intern", "company": "Example Robotics", "location": "Columbus, OH", "industry": "Robotics & Manufacturing",
+    "title": "Software Engineering Intern", "company": "Example Robotics", "location": "Columbus, OH", "industry": "Manufacturing",
     "fit": {"score": 82, "summary": "", "strengths": [], "gaps": [], "eligibility_notes": ""}, "posting_status": "open",
     "apply_url": "https://jobs.example.com/apply", "deadline": "", "job_summary": "", "keywords": ["Python"],
     "resume_strategy": {"archetype": "general", "theme": "modern", "section_order": [], "summary": "", "projects": [], "skills_grouping": "",
@@ -318,7 +347,7 @@ def no_rendering(monkeypatch):
 def ready_to_search():
     """A finished setup (resume, standard answers, built profile) and settings with every real source turned off."""
     db.kv_set("profile.resume", {"text": "# Jordan Rivera", "name": "resume.md"})
-    db.kv_set("profile.answers", {"_saved_at": db.now(), "target_roles": ["Software Engineer"]})
+    db.kv_set("profile.answers", {"_saved_at": db.now(), "target_roles": ["Software Engineer", "Data Analyst"]})
     db.kv_set("profile.built_at", db.now())
     cfg = make_cfg(allowed=["Ohio"])
     for source in cfg["sources"].values():
@@ -390,7 +419,7 @@ def test_build_package_saves_the_package_and_marks_the_lead_ready(fake_ai, no_re
     lead = db.lead_row(db.one("SELECT * FROM leads WHERE id=?", (lead_id,)))
     assert summary["stage"] == "ready" and summary["score"] == 82
     assert lead["title"] == "Software Engineering Intern" and lead["company"] == "Example Robotics"  # the placeholders were replaced
-    assert lead["apply_url"] == "https://jobs.example.com/apply" and lead["industry"] == "Robotics & Manufacturing"
+    assert lead["apply_url"] == "https://jobs.example.com/apply" and lead["industry"] == "Manufacturing"
     assert lead["resume_md"].endswith("Python, SQL") and lead["package"]["resume_style"] == {"theme": "modern", "max_pages": 1}
     assert "resume_md" not in lead["package"] and "_tokens" not in lead["package"]
     assert "Build internal tools" in lead["description"]  # the short pasted text was replaced by the full posting
@@ -516,7 +545,7 @@ def test_linkedin_search_runs_to_the_end(monkeypatch):
 
 
 def test_hunt_rotates_missions_and_respects_levels():
-    cfg = settings.get()
+    cfg = make_cfg()
     cfg["sources"]["ai_hunt"].update(missions_per_run=2, missions=[
         {"id": "a", "name": "A", "prompt": ""}, {"id": "b", "name": "B", "prompt": ""}, {"id": "c", "name": "C", "prompt": ""},
         {"id": "off", "name": "Off", "prompt": "", "enabled": False},
@@ -572,6 +601,92 @@ def test_dream_bypass_covers_the_us_only():
     job = lambda loc: RawJob("ats_boards", "Software Engineer", "Example Robotics", f"https://jobs.example.com/{loc}", location=loc)  # noqa: E731
     assert filters.check(job("Austin, TX"))[0]  # outside the search area, but a dream company in the US
     assert filters.check(job("Toronto, ON"))[1] == "outside the US"
+
+
+def _targets(roles: list[str], families: list[str] = ()) -> None:
+    """Set the user's target roles (standard answers) and the profile plan's role families."""
+    db.kv_set("profile.answers", {"target_roles": roles})
+    profile.save("search_plan", {"role_families": list(families), "queries": [], "dream_companies": [], "notes": ""})
+
+
+def test_sources_learn_the_users_fields_from_their_targets():
+    from jobportal.search import plan
+    cfg = make_cfg(levels=["internship", "entry"], allowed=["Ohio", "Remote"])
+    assert not plan.in_tech(cfg) and plan.fields(cfg) == []  # no targets: no field is assumed, tech least of all
+    _targets(["Registered Nurse", "Patient Care Technician"], ["Nursing", "Home health"])
+    assert plan.fields(cfg)[0] == "nursing" and plan.groups(cfg)[0] == "healthcare" and not plan.in_tech(cfg)
+    ctx = Ctx(cfg, lambda *a, **k: None)
+    instances, tags = feeds._mastodon_plan(ctx)
+    assert "nursingjobs" in tags and "techjobs" not in tags and "hachyderm.io" not in instances
+    assert "internship" in tags and "remotejobs" in tags  # an internship search with Remote allowed
+    assert "techjobs" not in feeds._reddit_subreddits(ctx) and "RemoteJobs" in feeds._reddit_subreddits(ctx)
+    assert feeds._wwr_feeds(ctx) == [feeds.WWR_FEED.format(feeds.WWR_OTHER)]
+    _targets(["Software Engineer", "Data Analyst"])
+    assert plan.in_tech(cfg)
+    instances, tags = feeds._mastodon_plan(ctx)
+    assert "techjobs" in tags and "hachyderm.io" in instances and "techjobs" in feeds._reddit_subreddits(ctx)
+    _targets(["Graphic Designer"])
+    assert {"DesignJobs", "HungryArtists"} <= set(feeds._reddit_subreddits(ctx))
+    asyncio.run(ctx.close())
+
+
+def test_tech_only_sources_skip_themselves_for_other_fields():
+    from jobportal.search.collectors import github_lists
+    _targets(["Line Cook", "Barista"])
+    logs = []
+    ctx = Ctx(make_cfg(), lambda source, msg, level="info": logs.append(msg))
+
+    async def no_network(*args, **kwargs):
+        raise AssertionError("a skipped source must not make requests")
+
+    ctx.request = no_network
+    assert asyncio.run(github_lists.collect(ctx)) == [] and asyncio.run(feeds.hackernews(ctx)) == []
+    assert all("aren't in tech" in line for line in logs)
+    asyncio.run(ctx.close())
+
+
+def test_the_muse_searches_the_users_fields(monkeypatch):
+    _targets(["Pastry Chef", "Line Cook"])
+    asked = []
+
+    async def fake_get_json(url, **kw):
+        asked.append(url)
+        return {"results": [], "page_count": 1}
+
+    ctx = Ctx(make_cfg(levels=["entry"]), lambda *a, **k: None)
+    ctx.get_json = fake_get_json
+    asyncio.run(feeds.themuse(ctx))
+    assert "category=Food+and+Hospitality+Services" in asked[0] and "level=Entry+Level" in asked[0]
+    asyncio.run(ctx.close())
+
+
+def test_the_muse_searches_a_states_largest_cities():
+    assert feeds._muse_locations(["Maryland", "Remote", "DC", "Pittsburgh, PA"]) == [
+        "Baltimore, MD", "Columbia, MD", "Rockville, MD", "Frederick, MD", "Annapolis, MD", "Flexible / Remote", "Washington, DC",
+        "Pittsburgh, PA"]
+    assert set(textutil.MAJOR_CITIES) == set(textutil.STATES)  # every state and DC
+    assert all(len(cities) >= 2 for state, cities in textutil.MAJOR_CITIES.items() if state != "DC")
+
+
+def test_we_work_remotely_items():
+    xml = """<rss><channel><item><title>Example Health: Patient Support Specialist</title><region>USA Only</region>
+<link>https://weworkremotely.com/remote-jobs/example-health-patient-support</link><description>&lt;p&gt;Help patients.&lt;/p&gt;</description>
+<pubDate>Tue, 27 Oct 2026 10:00:00 +0000</pubDate></item></channel></rss>"""
+    assert feeds._wwr_items(xml) == [{"title": "Example Health: Patient Support Specialist", "region": "USA Only",
+                                      "link": "https://weworkremotely.com/remote-jobs/example-health-patient-support",
+                                      "description": "Help patients.", "date": "2026-10-27"}]
+    assert feeds._wwr_items("not xml") == []
+
+
+def test_hunt_missions_for_some_fields_only():
+    cfg = make_cfg()
+    cfg["sources"]["ai_hunt"].update(missions_per_run=0, missions=[
+        {"id": "all", "name": "Everyone", "prompt": ""}, {"id": "labs", "name": "Labs", "prompt": "", "only_groups": ["science"]}])
+    assert [m["id"] for m in hunt.pick_missions(cfg, all_missions=True)] == ["all", "labs"]  # fields unknown: nothing skipped
+    _targets(["Retail Sales Associate", "Cashier"])
+    assert [m["id"] for m in hunt.pick_missions(cfg, all_missions=True)] == ["all"]
+    _targets(["Research Assistant"])
+    assert [m["id"] for m in hunt.pick_missions(cfg, all_missions=True)] == ["all", "labs"]
 
 
 def test_role_words_follow_the_profile_plan_switch():
