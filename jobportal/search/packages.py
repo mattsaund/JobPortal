@@ -397,15 +397,34 @@ CURRENT DOCUMENT:
 async def _save_reworked_resume(lead: dict, md: str, review: dict, tokens: int, **package_updates) -> float:
     """Save a new resume on its lead: the review, check and keyword coverage go into the package (with any
     package_updates), the old rendered files are deleted and the PDFs are rendered again. Returns the new keyword coverage
-    (0 to 1)."""
-    package = lead.get("package") or {}
+    (0 to 1).
+
+    The lead is read again first. The AI work before this took a minute or more, and edits the lead page saved meanwhile
+    (contacts, the checklist, notes) must not be overwritten with the copy read before it started."""
+    current = _load_lead(lead["id"]) or lead
+    package = current.get("package") or {}
     ats_coverage, hit, miss = coverage(package.get("keywords") or [], md)
     package.update(resume_review=review, resume_check=review.get("check"), coverage={"hit": hit, "miss": miss}, **package_updates)
-    db.update_lead(lead["id"], resume_md=md, package=package, ats_coverage=ats_coverage, tokens=(lead.get("tokens") or 0) + tokens)
+    db.update_lead(lead["id"], resume_md=md, package=package, ats_coverage=ats_coverage, tokens=(current.get("tokens") or 0) + tokens)
     _delete_rendered_resume(lead["id"])
     await render_files(lead["id"])
     return ats_coverage
 
+
+async def recheck_resume(lead: dict) -> dict:
+    """Run the resume checks again on the lead's current resume (the lead editor's recheck, after each save and layout
+    change) and save the result as the package's resume_check. Returns the check.
+
+    The check renders a PDF, which takes a few seconds, so the lead is read again before saving: package edits saved
+    meanwhile stay, and when the resume itself changed meanwhile, this check of the old one isn't saved at all."""
+    package = lead.get("package") or {}
+    style = package.get("resume_style") or dict(DEFAULT_STYLE)
+    archetype = (package.get("resume_strategy") or {}).get("archetype", "")
+    check = await check_resume(lead["resume_md"], package.get("keywords") or [], style, archetype)
+    current = _load_lead(lead["id"])
+    if current and current.get("resume_md") == lead["resume_md"]:
+        db.update_lead(lead["id"], package={**(current.get("package") or {}), "resume_check": check})
+    return check
 
 
 async def gap_questions(lead_id: int) -> int:

@@ -533,6 +533,37 @@ def test_gap_questions_keep_edits_made_while_the_ai_works(fake_ai):
     assert db.lead_row(db.one("SELECT package FROM leads WHERE id=?", (lead_id,)))["package"]["notes"] == "edited meanwhile"
 
 
+def test_a_resume_recheck_keeps_package_edits_saved_while_it_ran(no_rendering, monkeypatch):
+    lead_id = packages.add_manual_lead("https://jobs.example.com/16", "x" * 700, "Data Intern", "Contoso")
+    db.update_lead(lead_id, resume_md="# Jordan Rivera", package={"keywords": ["SQL"]})
+    real_check = packages.check_resume
+
+    async def check_while_the_user_saves(md, keywords, style, archetype=""):
+        db.update_lead(lead_id, package={"keywords": ["SQL"], "plan_done": [0, 1]})  # the lead page saves its checklist
+        return await real_check(md, keywords, style, archetype)
+
+    monkeypatch.setattr(packages, "check_resume", check_while_the_user_saves)
+    assert asyncio.run(packages.recheck_resume(packages._load_lead(lead_id)))["score"] == 90
+    package = packages._load_lead(lead_id)["package"]
+    assert package["plan_done"] == [0, 1] and package["resume_check"]["score"] == 90
+
+
+def test_a_reworked_resume_keeps_package_edits_saved_while_the_ai_worked(fake_ai, no_rendering):
+    lead_id = packages.add_manual_lead("https://jobs.example.com/17", "x" * 700, "Data Intern", "Contoso")
+    db.update_lead(lead_id, resume_md="# Jordan Rivera", package={"keywords": ["SQL"]})
+    item = {"id": 1, "name": "General resume", "md": "# Jordan Rivera\n\n## Skills\n- SQL", "style": {}}
+
+    def tailor(prompt):
+        db.update_lead(lead_id, package={"keywords": ["SQL"], "contacts": [{"name": "Riley Chen"}]})  # added on the lead page
+        return {"text": item["md"], "change_summary": "Tailored"}
+
+    fake_ai.responses["library-tailor"] = tailor
+    fake_ai.responses["resume-review"] = {"resume_md": item["md"], "changes": []}
+    asyncio.run(packages.use_saved_resume(lead_id, item, tailor=True))
+    package = packages._load_lead(lead_id)["package"]
+    assert package["contacts"] == [{"name": "Riley Chen"}] and package["resume_from_library"] == 1
+
+
 def test_use_saved_resume_as_is(no_rendering):
     lead_id = packages.add_manual_lead("https://jobs.example.com/13", "x" * 700, "Data Intern", "Contoso")
     db.update_lead(lead_id, package={"keywords": ["Python", "SQL"]})

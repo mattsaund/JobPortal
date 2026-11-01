@@ -68,9 +68,4 @@ async def resume_check(lead_id: int):
     lead = lead_or_404(lead_id)
     if not lead.get("resume_md"):
         raise HTTPException(404, "no resume yet")
-    package = lead.get("package") or {}
-    style = package.get("resume_style") or {"theme": "classic", "max_pages": 1}
-    archetype = (package.get("resume_strategy") or {}).get("archetype", "")
-    package["resume_check"] = await packages.check_resume(lead["resume_md"], package.get("keywords") or [], style, archetype)
-    db.update_lead(lead_id, package=package)
-    return package["resume_check"]
+    return await packages.recheck_resume(lead)
