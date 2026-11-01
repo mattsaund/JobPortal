@@ -68,13 +68,24 @@ function onCfgEdit(e) {
 document.addEventListener("input", onCfgEdit);
 document.addEventListener("change", onCfgEdit);
 
-// Saves the edited paths of S.cfg over the settings as they are now, then keeps the server's answer as S.cfg.
+// Saves the edited paths of S.cfg over the settings as they are now, then keeps the server's answer as S.cfg. A field
+// you change while the save is on its way isn't part of it: that edit is copied onto the answer and stays unsaved, so
+// the field and S.cfg agree and the next save sends it. When the save fails, every edit stays unsaved.
 async function saveCfg() {
-  const fresh = await api("/api/settings");
-  for (const path of S.cfgEdits) setPath(fresh, path, getPath(S.cfg, path));
-  S.cfg = await api("/api/settings", { method: "PUT", body: fresh });
-  S.cfgDirty = false;
-  S.cfgEdits.clear();
+  const mine = S.cfg, edits = [...S.cfgEdits];
+  S.cfgEdits.clear();  // what's edited from here on is new
+  let saved;
+  try {
+    const fresh = await api("/api/settings");
+    for (const path of edits) setPath(fresh, path, getPath(mine, path));
+    saved = await api("/api/settings", { method: "PUT", body: fresh });
+  } catch (err) {
+    edits.forEach((path) => S.cfgEdits.add(path));
+    throw err;
+  }
+  for (const path of S.cfgEdits) setPath(saved, path, getPath(mine, path));
+  S.cfg = saved;
+  S.cfgDirty = S.cfgEdits.size > 0;
   S.searchArea = S.cfg.locations.allowed;
   S.industries = S.cfg.industries;
   toast("Saved", "Your settings are updated.");
