@@ -339,11 +339,14 @@ def _postings(leads: list[dict]) -> list[dict]:
     return out
 
 
-def _market_titles(postings: list[dict], near: TargetMatcher) -> list[str]:
+def _market_titles(postings: list[dict], near: TargetMatcher, known: list[frozenset]) -> list[str]:
     """The titles that come up most in the user's own search, as role candidates: postings grouped by role, the ones with
     the most qualified leads first, then the most postings, then the best score. A title needs a qualified lead, or three
     postings near the user's targets (textutil.TargetMatcher, the search's own target check), so a stray posting never
-    becomes a role. Leads the user deleted don't count."""
+    becomes a role. Leads the user deleted don't count.
+
+    known: the keys of the candidates found before (targets, plan, ...). A title that's one of those roles still comes back
+    (it tags that role as one the leads show too), but only new roles count toward MARKET_MAX."""
     found: dict[frozenset, dict] = {}
     for posting in postings:
         if posting["trashed"]:
@@ -358,9 +361,16 @@ def _market_titles(postings: list[dict], near: TargetMatcher) -> list[str]:
             entry["qualified"] += 1
             entry["best"] = max(entry["best"], posting["score"] or 0)
         entry["near"] = entry["near"] or near.matches(posting["title"])
-    ranked = sorted((e for e in found.values() if e["qualified"] or (e["seen"] >= 3 and e["near"])),
-                    key=lambda e: (-e["qualified"], -e["seen"], -e["best"]))
-    return [e["label"] for e in ranked[:MARKET_MAX]]
+    ranked = sorted(((key, e) for key, e in found.items() if e["qualified"] or (e["seen"] >= 3 and e["near"])),
+                    key=lambda item: (-item[1]["qualified"], -item[1]["seen"], -item[1]["best"]))
+    titles, new = [], 0
+    for key, entry in ranked:
+        repeats = any(key <= k for k in known)  # the same role, or a less specific form of one (see _group)
+        if not repeats and new == MARKET_MAX:
+            continue
+        new += not repeats
+        titles.append(entry["label"])
+    return titles
 
 
 # ---------------------------------------------------------------- picking the roles
@@ -395,7 +405,8 @@ def _candidates(cfg: dict, postings: list[dict]) -> list[tuple[str, str]]:
     found += [(clean_title(t), "experience") for t in experience_titles(profile_mod.get("project_bank"))[:EXPERIENCE_MAX]]
     found += [(clean_title(str(s.get("title") or "")), "suggested") for s in _latest_suggestions()]
     near = TargetMatcher(plan.target_phrases(cfg), cfg["locations"].get("allowed"))
-    found += [(title, "market") for title in _market_titles(postings, near)]
+    known = [role_key(title) for title, _ in found if title]
+    found += [(title, "market") for title in _market_titles(postings, near, known)]
     return [(title, source) for title, source in found if title]
 
 

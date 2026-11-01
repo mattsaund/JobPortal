@@ -127,6 +127,17 @@ def test_many_target_roles_leave_room_for_other_sources():
     assert sources[-2:] == ["experience", "market"] and picked["more"] == ["Banquet Cook", "Barista"]
 
 
+def test_lead_titles_that_repeat_a_role_leave_room_for_new_ones():
+    db.kv_set("profile.answers", {"target_roles": ["Registered Nurse"]})
+    for title in ("RN - ICU", "Registered Nurse, Med-Surg"):  # the most qualified leads, but the role is a target already
+        _lead(title, score=95)
+    for title in ("Charge Nurse", "Clinic Nurse", "School Nurse", "Hospice Nurse", "Travel Nurse", "Flight Nurse"):
+        _lead(title, score=70)
+    roles = analysis.pick_roles()["roles"]
+    assert [r["source"] for r in roles].count("market") == analysis.MARKET_MAX
+    assert roles[0]["id"] == "registered-nurse" and roles[0]["sources"] == ["target", "market"]
+
+
 def test_market_numbers_for_each_role(client):
     _nurse()
     _lead("Registered Nurse, Med-Surg", score=90, missed=["Telemetry"])
