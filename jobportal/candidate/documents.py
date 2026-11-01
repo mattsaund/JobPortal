@@ -37,7 +37,7 @@ import uuid
 from pathlib import Path
 
 from jobportal.ai import client as ai, prompts, signin
-from jobportal.core import background, bus, db
+from jobportal.core import background, bus, db, osutil
 from jobportal.core.config import DATA, RESUME_DIR
 from jobportal.core.textutil import clean, extract_terms
 from jobportal.documents import extract
@@ -429,8 +429,7 @@ def add(filename: str, data: bytes, text: str | None = None) -> dict:
             raise ValueError(f"You can keep up to {MAX_DOCUMENTS} documents. Remove one first.")
         if text is None:
             text = read_text(filename, data)
-        # A file name with no folder parts and no characters Windows forbids.
-        name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", Path(filename or "document.txt").name).strip() or "document.txt"
+        name = osutil.storable_name(filename, "document.txt")
         doc_id = uuid.uuid4().hex[:12]
         DOCS_DIR.mkdir(parents=True, exist_ok=True)
         stored = DOCS_DIR / f"{doc_id} {name}"

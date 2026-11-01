@@ -10,12 +10,13 @@ Nothing here touches the database or the AI."""
 import asyncio
 import json
 import random
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 import httpx
+
+from jobportal.core.textutil import NATIONWIDE_RE
 
 # A desktop Chrome user agent. Several job sites refuse or strip requests from clients they don't recognize.
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
@@ -26,8 +27,9 @@ RETRY_STATUSES = (429, 502, 503, 504)  # rate limited, or a passing server probl
 # itself, so there is no posting page to fetch more details from.
 SOCIAL_SOURCES = frozenset({"hackernews", "mastodon", "reddit", "bluesky"})
 # An allowed location that means the whole country ("Nationwide", "Anywhere in the US", "USA"). Match it against the
-# lowercased, stripped text with fullmatch(). core/textutil.LocationMatcher recognizes the same phrases.
-NATIONWIDE = re.compile(r"(anywhere( in the)?( us| usa| united states)?|nationwide|united states|usa|us)")
+# lowercased, stripped text with fullmatch(). It's the location filter's own pattern, so a source and the filter always
+# agree on which entries are nationwide.
+NATIONWIDE = NATIONWIDE_RE
 
 
 @dataclass

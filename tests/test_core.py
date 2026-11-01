@@ -392,6 +392,11 @@ def test_a_missing_chrome_override_falls_back_to_the_bundled_engine(tmp_path, mo
     assert Path(osutil.find_pdf_engine()).resolve() == engine.resolve()
 
 
+def test_upload_names_are_safe_to_store():
+    assert osutil.storable_name("../../uploads/Jordan Rivera: Resume|v2.pdf", "resume.txt") == "Jordan Rivera- Resume-v2.pdf"
+    assert osutil.storable_name("  ", "document.txt") == "document.txt" and osutil.storable_name(None, "resume.txt") == "resume.txt"
+
+
 def test_notification_text_never_becomes_part_of_a_script(monkeypatch):
     started = []
     monkeypatch.setattr(osutil.subprocess, "Popen", lambda cmd, **kw: started.append((cmd, kw.get("env"))))

@@ -25,11 +25,10 @@ import hashlib
 import re
 import time
 from datetime import date
-from pathlib import Path
 
 from jobportal.ai import client as ai
 from jobportal.candidate import documents, profile as profile_mod
-from jobportal.core import bus, db, settings as settings_mod
+from jobportal.core import bus, db, osutil, settings as settings_mod
 from jobportal.core.config import RESUME_DIR
 from jobportal.core.genres import DEFAULT_INDUSTRIES, OLD_INDUSTRIES
 from jobportal.core.levels import LEVELS, title_filters
@@ -270,8 +269,7 @@ async def import_resume(filename: str, data: bytes | None = None, text: str | No
         raise extract.ExtractError("that's too short to be a resume. Paste the whole thing.")
     raw = data if data is not None else text.encode("utf-8")
     RESUME_DIR.mkdir(parents=True, exist_ok=True)
-    # A file name with no folder parts and no characters Windows forbids, dated so imports on different days stay apart.
-    safe_name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", Path(filename or "resume.txt").name).strip() or "resume.txt"
+    safe_name = osutil.storable_name(filename, "resume.txt")  # dated below, so imports on different days stay apart
     stored = RESUME_DIR / f"{date.today().isoformat()} {safe_name}"
     stored.write_bytes(raw)
     text = text.strip()

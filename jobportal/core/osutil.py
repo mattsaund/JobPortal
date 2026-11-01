@@ -12,6 +12,7 @@ Key ideas:
   JOBPORTAL_SOFFICE (LibreOffice). A path that doesn't exist is ignored."""
 import functools
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,14 @@ from pathlib import Path
 IS_WIN = sys.platform == "win32"  # also true on 64-bit Windows
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
+
+
+def storable_name(filename: str | None, default: str) -> str:
+    """A name an uploaded file can be stored under on any system: the last part of `filename` (no folders), with the
+    characters Windows forbids in names and control characters each run turned into "-". `default` when nothing usable
+    is left. The resume import and the extra documents keep a copy of each upload under a name like this."""
+    name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", Path(filename or default).name).strip()
+    return name or default
 
 
 def os_name() -> str:

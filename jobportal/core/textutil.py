@@ -120,9 +120,10 @@ _US_RE = re.compile(r"\b(US|USA|United States)\b")
 _US_OR_DOTTED_RE = re.compile(r"\b(?:US|USA|United States)\b|\bU\.S\.(?:A\.)?")
 # A hybrid listing: part remote, part on-site at the place it names.
 _HYBRID_RE = re.compile(r"\bhybrid\b", re.I)
-# An allowed-location entry that means "anywhere in the US", matched against the whole entry in lowercase. Keep it in
-# step with NATIONWIDE_RE in web/static/js/components/search-area.js, which reads the same entries.
-_NATIONWIDE_RE = re.compile(r"(anywhere( in the)?( us| usa| united states)?|nationwide|united states|usa|us)")
+# An allowed-location entry that means "anywhere in the US": use fullmatch() on the whole entry, lowercased and stripped.
+# The collectors use it too (as collectors/base.NATIONWIDE). Keep it in step with NATIONWIDE_RE in
+# web/static/js/components/search-area.js, which reads the same entries.
+NATIONWIDE_RE = re.compile(r"(anywhere( in the)?( us| usa| united states)?|nationwide|united states|usa|us)")
 # Vague location text (see UNKNOWN_LOC) that still says the job is in the US.
 _SAYS_US_RE = re.compile(r"united states|\bus\b|usa|nationwide", re.I)
 # What separates the locations of a job that lists several: ";", "|", "/", " or " and line breaks.
@@ -342,7 +343,7 @@ class LocationMatcher:
             entry = entry.strip()
             if not entry:
                 continue
-            if _NATIONWIDE_RE.fullmatch(entry.lower()):  # checked before remote, since "anywhere" is also a remote word
+            if NATIONWIDE_RE.fullmatch(entry.lower()):  # checked before remote, since "anywhere" is also a remote word
                 self.anywhere_us = True
             elif REMOTE_RE.search(entry):
                 self.allow_remote = True
