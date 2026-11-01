@@ -63,8 +63,9 @@ async function renderSearchSettings(box) {
   const levels = questionFields().levels;
   const number = (path, label, step = 1) => cfgInput(path, label, "number", `step="${step}" min="0"`);
   const planList = (id, label, items) => `<label class="field"><span class="field-label">${label}</span><textarea id="${id}" rows="10">${esc((items || []).join("\n"))}</textarea></label>`;
-  const techGate = c.filters.require_tech_title === undefined ? ""
-    : cfgSwitch("filters.require_tech_title", "Only keep job-board titles that name a technical or science field", c.filters.require_tech_title);
+  // The cheap check before AI scoring (textutil.TargetMatcher on the server). It passes everything until you have targets.
+  const targetGate = c.filters.require_target_match === undefined ? ""
+    : cfgSwitch("filters.require_target_match", "Only keep jobs that match the roles you're targeting (lenient: related titles count)", c.filters.require_target_match);
   box.innerHTML = `<div class="stack" data-cfg>
     <section class="panel" id="area-card"></section>
     ${levels ? settingsPanel("Experience levels", "The levels to search at. They also decide which job titles get through the filters.",
@@ -78,7 +79,7 @@ async function renderSearchSettings(box) {
     ${settingsPanel("Filters", "Rules every job passes before any AI reads it. The title rules are made from your experience levels and the jobs you want each time you save your answers; change them here if you need to.",
       `<div class="form-grid">${cfgLines("filters.title_include", "A title must match one of these (patterns; leave empty for any title)", 7)}
         ${cfgLines("filters.title_exclude", "A title must not match these (patterns)", 7)}
-        ${cfgLines("filters.exclude_companies", "Never show these companies", 4)}${cfgLines("filters.exclude_keywords", "Skip a job when its description has", 4)}</div>${techGate}`)}
+        ${cfgLines("filters.exclude_companies", "Never show these companies", 4)}${cfgLines("filters.exclude_keywords", "Skip a job when its description has", 4)}</div>${targetGate}`)}
     ${settingsPanel("Industries", "Every lead is tagged with one of these, so you can filter and sort by it. One per line. Save, then tag your leads again.",
       `${cfgLines("industries", "Industries", 8)}<div class="block-actions"><button class="button light" type="button" data-act="retag-industries">${icon("sparkle")}Tag all leads again with AI</button></div>`)}
     ${settingsPanel("How much each search does", "",
@@ -112,6 +113,7 @@ const AI_STAGES = {
   package: ["Tailoring applications", "Researches each job and writes its resume, cover letter, emails and interview prep."],
   revise: ["Revise with AI", "Your edits by instruction in the editors, and the recruiter review."],
   profile: ["Your profile", "Builds and updates your profile from your resume, documents and answers, and learns your writing voice."],
+  documents: ["Reading your documents", "Reads the title, issuer, dates and skills off each certificate, license or award you add. A fast model is fine."],
   analysis: ["Analysis", "The fit and interest scores on the Analysis page."],
 };
 

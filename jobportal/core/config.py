@@ -46,6 +46,9 @@ EFFORTS = ["low", "medium", "high"]
 # user deleted: it leaves every list, and a later search never adds the same job again.
 APP_STATUSES = ["new", "ready", "applied", "interviewing", "accepted", "rejected", "trashed"]
 TRACKER_STATUSES = ["ready", "applied", "interviewing", "accepted", "rejected"]
+# The statuses that mean the user has applied. Reaching one records the application date (applied_at), even when a card
+# is dragged straight from Ready to apply to In interview, so the Tracker's and Analysis's numbers still add up.
+APPLIED_STATUSES = ("applied", "interviewing", "accepted")
 STATUS_LABELS = {"new": "New", "ready": "Ready to apply", "applied": "Application sent", "interviewing": "In interview",
                  "accepted": "Accepted", "rejected": "Rejected", "trashed": "Deleted"}
 # Statuses from v0.2.0 and earlier, and the status each one became. db._migrate() moves old leads over.

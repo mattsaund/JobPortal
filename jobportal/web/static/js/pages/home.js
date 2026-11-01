@@ -12,7 +12,8 @@
 
 // The optional standard questions Home asks after the required ones, in this order: the ones that most improve the
 // search and fill in the most application forms. Every question, these included, is in Settings, Profile.
-const RECOMMENDED = ["locations", "job_types", "experience_years", "education_level", "field_of_study", "phone", "linkedin", "start_date"];
+const RECOMMENDED = ["locations", "job_types", "experience_years", "education_level", "field_of_study", "licenses", "phone", "linkedin",
+  "start_date"];
 // Home never asks from these sections: voluntary self-identification, and "Help it sound like you". They stay in Settings.
 const NOT_ON_HOME = ["eeo", "about"];
 // The answers the search area is made from (LOCATION_ANSWERS in candidate/onboarding.py): saving one can change it.

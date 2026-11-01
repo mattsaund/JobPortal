@@ -28,7 +28,7 @@ from pathlib import Path
 from jobportal.ai import client as ai, prompts
 from jobportal.candidate import profile as profile_mod
 from jobportal.core import bus, db, settings as settings_mod
-from jobportal.core.config import CACHE, LEADS_DIR
+from jobportal.core.config import APPLIED_STATUSES, CACHE, LEADS_DIR
 from jobportal.core.genres import DEFAULT_INDUSTRIES
 from jobportal.core.textutil import coverage, extract_terms, fingerprint, url_key
 from jobportal.documents import render, resumecheck
@@ -115,8 +115,9 @@ def add_manual_lead(url: str = "", text: str = "", title: str = "", company: str
                            "stage": "qualified" if url or text else "ready", "app_status": app_status,
                            "created_at": now, "updated_at": now, "found": json.dumps(found)})
     db.add_event(lead_id, "created", "Added manually")
-    if app_status == "applied":  # added after applying: start the follow-up clock, like marking it applied on its page
-        db.update_lead(lead_id, applied_at=date.today().isoformat(), follow_up_at=(date.today() + timedelta(days=7)).isoformat())
+    if app_status in APPLIED_STATUSES:  # added after applying: record when, the same as moving it on the Tracker
+        follow_up = {"follow_up_at": (date.today() + timedelta(days=7)).isoformat()} if app_status == "applied" else {}
+        db.update_lead(lead_id, applied_at=date.today().isoformat(), **follow_up)
     return lead_id
 
 

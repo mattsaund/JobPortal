@@ -318,3 +318,12 @@ def test_dropping_several_files_picks_the_main_resume(client, fake_ai, sample_re
     assert out["picked"] == "full resume.md" and out["resume"]["filename"] == "full resume.md"
     assert sorted(d["name"] for d in client.get("/api/profile/documents").json()) == ["Food handler certificate.txt", "short resume.md"]
     assert client.post("/api/profile/documents/auto-main").json()["picked"] is None  # there's a main resume now
+
+
+def test_skipping_application_sent_still_records_the_date(client, fake_ai):
+    lead = client.post("/api/leads/manual", json={"title": "Electrician Apprentice", "company": "Example Electric",
+                                                  "app_status": "ready"}).json()
+    moved = client.patch(f"/api/leads/{lead['id']}", json={"app_status": "interviewing"}).json()
+    assert moved["applied_at"] and not moved.get("follow_up_at")  # applied, but not waiting on a reply anymore
+    quick = client.post("/api/leads/manual", json={"title": "Line Cook", "company": "Example Diner", "app_status": "accepted"}).json()
+    assert quick["applied_at"]

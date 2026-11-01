@@ -8,16 +8,16 @@
 
 // What each source is, by its key in S.meta.collectors.
 const SRC_HELP = {
-  github_lists: "Community-kept lists of internships and new-graduate jobs, updated daily. Used only when you search for internships or entry-level jobs.",
+  github_lists: "Community-kept lists of tech internships and new-graduate jobs, updated daily. Used only when your targets include tech jobs at the internship or entry level.",
   ats_boards: "The job boards of specific companies, read directly. Add any company by pasting its careers page.",
   linkedin: "LinkedIn's public job search (no sign-in): your search terms in your search area, at your experience levels.",
-  usajobs: "U.S. government jobs, including student programs. Needs a free key from developer.usajobs.gov.",
-  hackernews: "The monthly hiring threads on Hacker News, plus recent comments that mention jobs at your level.",
+  usajobs: "U.S. federal government jobs in every field, including student programs. Needs a free key from developer.usajobs.gov.",
+  hackernews: "The monthly hiring threads on Hacker News, plus recent comments that mention jobs at your level. Used only when your targets include tech jobs.",
   bluesky: "Hiring posts on Bluesky. Needs your handle and a free app password (Bluesky settings, Privacy and security, App passwords).",
   themuse: "Listings from The Muse at your levels, in your search area.",
   reddit: "Job posts in the subreddits below. Reddit limits how often it can be read, so the AI hunt covers more of it.",
   mastodon: "Hiring hashtags on Mastodon.",
-  remote_boards: "Remotive and RemoteOK, when Remote is part of your search area.",
+  remote_boards: "Remotive, RemoteOK and We Work Remotely, when Remote is part of your search area.",
   rss: "Any RSS or Atom feed. Tip: set up a Google Alert for the jobs you want, delivered as a feed, and paste its link here.",
   adzuna: "A job search site that gathers listings from many boards. Needs a free key from developer.adzuna.com.",
   serpapi: "Google's job results through SerpAPI (100 free searches a month at serpapi.com).",

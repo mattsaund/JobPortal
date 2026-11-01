@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from jobportal.ai import client as ai
 from jobportal.candidate import profile
 from jobportal.core import background, bus, db
-from jobportal.core.config import APP_STATUSES, LEADS_DIR, TRACKER_STATUSES
+from jobportal.core.config import APP_STATUSES, APPLIED_STATUSES, LEADS_DIR, TRACKER_STATUSES
 from jobportal.core.textutil import coverage
 from jobportal.search import packages, pipeline
 from jobportal.web.common import ai_error, lead_or_404
@@ -88,7 +88,8 @@ def _clear_rendered(folder, *names: str) -> None:
 def patch_lead(lead_id: int, body: dict):
     """Save edits from the lead page: status, notes, follow-up date, the resume and cover letter text, package details.
 
-    Side effects: marking a lead "applied" records the date and schedules a follow-up in 7 days. Editing the resume
+    Side effects: moving a lead to Application sent or later (config.APPLIED_STATUSES) records the date it was applied
+    for, and Application sent also schedules a follow-up in 7 days. Editing the resume
     recomputes its keyword coverage. Editing a document deletes its rendered files so downloads stay current."""
     current = lead_or_404(lead_id)
     fields = {k: v for k, v in body.items() if k in EDITABLE}
@@ -102,9 +103,10 @@ def patch_lead(lead_id: int, body: dict):
         if status not in APP_STATUSES:
             raise HTTPException(400, "bad status")
         db.add_event(lead_id, "status", f"{current['app_status']} → {status}")
-        if status == "applied" and not current.get("applied_at"):
+        if status in APPLIED_STATUSES and not current.get("applied_at"):
             fields["applied_at"] = date.today().isoformat()
-            fields.setdefault("follow_up_at", (date.today() + timedelta(days=7)).isoformat())
+            if status == "applied":  # now waiting to hear back: remind the user to follow up in a week
+                fields.setdefault("follow_up_at", (date.today() + timedelta(days=7)).isoformat())
     folder = LEADS_DIR / str(lead_id)
     if "resume_md" in fields and fields["resume_md"] != current.get("resume_md"):
         _clear_rendered(folder, *packages.RENDERED_RESUME)

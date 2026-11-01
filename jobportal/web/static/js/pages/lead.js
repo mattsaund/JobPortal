@@ -658,10 +658,12 @@ function showFit(frame, doc, pages, tag) {
 
 // ---------------------------------------------------------------- the resume's strategy and check
 // Names for the resume strategies (archetypes) the AI picks. A strategy not listed here shows its key, made readable.
-const ARCHETYPE_LABEL = { big_tech_swe: "Big-tech SWE", startup_product: "Startup or product", defense_contractor: "Defense contractor",
-  aerospace_space: "Aerospace and space", research_lab: "Research lab", federal_usajobs: "Federal (USAJobs)", data_ml: "Data and ML",
-  it_support_infra: "IT and infrastructure", solutions_sales_eng: "Solutions and sales engineering", experienced_professional: "Experienced professional",
-  general: "General", general_tech: "General tech" };
+// The kinds of resume the AI writes (resume_strategy.archetype, from the package prompt in ai/prompts.py). A key that isn't
+// here, such as one from a lead tailored by an older version, shows as its words with the first letter capitalized.
+const ARCHETYPE_LABEL = { large_employer: "Large employer", small_business: "Small business or startup", public_sector: "Public sector",
+  federal_usajobs: "Federal (USAJobs)", nonprofit: "Nonprofit", healthcare: "Healthcare", education: "Education",
+  skilled_trades: "Skilled trades", service_retail: "Service and retail", creative_agency: "Creative or agency", technical: "Technical",
+  research_lab: "Research lab", career_changer: "Career changer", experienced_professional: "Experienced professional", general: "General" };
 const archetypeLabel = (key) => ARCHETYPE_LABEL[key] || humanize(key);
 
 // The strategy block on the Resume tab: what kind of resume the AI wrote, the layout menu, the page limit, why it chose

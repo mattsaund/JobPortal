@@ -31,6 +31,11 @@ jobs:
         run: python -m ruff check .
       - name: Tests
         run: python -m pytest -q
+      - name: Dashboard scripts
+        # The dashboard has no build step, so a syntax error would only show up in the browser. node --check catches it.
+        if: runner.os == 'Linux'
+        shell: bash
+        run: for f in $(git ls-files 'jobportal/web/static/*.js'); do node --check "$f"; done
       - name: Doctor
         run: python -m jobportal --doctor
       - name: Server smoke test
