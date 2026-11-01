@@ -1,14 +1,15 @@
 """The SQLite database: every lead, run, event and saved value lives in one file, DATA/jobportal.db (see config.py).
 
-Who calls it: nearly every package. Read with q() (many rows) or one() (a single row), and write with ex(). Small JSON
-values go in the kv table through kv_get() and kv_set(). Leads have their own helpers: update_lead(), add_event() and
-lead_row().
+Who calls it: nearly every package. Read with q() (many rows) or one() (a single row), and write with ex(), or ex_many()
+for a batch of rows. Small JSON values go in the kv table through kv_get() and kv_set(). Leads have their own helpers:
+update_lead(), add_event() and lead_row().
 
 Key ideas:
 - One shared connection, opened on first use. FastAPI runs requests on several threads, so every query holds _lock (a
   re-entrant lock, so a function that holds it can still call q() or ex()). This is a single-user app, so one connection
   is plenty.
-- Autocommit: each statement is saved the moment it runs. There are no transactions to commit.
+- Autocommit: each statement is saved the moment it runs, and there is nothing to commit. The one exception is ex_many(),
+  which writes a whole batch in one transaction, since one disk sync per row adds up to seconds for thousands of rows.
 - Rows come back as plain dicts keyed by column name. Columns that hold JSON stay text until lead_row() decodes them.
 - Timestamps are UTC text from now(), so sorting them as text sorts them by time.
 - The tables are created by SCHEMA and upgraded by _migrate(). People installed v0.1.0, so their databases must keep
@@ -212,6 +213,23 @@ def ex(sql: str, args=()) -> int:
     """Run a statement that changes data (INSERT, UPDATE, DELETE). Returns the new row's id after an INSERT."""
     with _lock:
         return conn().execute(sql, args).lastrowid
+
+
+def ex_many(sql: str, rows) -> None:
+    """Run one statement for every set of values in `rows`, all in one transaction: either every row is written or none.
+
+    In autocommit each statement is its own transaction, and each one waits for the disk to confirm the write. For a
+    few rows that doesn't matter, but saving a triage backlog of thousands of candidates took about 10 seconds that way
+    (on the event loop, so the dashboard froze), and well under one second as one transaction."""
+    with _lock:
+        c = conn()
+        c.execute("BEGIN")
+        try:
+            c.executemany(sql, rows)
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+        c.execute("COMMIT")
 
 
 def kv_get(key: str, default=None):

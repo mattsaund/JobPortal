@@ -419,12 +419,10 @@ class Pipeline:
         per day of waiting (at most 20), so old ones get triaged before new finds of the same quality."""
         known_fields = {f.name for f in dataclass_fields(RawJob)}
         db.ex("DELETE FROM candidates WHERE first_seen < ?", ((date.today() - timedelta(days=BACKLOG_DAYS)).isoformat(),))
+        db.ex("DELETE FROM candidates WHERE fingerprint IN (SELECT fingerprint FROM leads)")  # became leads some other way
         loaded = 0
         for row in db.q("SELECT fingerprint, data, rule_score, first_seen FROM candidates"):
             fp = row["fingerprint"]
-            if db.one("SELECT 1 FROM leads WHERE fingerprint=?", (fp,)):
-                db.ex("DELETE FROM candidates WHERE fingerprint=?", (fp,))
-                continue
             try:
                 # Only fields RawJob still has, so a backlog saved by an older version still loads.
                 job = RawJob(**{k: v for k, v in json.loads(row["data"]).items() if k in known_fields})
@@ -441,12 +439,12 @@ class Pipeline:
         """Save every candidate still in the pool to the backlog (the candidates table) and return how many there were. Only
         the best BACKLOG_MAX by rule score are kept. A candidate keeps the date it was first seen, which load_backlog uses."""
         now = db.now()
-        for fp, (score, job) in self.pool.items():
-            # Save the candidate's own rule score, not one raised for waiting, or the waiting bonus would pile up each run.
-            rule_score = self.backlog_scores.get(fp, score)
-            db.ex("""INSERT INTO candidates(fingerprint, data, rule_score, first_seen, last_seen) VALUES(?,?,?,?,?)
-                     ON CONFLICT(fingerprint) DO UPDATE SET data=excluded.data, rule_score=excluded.rule_score, last_seen=excluded.last_seen""",
-                  (fp, json.dumps(asdict(job), default=str), rule_score, now, now))
+        # One transaction for the lot (db.ex_many): a backlog can hold thousands of candidates. Each keeps its own rule
+        # score, not one raised for waiting, or the waiting bonus would pile up each run.
+        db.ex_many("""INSERT INTO candidates(fingerprint, data, rule_score, first_seen, last_seen) VALUES(?,?,?,?,?)
+                      ON CONFLICT(fingerprint) DO UPDATE SET data=excluded.data, rule_score=excluded.rule_score, last_seen=excluded.last_seen""",
+                   [(fp, json.dumps(asdict(job), default=str), self.backlog_scores.get(fp, score), now, now)
+                    for fp, (score, job) in self.pool.items()])
         kept = len(self.pool)
         db.ex("DELETE FROM candidates WHERE fingerprint IN (SELECT fingerprint FROM candidates ORDER BY rule_score ASC "
               "LIMIT max(0, (SELECT COUNT(*) FROM candidates) - ?))", (BACKLOG_MAX,))

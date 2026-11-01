@@ -9,6 +9,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from jobportal.core import bus, config, db, genres, osutil, settings, textutil
 from jobportal.core.textutil import LocationMatcher
 
@@ -231,6 +233,17 @@ def test_lead_helpers():
     damaged = db.lead_row({"sources": "{oops", "found": "[oops", "triage": "oops", "package": "oops"})
     assert damaged == {"sources": [], "found": [], "triage": {}, "package": {}}  # list columns stay lists
     assert db.kv_get("missing", "fallback") == "fallback"
+
+
+def test_many_rows_are_written_in_one_transaction():
+    insert = "INSERT INTO leads(fingerprint, title, company) VALUES(?, ?, ?)"
+    db.ex_many(insert, [(f"fp{i}", "Medical Assistant", "Example Health") for i in range(3)])
+    assert db.one("SELECT COUNT(*) n FROM leads")["n"] == 3
+    with pytest.raises(sqlite3.IntegrityError):  # the second row repeats a fingerprint, which leads keeps unique
+        db.ex_many(insert, [("fp9", "Cook", "Example Bistro"), ("fp0", "Cook", "Example Bistro")])
+    assert db.one("SELECT COUNT(*) n FROM leads")["n"] == 3  # all or nothing: the first row of the failed batch isn't kept
+    db.ex(insert, ("fp10", "Barista", "Example Cafe"))  # the connection is back in autocommit afterwards
+    assert db.one("SELECT COUNT(*) n FROM leads")["n"] == 4
 
 
 # ---------------------------------------------------------------- settings
