@@ -113,18 +113,22 @@ JobPortal/
 │   │   ├── common.py           helpers the routes share
 │   │   └── static/             the dashboard
 │   │       ├── index.html      the page shell and the list of scripts, in load order
-│   │       ├── style.css       all the styles
-│   │       └── js/             core.js, live.js, layout.js, pages/ (one file per page), main.js, and components/ for
-│   │                           pieces several pages share (search area, answers form, settings form, file drops)
+│   │       ├── style.css       all the styles, on the team design's light and dark color tokens
+│   │       ├── logo.png        the sidebar logo (icon.png and favicon.png are the app icon and the browser tab icon)
+│   │       └── js/             core.js, live.js, layout.js, components/ (pieces several pages share: documents, file
+│   │                           drops, search area, answers form, settings form), pages/ (home, leads with lead.js and
+│   │                           the sources dialog, tracker, analysis, and settings with its parts: profile, dreams,
+│   │                           resumes, runs), then main.js
 │   ├── candidate/              what JobPortal knows about the user
-│   │   ├── onboarding.py       setup: importing the resume and the standard questions
+│   │   ├── onboarding.py       setup: importing the resume and the standard questions (asked one at a time on Home)
+│   │   ├── documents.py        extra documents (certificates, licenses, cover letters, awards), read and parsed
 │   │   ├── profile.py          the profile: building it, updating it, questions along the way, writing voice
 │   │   └── library.py          saved resumes (storage only, they never feed the profile)
 │   ├── search/                 finding jobs
 │   │   ├── pipeline.py         a search run: collect, filter, score with AI, queue packages
 │   │   ├── packages.py         work on one lead: build its package, rework its resume, add a job by hand
 │   │   ├── plan.py             what to search for: levels, roles, queries, dream companies
-│   │   ├── sources.py          the checks on the Sources page
+│   │   ├── sources.py          the checks in the Sources dialog on Leads
 │   │   └── collectors/         one file per kind of source (LinkedIn, company boards, feeds, GitHub lists, AI hunt)
 │   ├── ai/                     ChatGPT
 │   │   ├── client.py           every AI request (OpenAI's Responses API)
@@ -136,7 +140,7 @@ JobPortal/
 │   │   ├── resumecheck.py      resume checks: format, length, keywords, truthful skills
 │   │   ├── exports.py          downloads: single files, the package zip, emails
 │   │   └── revise.py           AI edits by instruction
-│   ├── insights/               the Analysis (analysis.py) and Equity mining (crm.py) pages
+│   ├── insights/               the Analysis page (analysis.py)
 │   ├── core/                   shared building blocks
 │   │   ├── background.py       background work (package builds, profile updates) and stopping it at shutdown
 │   │   ├── config.py           folders, the port and every default setting
@@ -194,7 +198,7 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 
 | Test file | What it covers |
 |---|---|
-| `test_api.py` | the HTTP API: setup, downloads, leads, the Dream list, sources, security checks, Quit |
+| `test_api.py` | the HTTP API: setup, documents, downloads, leads, the Tracker, the Dream list, sources, security checks, Quit |
 | `test_ai.py` | Sign in with ChatGPT and the AI request loop, against a mock OpenAI |
 | `test_profile.py` | building and updating the profile, and that only the resume and answers feed it |
 | `test_onboarding.py` | resume import, pre-filling the questions, saving answers |
@@ -202,6 +206,7 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 | `test_core.py` | config, settings, the database, live updates, location matching and other text helpers |
 | `test_levels.py` | experience levels and title filters |
 | `test_search.py` | the rule filters (levels, locations, the Dream list), dedupe, triage and building packages |
+| `test_writing.py` | the writing rules in every tracked file: no em dashes or middle dots, American spelling |
 | `test_platform.py` | cross-platform pieces: the command line, the app window, the PDF engine lookup |
 
 Add or update a test with every bug fix and every feature.
@@ -209,7 +214,7 @@ Add or update a test with every bug fix and every feature.
 ### Testing by hand
 
 - Run with a scratch data folder and another port: `jobportal --data-dir ./dev-data --port 8790 --browser`.
-- Import `tests/fixtures/sample_resume.md` to try setup without using your own resume.
+- Drop `tests/fixtures/sample_resume.md` on Home to try setup without using your own resume.
 - Without signing in to ChatGPT, anything that needs AI shows a "Sign in with ChatGPT first" error. That's expected. To try
   the AI, sign in with your own ChatGPT account.
 - After changing the dashboard, click through every page you touched with the browser's developer console open (F12). Any
@@ -238,7 +243,7 @@ Add or update a test with every bug fix and every feature.
 5. **Keep it safe.** The server only answers requests from this computer. Don't add endpoints that run commands or read
    arbitrary files. ChatGPT tokens never leave the data folder.
 6. **Write plainly.** In UI text, comments and docs: short sentences, American English, no em dashes and no middle dots as
-   separators.
+   separators. `tests/test_writing.py` checks every tracked file for the dashes, the dots and common British spellings.
 7. **Match the code around you.** Absolute imports (`from jobportal.core import db`), the existing naming, and comments that
    explain why. The dashboard is plain JavaScript with no build step: each page registers its own buttons with `onAction()`.
 
@@ -249,10 +254,12 @@ Add or update a test with every bug fix and every feature.
 | change or add a standard question | `QUESTIONS` in `candidate/onboarding.py` |
 | change what the AI writes | the prompt in `ai/prompts.py` |
 | add a job source | a collector in `search/collectors/`, listed in `search/collectors/__init__.py`, with defaults in `core/config.py` |
-| add a company job board | the Sources page, or `ATS_BOARDS` in `core/config.py` |
+| add a company job board | the Sources dialog on Leads, or `ATS_BOARDS` in `core/config.py` |
 | change resume layouts | `RESUME_THEMES` and `_DOCX_THEMES` in `documents/render.py` (keep `FIT_SCALES` in step with the copy in `web/static/js/pages/lead.js`), and the playbook in `resources/resume_playbook.md` |
 | add an API endpoint | the matching file in `web/routes/` |
 | change a dashboard page | its file in `web/static/js/pages/` |
+| change colors or the light and dark themes | the tokens at the top of `web/static/style.css` (the team design is in `documentation/design/`) |
+| change the Tracker's columns | `TRACKER_STATUSES` and `STATUS_LABELS` in `core/config.py` |
 | add something that differs by operating system | `core/osutil.py` |
 
 ## Releases

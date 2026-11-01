@@ -15,13 +15,18 @@ applications that are actually worth it.
 
 You give JobPortal three things:
 
-1. **Your resume.** PDF, Word, ODT, RTF, Markdown or plain text. You can also paste it in.
-2. **Answers to the standard job questions.** Contact info, work authorization, education, the roles and levels you want,
-   and where you want to work. Most of these fill in from your resume.
+1. **Your resume, plus anything else that shows what you can do.** Drop in your resume with your certificates, licenses,
+   cover letters, awards and transcripts, all at once. PDF, Word, ODT, RTF, Markdown or plain text. JobPortal picks your
+   best resume as the main one and reads the details off each document, like a certificate's name, issuer and dates.
+2. **Answers to a few questions.** Home asks them one at a time: contact info, work authorization, education, the jobs
+   and levels you want, and where you want to work. Most of these fill in from your resume.
 3. **Answers to questions it asks along the way.** When a job wants something your profile doesn't show, JobPortal asks
    you about it. Your answer makes every application after that better.
 
 That's all it learns from. JobPortal doesn't read anything else about you.
+
+It works for any kind of job and any level, from high school and the trades to graduate degrees, and from an arts degree
+to computer science.
 
 Then it searches LinkedIn, company career sites, job lists, Hacker News, Reddit, Mastodon, Bluesky, RSS feeds and USAJobs
 in the locations you pick: specific states and cities, remote, or nationwide. AI agents also dig through places normal job
@@ -52,23 +57,19 @@ The apps aren't code-signed yet. That's why Windows and macOS warn you the first
 
 ## Using it
 
-1. **Set up.** Continue with ChatGPT, import your resume, check the pre-filled questions, and build your profile.
-2. **Pick where to search.** States, cities, remote or nationwide.
-3. **Run a search.** Leads show up live as they qualify.
-4. **Open a lead.** See why it fits, edit the resume and cover letter, and download PDF or Word files.
-5. **Apply.** Use the lead's Apply button. The tracker reminds you when to follow up.
+1. **Home.** Continue with ChatGPT, drop your resume and documents, and answer the questions as they come in.
+2. **Run a search.** Use Run search at the top. Leads show up ranked as they qualify.
+3. **Open a lead.** Click it on the Leads page to see everything: why it fits, the tailored resume and cover letter,
+   emails, contacts and interview prep. Download PDF or Word files from there.
+4. **Apply and track it.** Use the lead's Apply button, then follow it on the Tracker.
 
-There's more in the sidebar:
-
-| Page | What it's for |
+| Menu | What it's for |
 |---|---|
-| Tracker | your applications on a board, from Saved to Offer |
-| Resumes | resume versions you want to keep and reuse |
+| Home | your resume and documents, the questions JobPortal has for you, and your top leads |
+| Leads | every job found, ranked. Click one to open it. Sources (where JobPortal searches) is here too |
+| Tracker | your applications on a board: Ready to apply, Application sent, In interview, Accepted and Rejected. Drag cards between columns, add or delete jobs, and see your contacts |
 | Analysis | how your fit compares with what the market wants |
-| Dream list | the companies and roles you care most about |
-| Equity mining | your most valuable next moves, ranked |
-| Sources | every place JobPortal searches, which you can turn on or off |
-| Settings | AI models, filters, the resume playbook and your data |
+| Settings | your profile and answers, where to search, the Dream list, saved resumes, ChatGPT and AI options, the light or dark theme, search history and your data |
 
 ## Screenshots
 
@@ -88,12 +89,12 @@ _Coming soon._
 ## To do
 
 - [ ] Add profile editing and creation
-- [ ] Job listing saving
-- [X] Get a good color scheme
-- [X] Pick a good font 
-- [X] Get a good logo 
+- [x] Job listing saving
+- [x] Get a good color scheme
+- [x] Pick a good font
+- [x] Get a good logo
 - [ ] Change the name (maybe?) - Currently Pending
-- [ ] Simplify the UI: fewer buttons and fewer words. Sleek, simple and easy to use.
+- [x] Simplify the UI: fewer buttons and fewer words. Sleek, simple and easy to use.
 - [ ] Test Sign in with ChatGPT and a full search with a real ChatGPT plan, end to end. It hasn't been tried with a real
       account yet, and the alpha needs a working AI feature.
 - [ ] Finish extra documents in the dashboard: one drop zone in setup that takes your resume plus other resumes,
@@ -140,7 +141,7 @@ Everything stays on your computer, in one folder:
 | macOS | `~/Library/Application Support/JobPortal` |
 | Linux | `~/.local/share/JobPortal` |
 
-Settings, Your data shows the exact path. To start over, quit JobPortal and delete that folder.
+Settings, Data shows the exact path. To start over, quit JobPortal and delete that folder.
 
 - The app's server only talks to your own computer. Other websites can't change anything in it.
 - Each AI task sends OpenAI only what it needs. Your answers about gender, race, veteran status and disability are never
