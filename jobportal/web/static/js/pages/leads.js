@@ -280,11 +280,13 @@ function leadCard(l, fresh) {
     <div class="job-details"${open ? "" : " hidden"}></div></article>`;
 }
 
-// The company's first letter in a tinted square. The tint comes from the name, so a company keeps its color.
+// The company's first letter in a tinted square (the classes tint-0 to tint-2 in style.css). The tint comes from the
+// name, so a company keeps its color. [...name] splits by characters, so a name that starts with an emoji or an accented
+// letter written in two code units keeps its whole first character.
 function companyLogo(company) {
-  const name = String(company || "?").trim() || "?";
-  const tint = [...name].reduce((sum, c) => sum + c.charCodeAt(0), 0) % 3;
-  return `<span class="company-logo tint-${tint}" aria-hidden="true">${esc(name[0].toUpperCase())}</span>`;
+  const letters = [...(String(company || "?").trim() || "?")];
+  const tint = letters.reduce((sum, c) => sum + c.charCodeAt(0), 0) % 3;
+  return `<span class="company-logo tint-${tint}" aria-hidden="true">${esc(letters[0].toUpperCase())}</span>`;
 }
 
 // The small tag after the company: what stage the lead is at, your status, or NEW for a lead found in the last two days.
