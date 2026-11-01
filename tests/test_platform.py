@@ -39,6 +39,41 @@ def test_stop_never_signals_a_stale_pid_file(monkeypatch):
         bystander.wait()
 
 
+def test_stop_asks_the_server_to_quit_and_never_signals_the_pid_file(monkeypatch):
+    """With a server up, a PID file can still be stale (left by a crash, while another server took the port), so --stop
+    asks the server itself to quit instead of signaling the number in the file."""
+    from jobportal.app import desktop
+    answering = [True]
+    monkeypatch.setattr(desktop, "up", lambda: answering[0])
+    bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    pid_file = cli._pid_file()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(bystander.pid), encoding="utf-8")
+    try:
+        monkeypatch.setattr(cli, "_request_quit", lambda: False)  # a server that can't be stopped this way
+        assert cli.stop() == 1 and pid_file.exists()
+
+        def quit_server():
+            answering[0] = False
+            return True
+        monkeypatch.setattr(cli, "_request_quit", quit_server)
+        assert cli.stop() == 0 and not pid_file.exists()
+        assert bystander.poll() is None  # alive both times
+    finally:
+        bystander.kill()
+        bystander.wait()
+
+
+def test_a_second_server_on_a_busy_port_leaves_the_pid_file_alone(monkeypatch):
+    from jobportal.app import desktop
+    monkeypatch.setattr(desktop, "up", lambda: True)  # --background already runs on this port
+    pid_file = cli._pid_file()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text("4242", encoding="utf-8")
+    assert cli.serve() == 1
+    assert pid_file.read_text(encoding="utf-8") == "4242"  # so --stop still knows the first server
+
+
 def test_cli_version_and_doctor(tmp_path):
     env = {**os.environ, "JOBPORTAL_HOME": str(tmp_path)}
     out = subprocess.run([sys.executable, "-m", "jobportal", "--version"], capture_output=True, text=True, env=env, timeout=60)
