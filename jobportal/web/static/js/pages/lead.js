@@ -467,6 +467,27 @@ function renderActivityTab(box, l) {
       ${block("Log what happened", `<div class="filters">${presets}</div>
         <div class="inline-form"><input type="text" data-event-text placeholder="Something else" aria-label="What happened">
           <button class="button outline" type="button" data-act="log-event">Log it</button></div>`)}</div></div>`;
+  // The notes and the follow-up date have Save buttons, so a change to either is an unsaved edit until it's saved: moving
+  // away asks first, and live updates leave the tab alone. "Log what happened" isn't: it's sent as you log it.
+  box.addEventListener("input", () => (S.dirty = activityEdited()));
+}
+
+// True when the notes or the follow-up date on screen differ from what was saved. Saving one of them updates its
+// defaultValue, so an unsaved change to the other one still counts.
+function activityEdited() {
+  return ["[data-notes]", "[data-follow-up]"].some((selector) => {
+    const field = lv(selector);
+    return !!field && field.value !== field.defaultValue;
+  });
+}
+
+// Saves the notes or the follow-up date (one field of the lead), then marks what was sent as saved.
+async function saveActivityField(selector, key, emptyValue) {
+  const field = lv(selector), value = field.value;
+  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { [key]: value || emptyValue } });
+  field.defaultValue = value;  // what you typed while it saved stays unsaved
+  S.lead[key] = value || emptyValue;
+  S.dirty = activityEdited();
 }
 
 // Download buttons: exportButtons(12, "resume", ["pdf", "docx"], "Resume") makes "Resume PDF" and "Resume DOCX".
@@ -902,11 +923,11 @@ onAction("rm-answer", (el) => {
 onAction("copy-answer", (el) => copy(lv(`[data-aa="${el.dataset.i}"]`).value));
 // Activity tab
 onAction("save-notes", async () => {
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { notes: lv("[data-notes]").value } });
+  await saveActivityField("[data-notes]", "notes", "");
   toast("Saved", "Your notes are updated.");
 });
 onAction("save-follow-up", async () => {
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { follow_up_at: lv("[data-follow-up]").value || null } });
+  await saveActivityField("[data-follow-up]", "follow_up_at", null);
   toast("Saved", "Follow-up date set.");
   refreshStats();
 });
