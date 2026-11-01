@@ -656,6 +656,35 @@ def test_linkedin_search_runs_to_the_end(monkeypatch):
     assert logs[-1] == "2 searches found 1 unique postings"
 
 
+def test_linkedin_backs_off_when_blocked_and_counts_what_it_did(monkeypatch):
+    cfg = make_cfg(allowed=["Ohio", "Remote", "Pittsburgh, PA"], dream_bypass=False)
+    cfg["search"]["queries"] = ["nurse", "medical assistant", "phlebotomist"]  # nine searches in all
+    logs, waits = [], []
+
+    class Blocked:
+        status_code, text = 999, ""  # LinkedIn's own "go away" answer
+
+    async def fake_request(method, url, **kw):
+        return Blocked()
+
+    async def record_wait(seconds):
+        waits.append(seconds)
+
+    monkeypatch.setattr(linkedin.asyncio, "sleep", record_wait)
+
+    async def scenario():
+        ctx = Ctx(cfg, lambda source, msg, level="info": logs.append(msg))
+        ctx.request = fake_request
+        try:
+            return await linkedin.collect(ctx)
+        finally:
+            await ctx.close()
+
+    assert asyncio.run(scenario()) == []
+    assert logs[-1] == "3 searches found 0 unique postings"  # stopped after three blocks, and says so
+    assert waits.count(linkedin.BACKOFF_SECONDS) == 2 and len(waits) == 4  # a pause before each later search, plus back-offs
+
+
 def test_hunt_rotates_missions_and_respects_levels():
     cfg = make_cfg()
     cfg["sources"]["ai_hunt"].update(missions_per_run=2, missions=[
