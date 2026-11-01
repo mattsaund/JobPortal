@@ -8,6 +8,7 @@ last resort.
 
 fetch() returns a dict that always has "description" and, when the source gives them, "apply_url", "deadline", "location",
 "posted_at", "company" and "title". It raises on network and HTTP errors; callers treat a failure as "no extra details"."""
+import asyncio
 import json
 import re
 from urllib.parse import parse_qs, unquote, urlparse
@@ -36,13 +37,19 @@ def _jsonld_jobposting(html: str) -> dict | None:
 
 
 def _ld_location(posting: dict) -> str:
-    """A JobPosting's locations as "City, ST | City, ST", plus "Remote" when it is marked as telecommuting."""
+    """A JobPosting's locations as "City, ST | City, ST", plus "Remote" when it is marked as telecommuting. Sites write a
+    place as a Place object with an address, or as plain text ("Remote", "Columbus, OH"), which is used as it is."""
     places = posting.get("jobLocation") or []
     places = places if isinstance(places, list) else [places]
     out = []
     for place in places:
-        address = (place or {}).get("address") or {}
-        if isinstance(address, dict):  # some sites put a plain string here, which has no parts to read
+        if isinstance(place, str):
+            out.append(clean(place))
+            continue
+        address = (place.get("address") or {}) if isinstance(place, dict) else {}
+        if isinstance(address, str):
+            out.append(clean(address))
+        elif isinstance(address, dict):
             out.append(", ".join(x for x in [address.get("addressLocality"), address.get("addressRegion")] if x))
     if str(posting.get("jobLocationType", "")).upper() == "TELECOMMUTE":
         out.append("Remote")
@@ -60,12 +67,14 @@ async def linkedin_detail(ctx: Ctx, job_id: str) -> dict:
     if criteria:
         out["description"] += "\n\n" + "\n".join(f"{name}: {value}" for name, value in criteria)
     # An offsite apply link sits in an HTML comment inside <code id="applyUrl">, wrapped in a LinkedIn redirect whose "url"
-    # parameter holds the real address.
+    # parameter holds the real address. parse_qs has already decoded that parameter once; decoding it again would also
+    # decode the real address's own escapes ("%26" inside it would become "&" and split its query). It's decoded again only
+    # when it doesn't read as an address yet, which a twice-encoded parameter wouldn't.
     apply = re.search(r'<code id="applyUrl"[^>]*><!--"(.*?)"--></code>', html)
     if apply:
         link = apply.group(1)
-        query = parse_qs(urlparse(link).query)
-        out["apply_url"] = unquote(query["url"][0]) if "url" in query else link
+        real = parse_qs(urlparse(link).query).get("url", [""])[0]
+        out["apply_url"] = (real if real.startswith(("http://", "https://")) else unquote(real)) if real else link
     return out
 
 
@@ -120,11 +129,15 @@ async def fetch(ctx: Ctx, url: str, meta: dict | None = None) -> dict:
         return {"description": text[:MAX_DESC], "apply_url": d.get("applyUrl")}
 
     if "ashbyhq.com" in host and len(segments) >= 2:  # jobs.ashbyhq.com/<slug>/<job id>
-        # Ashby has no single-posting API, so read the whole board once per run and find the posting in it.
+        # Ashby has no single-posting API, so read the whole board once per run and find the posting in it. The download
+        # itself is what's kept: a triage batch fetches its postings side by side, and every one from the same board would
+        # otherwise start its own download before the first one finished. shield() keeps one fetch's time limit from
+        # canceling the download the others wait on.
         boards = ctx.cache.setdefault("ashby_boards", {})
         if segments[0] not in boards:
-            boards[segments[0]] = await ctx.get_json(f"https://api.ashbyhq.com/posting-api/job-board/{segments[0]}")
-        for j in boards[segments[0]].get("jobs", []):
+            boards[segments[0]] = asyncio.ensure_future(ctx.get_json(f"https://api.ashbyhq.com/posting-api/job-board/{segments[0]}"))
+        board = await asyncio.shield(boards[segments[0]])
+        for j in board.get("jobs", []):
             if j.get("id") == segments[1]:
                 return {"description": (j.get("descriptionPlain") or html_to_text(j.get("descriptionHtml")))[:MAX_DESC],
                         "apply_url": j.get("applyUrl")}

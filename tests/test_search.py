@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 from datetime import date, timedelta
+from urllib.parse import quote
 
 import pytest
 
@@ -732,6 +733,40 @@ def test_detect_company_boards_from_links():
     assert ats.detect(f"https://recruiting.ultipro.com/EXA1000EXMP/JobBoard/{guid}/?q=nurse") == {
         "ats": "ukg", "url": f"https://recruiting.ultipro.com/EXA1000EXMP/JobBoard/{guid}"}
     assert ats.detect("https://[x") is None  # a broken address, which used to raise
+
+
+def test_posting_details_from_odd_pages():
+    from jobportal.search.collectors import details
+    # A JobPosting may name its place as plain text, or give an address as plain text.
+    assert details._ld_location({"jobLocation": "Remote"}) == "Remote"
+    assert details._ld_location({"jobLocation": [{"address": "Columbus, OH"},
+                                                 {"address": {"addressLocality": "Austin", "addressRegion": "TX"}}]}) == "Columbus, OH | Austin, TX"
+    # LinkedIn's apply redirect carries the real address encoded once, and that address keeps its own escapes.
+    real = "https://jobs.example.com/apply?return=https%3A%2F%2Fexample.com%2F%3Fa%3D1%26b%3D2"
+    page = f'<code id="applyUrl"><!--"https://www.linkedin.com/jobs/view/externalApply/4012345678?url={quote(real, safe="")}&urlHash=x"--></code>'
+    ctx = Ctx(make_cfg(), lambda *a, **k: None)
+    downloads = []
+
+    async def get_text(url, **kw):
+        return page
+
+    async def get_json(url, **kw):  # one Ashby board, slow to download
+        downloads.append(url)
+        await asyncio.sleep(0.01)
+        return {"jobs": [{"id": "a1", "descriptionPlain": "Care for patients."}, {"id": "a2", "descriptionPlain": "Answer phones."}]}
+
+    ctx.get_text, ctx.get_json = get_text, get_json
+
+    async def scenario():
+        linked = await details.linkedin_detail(ctx, "4012345678")
+        both = await asyncio.gather(details.fetch(ctx, "https://jobs.ashbyhq.com/example-health/a1"),
+                                    details.fetch(ctx, "https://jobs.ashbyhq.com/example-health/a2"))
+        await ctx.close()
+        return linked, both
+
+    linked, both = asyncio.run(scenario())
+    assert linked["apply_url"] == real  # not decoded a second time, which split its own query at "&b=2"
+    assert [d["description"] for d in both] == ["Care for patients.", "Answer phones."] and len(downloads) == 1
 
 
 def test_a_careers_page_is_searched_past_links_that_are_no_board(monkeypatch):
