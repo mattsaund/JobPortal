@@ -4,10 +4,12 @@
    jobs found to offers, and which industries and sources bring good fits.
    The roles aren't fixed. The server picks 3 to 8 job titles from your target roles, your search plan, your work history,
    the AI's suggestions and your own leads (insights/analysis.py), and you can remove any of them or add your own.
+   Live redraws (an "analysis" event) keep your place: open role details stay open, and the focus and anything typed in
+   "Add a role" survive. Only the newest load draws, so a click and a live event can't race.
    APIs: GET /api/analysis (the roles with their numbers and scores, the market numbers, the latest AI assessment and its
    history), POST /api/analysis/run, POST /api/analysis/roles/add, /remove and /restore (each answers with the page's data
-   again), GET /api/profile and PUT /api/profile/search_plan (the "Add to search plan" buttons). An "analysis" event redraws
-   it. The chart colors are CSS variables (--viz-*), checked for color blindness and contrast in both themes. */
+   again), GET /api/profile and PUT /api/profile/search_plan (the "Add to search plan" buttons).
+   The chart colors are CSS variables (--viz-*), checked for color blindness and contrast in both themes. */
 "use strict";
 
 // The radar's series in drawing order: [key in each row, legend label].
@@ -25,21 +27,24 @@ const ROLE_SOURCE = {
 };
 // The series you switched off in the legend, remembered between visits.
 const radarOff = new Set(store.list("radarOff"));
-// Redraws the radar when its box changes width a lot (a window resized, a phone turned). Replaced on every draw.
-let radarResize = null;
+// The page between draws: the newest load's ticket (only it may draw), the rows and series on the radar (the legend
+// redraws the radar from them without loading again), the observer that redraws the radar when its box changes width a
+// lot (a window resized, a phone turned), and the roles whose details are open (they stay open through live redraws).
+let analysisLoad = 0, radarView = null, radarResize = null;
+const openRoles = new Set();
 
 // The floating tooltip for the chart and the bars. html = null hides it.
 function vizTip(html, e) {
   let tip = $("#viz-tip");
+  if (!html) {
+    if (tip) tip.hidden = true;
+    return;
+  }
   if (!tip) {
     tip = document.createElement("div");
     tip.id = "viz-tip";
     tip.className = "viz-tip";
     document.body.appendChild(tip);
-  }
-  if (!html) {
-    tip.hidden = true;
-    return;
   }
   tip.innerHTML = html;
   tip.hidden = false;
@@ -47,12 +52,22 @@ function vizTip(html, e) {
   tip.style.left = `${Math.min(e.clientX + 16, innerWidth - tip.offsetWidth - 10)}px`;
   tip.style.top = `${Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 10)}px`;
 }
+// A tooltip showing when you leave the page would stay on screen: the element under it is gone.
+window.addEventListener("hashchange", () => vizTip(null));
 
 // A small color swatch for legends and table headers.
 const swatch = (key) => `<i class="swatch s-${key}" aria-hidden="true"></i>`;
 
 // "A", "A and B", "A, B and C".
 const listText = (items) => (items.length < 3 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+// A 0 to 100 value for the chart, or null when there's none. Anything that isn't a number (a stray value in an old saved
+// analysis) reads as missing, so it never reaches the drawing or the HTML.
+const score = (value) => (value == null || value === "" || !Number.isFinite(+value) ? null : Math.max(0, Math.min(100, Math.round(+value))));
+// A share (0.37) as a percent with one decimal ("37.0").
+const percent = (share) => ((Number(share) || 0) * 100).toFixed(1);
+// A list from the server, or [] when it isn't one.
+const listOf = (value) => (Array.isArray(value) ? value : []);
 
 // The width of text in the chart's font, for wrapping role names around the rim. One canvas, made on first use.
 let measureCanvas = null;
@@ -139,7 +154,7 @@ function radarSVG(rows, present, width) {
     // the right, clear of the ring numbers.
     const value = rows[peak][key], [x, y] = point(peak, Math.max(0, value - 13)), cos = Math.cos(angle(peak));
     const upright = Math.abs(cos) < 0.25, anchor = upright || cos < 0 ? "start" : "end";
-    svg += `<text x="${upright ? x + 7 : x}" y="${y + 4}" text-anchor="${anchor}" class="peak">${esc(label.replace(/^Your /, ""))} ${value}</text>`;
+    svg += `<text x="${upright ? x + 7 : x}" y="${y + 4}" text-anchor="${anchor}" class="peak">${esc(label.replace(/^Your /, ""))} ${esc(value)}</text>`;
   }
   rows.forEach((_, i) => {  // invisible wedges, bigger than the marks, for each spoke's tooltip
     const a0 = angle(i) - Math.PI / N, a1 = angle(i) + Math.PI / N, r = R + 34;
@@ -152,10 +167,12 @@ function radarSVG(rows, present, width) {
 // The radar's width: its box's, between a phone's and the widest the layout needs.
 const radarWidth = (box) => Math.round(Math.min(660, Math.max(320, box.clientWidth || 660)));
 
-// Draws the radar into #radar at its box's width, and draws it again when that width changes a lot.
+// Draws the radar into #radar at its box's width, and draws it again when that width changes a lot. rows and present are
+// kept (radarView), so the legend can redraw it without loading the page again.
 function drawRadar(rows, present) {
   const box = $("#radar");
   if (!box) return;
+  radarView = { rows, present };
   box.dataset.width = radarWidth(box);
   box.innerHTML = radarSVG(rows, present, +box.dataset.width);
   radarResize?.disconnect();
@@ -169,19 +186,48 @@ function drawRadar(rows, present) {
 // A list of horizontal bars. Each item gives [label, value, value text, tooltip text].
 function bars(items, maxValue) {
   return `<div class="bars">${items.map(([label, value, text, tip]) => `<div class="bar-row" data-tip="${esc(tip)}">
-      <span class="bar-label">${esc(label)}</span><span class="bar-track"><i style="width:${(value / maxValue) * 100}%"></i></span>
-      <span class="bar-value">${text}</span></div>`).join("")}</div>`;
+      <span class="bar-label">${esc(label)}</span><span class="bar-track"><i style="width:${((Number(value) || 0) / maxValue) * 100}%"></i></span>
+      <span class="bar-value">${esc(text)}</span></div>`).join("")}</div>`;
+}
+
+// The page's heading. With the page's data (d), it also says when the latest analysis ran and has the button that runs it.
+function analysisHeading(d = null) {
+  const latest = d?.latest, result = latest?.result;
+  const runLabel = d?.running ? `${spinner()} Analyzing` : result ? `${icon("refresh")} Analyze again` : `${icon("sparkle")} Run the analysis`;
+  const actions = d ? `<div class="heading-actions"><span class="muted-note">${latest ? `Analyzed ${esc(fmtTs(latest.ts))}, ${fmtTokens(+latest.tokens || 0)} tokens` : "Not analyzed yet"}</span>
+        <button class="button ${result ? "outline" : "primary"}" type="button" data-act="run-analysis"${d.running ? " disabled" : ""}>${runLabel}</button></div>` : "";
+  return `<div class="page-heading"><div><p class="eyebrow">YOUR MARKET</p><h1>Analysis</h1>
+      <p>Where you fit, where the jobs are, and what to work on next.</p></div>${actions}</div>`;
 }
 
 // Draws the page from GET /api/analysis, or from `data` when an action already has it, then wires the chart and bar
-// tooltips.
+// tooltips. Only the newest load draws. A first load that fails says so, with Try again; a live redraw that fails leaves
+// the page as it is.
 async function renderAnalysis(data = null) {
-  const d = data || (await api("/api/analysis"));
-  if (S.route[0] !== "analysis") return;
+  const ticket = ++analysisLoad;
+  let d = data;
+  if (!d) {
+    try {
+      d = await api("/api/analysis");
+    } catch (err) {
+      if (ticket === analysisLoad && S.route[0] === "analysis" && main.dataset.page !== "analysis") {
+        main.dataset.page = "analysis";
+        main.innerHTML = analysisHeading() + loadError(err);
+      }
+      return;
+    }
+  }
+  if (ticket !== analysisLoad || S.route[0] !== "analysis") return;
+  vizTip(null);  // what it points at is about to be replaced
+  // A redraw of the page on screen keeps your place: the focused element, and what you're typing in "Add a role".
+  const redraw = main.dataset.page === "analysis", focus = redraw ? focusKey(main) : "";
+  const typingBox = redraw ? $("#role-add") : null, typed = typingBox?.value || "";
+  const caret = [typingBox?.selectionStart ?? typed.length, typingBox?.selectionEnd ?? typed.length];
   main.dataset.page = "analysis";
   const market = d.market, latest = d.latest, result = latest?.result || null, fewest = d.limits.min;
   // One row per role: its market numbers plus the AI's fit and interest, and the fit from the analysis before.
-  const rows = d.roles.map((role) => ({ ...role, demand: market.demand_total ? role.demand_index : null, prev: role.fit_before }));
+  const rows = d.roles.map((role) => ({ ...role, fit: score(role.fit), interest: score(role.interest), prev: score(role.fit_before),
+    demand: market.demand_total ? score(role.demand_index) : null }));
   const enough = rows.length >= fewest;
   const present = new Set(["fit", "interest", "demand", "prev"].filter((key) => rows.some((row) => row[key] != null)));
   // Payoff: many jobs, high interest and room to grow. A missing number counts as 50.
@@ -193,7 +239,6 @@ async function renderAnalysis(data = null) {
     + ` type="button" data-act="radar-toggle" data-k="${key}" aria-pressed="${!radarOff.has(key)}">${swatch(key)}${label}</button>`).join("");
   const steer = result?.search_steering || {};
   const notYet = `<p class="muted-note">Shows up after the analysis runs.</p>`;
-  const runLabel = d.running ? `${spinner()} Analyzing` : result ? `${icon("refresh")} Analyze again` : `${icon("sparkle")} Run the analysis`;
   const runAgain = `<button class="button primary" type="button" data-act="run-analysis"${d.running ? " disabled" : ""}>${d.running ? `${spinner()} Analyzing` : `${icon("refresh")} Analyze again`}</button>`;
   const theseRoles = rows.length === 1 ? "this role" : rows.length ? `these ${rows.length} roles` : "your roles";
   let banner = "";
@@ -207,16 +252,16 @@ async function renderAnalysis(data = null) {
     banner = `<div class="banner info">${icon("sparkle")}<div><b>New since the last analysis:</b> ${esc(listText(d.unscored.map(nameOf)))}.
       Run it again to score ${d.unscored.length === 1 ? "it" : "them"}.</div>${runAgain}</div>`;
   }
-  const topMoves = (result?.top_priorities || []).map((t, i) => `<li class="move">
+  const topMoves = listOf(result?.top_priorities).map((t, i) => `<li class="move">
       <span class="move-num">${i + 1}</span><div><b>${esc(t.title)}</b>
         <div class="tags"><span class="tag purple">${icon(MOVE_ICON[t.type] || "arrow")}${esc(humanize(t.type))}</span>${t.role ? `<span class="tag">${esc(nameOf(t.role))}</span>` : ""}</div>
         <p>${esc(t.detail)}</p><p class="why">Why: ${esc(t.why)}</p></div></li>`).join("");
-  const maxGap = Math.max(1, ...market.gaps.map((x) => x.missing_in));
+  const maxGap = Math.max(1, ...market.gaps.map((x) => Number(x.missing_in) || 0));
   const gaps = market.gaps.length
     ? bars(market.gaps.map((x) => [x.skill, x.missing_in, `${x.missing_in}/${x.requested_in}`, `${x.skill}: missing in ${x.missing_in} of the ${x.requested_in} jobs that asked for it`]), maxGap)
     : `<div class="empty-state"><h3>Nothing measured yet</h3><p>This fills in as JobPortal tailors applications.</p></div>`;
   const qualifiedBars = (items, nameOfItem) => bars(items.map((x) => [nameOfItem(x), x.qualified, `${x.qualified} (avg ${x.avg_score ?? "-"})`,
-    `${nameOfItem(x)}: ${x.qualified} good fits of ${x.triaged} scored, average score ${x.avg_score ?? "-"}`]), Math.max(1, ...items.map((x) => x.qualified)));
+    `${nameOfItem(x)}: ${x.qualified} good fits of ${x.triaged} scored, average score ${x.avg_score ?? "-"}`]), Math.max(1, ...items.map((x) => Number(x.qualified) || 0)));
   const industries = market.industries || [];
   const suggestion = (x) => `<li><b>${esc(x.title)}</b><p>${esc(x.detail)}</p></li>`;
   const chart = enough
@@ -232,13 +277,10 @@ async function renderAnalysis(data = null) {
         <th>${swatch("interest")}Interest</th><th>${swatch("demand")}Jobs out there</th><th>Good fits</th><th>Average score</th><th>Fit change</th>
         <th>Skills your resumes lacked</th></tr></thead><tbody>${sorted.map(roleRows).join("")}</tbody></table></div>`
     : `<p class="muted-note">No roles yet. Add one below.</p>`;
-  const ideas = d.more_roles || [];
+  const ideas = listOf(d.more_roles);
   const removed = d.removed_roles.map((role) => `<span class="tag">${esc(role.label)}<button class="tag-x" type="button" data-act="role-restore"`
     + ` data-id="${esc(role.id)}" data-label="${esc(role.label)}" title="Bring it back" aria-label="Bring back ${esc(role.label)}">${icon("undo")}</button></span>`).join("");
-  main.innerHTML = `<div class="page-heading"><div><p class="eyebrow">YOUR MARKET</p><h1>Analysis</h1>
-      <p>Where you fit, where the jobs are, and what to work on next.</p></div>
-      <div class="heading-actions"><span class="muted-note">${latest ? `Analyzed ${esc(fmtTs(latest.ts))}, ${fmtTokens(+latest.tokens || 0)} tokens` : "Not analyzed yet"}</span>
-        <button class="button ${result ? "outline" : "primary"}" type="button" data-act="run-analysis"${d.running ? " disabled" : ""}>${runLabel}</button></div></div>
+  main.innerHTML = `${analysisHeading(d)}
     ${banner}
     <div class="analysis-top">
       <section class="panel"><div class="panel-heading"><h2>Fit and demand by role</h2>${enough ? `<div class="legend">${legend}</div>` : ""}</div>
@@ -258,15 +300,15 @@ async function renderAnalysis(data = null) {
         ${removed ? `<div class="role-removed"><span>Removed:</span><div class="tags">${removed}</div></div>` : ""}</div></section>
     <div class="two-col">
       <section class="panel"><h2>Skills employers asked for that your resumes couldn't show</h2>
-        <p class="panel-note">Across ${plural(market.packaged_leads, "tailored application")}. Learn or document these, and every future resume can use them.</p>
+        <p class="panel-note">Across ${esc(plural(market.packaged_leads, "tailored application"))}. Learn or document these, and every future resume can use them.</p>
         ${gaps}</section>
       <div class="stack">
         <section class="panel"><h2>Skills employers asked for that you already show</h2>
-          <div class="tags">${market.strengths.map((x) => `<span class="tag green" title="Asked for in ${x.requested_in}">${esc(x.skill)}</span>`).join("")
+          <div class="tags">${market.strengths.map((x) => `<span class="tag green" title="Asked for in ${esc(x.requested_in)}">${esc(x.skill)}</span>`).join("")
             || `<span class="muted-note">This fills in as applications are tailored.</span>`}</div></section>
         <section class="panel"><h2>Steer the search</h2>${result ? steerSearch(steer, nameOf) : notYet}</section>
         <section class="panel"><h2>Add these to your profile</h2>
-          ${(result?.profile_suggestions || []).length ? `<ul class="suggestions">${result.profile_suggestions.map(suggestion).join("")}</ul>` : notYet}
+          ${listOf(result?.profile_suggestions).length ? `<ul class="suggestions">${result.profile_suggestions.map(suggestion).join("")}</ul>` : notYet}
           <div class="block-actions"><a class="button outline" href="#/settings/profile/questions">Tell JobPortal about it</a>
             <a class="text-button" href="#/home">Answer open questions ${icon("arrow")}</a></div></section></div></div>
     <section class="panel"><h2>From found to hired</h2><div class="funnel">${funnel(market.funnel)}</div></section>
@@ -275,6 +317,9 @@ async function renderAnalysis(data = null) {
         ${industries.length ? qualifiedBars(industries, (x) => x.industry) : `<p class="muted-note">Run a search first.</p>`}</section>
       <section class="panel"><h2>Which sources bring good fits</h2>
         ${market.sources.length ? qualifiedBars(market.sources, (x) => LABEL_SRC[x.source] || humanize(x.source)) : `<p class="muted-note">Run a search first.</p>`}</section></div>`;
+  if (typed) $("#role-add").value = typed;
+  refocus(main, focus);
+  if (typed && document.activeElement?.id === "role-add") document.activeElement.setSelectionRange(...caret);
   if (enough) {
     drawRadar(rows, present);
     const box = $("#radar");
@@ -286,8 +331,8 @@ async function renderAnalysis(data = null) {
       const row = rows[+hit.dataset.i];
       $(`.spoke[data-i="${hit.dataset.i}"]`, box)?.classList.add("on");
       const values = [["fit", "Your fit"], ["interest", "Your interest"], ["demand", "Jobs out there"], ["prev", "Your fit before"]].filter(([key]) => row[key] != null)
-        .map(([key, label]) => `<div class="tip-row">${swatch(key)}<span>${label}</span><b>${row[key]}</b></div>`).join("");
-      vizTip(`<b>${esc(row.label)}</b>${values}<div class="tip-note">${plural(row.qualified, "good fit")}, ${(row.demand_share * 100).toFixed(1)}% of jobs.`
+        .map(([key, label]) => `<div class="tip-row">${swatch(key)}<span>${label}</span><b>${esc(row[key])}</b></div>`).join("");
+      vizTip(`<b>${esc(row.label)}</b>${values}<div class="tip-note">${esc(plural(row.qualified, "good fit"))}, ${esc(percent(row.demand_share))}% of jobs.`
         + ` From ${esc((ROLE_SOURCE[row.source] || [])[2] || row.source)}.</div>`, e);
     });
     box.addEventListener("mouseleave", () => {
@@ -295,6 +340,7 @@ async function renderAnalysis(data = null) {
       unhighlight();
     });
   } else {
+    radarView = null;
     radarResize?.disconnect();
   }
   $$(".bar-row", main).forEach((bar) => {
@@ -308,38 +354,39 @@ async function renderAnalysis(data = null) {
 const roleMove = (move) => `<li><b>${icon(MOVE_ICON[move.type] || "arrow")}${esc(move.title)}</b>`
   + ` <span class="muted-note">(${esc(move.effort)} effort, ${esc(move.impact)} impact)</span><p>${esc(move.detail)}</p></li>`;
 
-// Two table rows per role: its numbers with where it came from and a remove button, and a hidden row with where it came
-// from in full and the AI's reason, evidence, gaps and moves (a click on the first row shows it).
+// Two table rows per role: its numbers with where it came from and a remove button, and a details row with where it came
+// from in full and the AI's reason, evidence, gaps and moves (a click on the first row opens it, and it stays open through
+// live redraws).
 function roleRows(row) {
   const change = row.fit != null && row.prev != null
-    ? `${row.fit > row.prev ? icon("up") : row.fit < row.prev ? icon("chevron") : ""}${Math.abs(row.fit - row.prev)}` : "-";
+    ? `${row.fit > row.prev ? icon("up") : row.fit < row.prev ? icon("chevron") : ""}${esc(Math.abs(row.fit - row.prev))}` : "-";
   const [tag, color] = ROLE_SOURCE[row.source] || [humanize(row.source), ""];
   const from = `<span class="tag${color ? ` ${color}` : ""}">${row.source === "suggested" ? icon("sparkle") : ""}${esc(tag)}</span>`;
-  const origins = row.sources.map((source) => (ROLE_SOURCE[source] || [])[2] || source);
-  const ai = row.assessment;
+  const origins = listOf(row.sources).map((source) => (ROLE_SOURCE[source] || [])[2] || source);
+  const ai = row.assessment, open = openRoles.has(row.id);
   const details = `<p class="role-origin">From ${esc(listText(origins))}.${row.pinned ? " You added it, so it stays on the chart until you remove it." : ""}</p>`
     + (row.why ? `<p class="role-why"><b>Why it could fit:</b> ${esc(row.why)}</p>` : "")
     + (ai ? `<div class="three-col">
-        <div><h4>Evidence <span class="tag">${esc(humanize(ai.confidence))} confidence</span></h4>${bulletList(ai.evidence || [], "good")}</div>
-        <div><h4>Gaps</h4>${bulletList(ai.gaps || [], "warn")}</div>
-        <div><h4>Moves</h4><ul class="plain-list">${(ai.moves || []).map(roleMove).join("")}</ul></div></div>`
+        <div><h4>Evidence <span class="tag">${esc(humanize(ai.confidence))} confidence</span></h4>${bulletList(listOf(ai.evidence), "good")}</div>
+        <div><h4>Gaps</h4>${bulletList(listOf(ai.gaps), "warn")}</div>
+        <div><h4>Moves</h4><ul class="plain-list">${listOf(ai.moves).map(roleMove).join("")}</ul></div></div>`
       : row.why ? "" : `<p class="muted-note">Run the analysis for the evidence, gaps and moves.</p>`);
-  return `<tr class="role-row" data-act="role-row" data-id="${esc(row.id)}" tabindex="0" aria-expanded="false">
+  return `<tr class="role-row" data-act="role-row" data-id="${esc(row.id)}" tabindex="0" aria-expanded="${open}">
       <td><div class="role-name"><b>${esc(row.label)}</b>${icon("chevron")}<button class="icon-button role-remove" type="button" data-act="role-remove"
         data-id="${esc(row.id)}" data-label="${esc(row.label)}" data-pinned="${row.pinned ? 1 : 0}" title="Remove from the chart"
         aria-label="Remove ${esc(row.label)} from the chart">${icon("close")}</button></div></td>
-      <td>${from}</td><td>${row.fit ?? "-"}</td><td>${row.interest ?? "-"}</td>
-      <td>${row.demand ?? "-"}${row.demand == null ? "" : ` <small>(${(row.demand_share * 100).toFixed(1)}%)</small>`}</td>
-      <td>${row.qualified}</td><td>${row.avg_score ?? "-"}</td><td class="change">${change}</td>
-      <td class="wrap">${esc(row.top_missing.join(", ")) || `<span class="muted-note">None</span>`}</td></tr>
-    <tr class="role-details" data-details="${esc(row.id)}" hidden><td colspan="9">${details}</td></tr>`;
+      <td>${from}</td><td>${esc(row.fit ?? "-")}</td><td>${esc(row.interest ?? "-")}</td>
+      <td>${esc(row.demand ?? "-")}${row.demand == null ? "" : ` <small>(${esc(percent(row.demand_share))}%)</small>`}</td>
+      <td>${esc(row.qualified)}</td><td>${esc(row.avg_score ?? "-")}</td><td class="change">${change}</td>
+      <td class="wrap">${esc(listOf(row.top_missing).join(", ")) || `<span class="muted-note">None</span>`}</td></tr>
+    <tr class="role-details" data-details="${esc(row.id)}"${open ? "" : " hidden"}><td colspan="9">${details}</td></tr>`;
 }
 
 // "Steer the search": roles to lean into and away from, a note, and search terms and companies you can add to your search
 // plan with one click.
 function steerSearch(steer, nameOf) {
-  const roles = (ids, cls) => (ids || []).map((id) => `<span class="tag${cls}">${esc(nameOf(id))}</span>`).join("") || `<span class="muted-note">None</span>`;
-  const addList = (items, title, kind, button) => ((items || []).length
+  const roles = (ids, cls) => listOf(ids).map((id) => `<span class="tag${cls}">${esc(nameOf(id))}</span>`).join("") || `<span class="muted-note">None</span>`;
+  const addList = (items, title, kind, button) => (listOf(items).length
     ? `<h4>${title}</h4><div class="tags">${items.map((q) => `<span class="tag">${esc(q)}</span>`).join("")}</div>`
       + `<button class="button outline small" type="button" data-act="plan-add" data-kind="${kind}">${icon("plus")}${button}</button>`
     : "");
@@ -353,16 +400,16 @@ function steerSearch(steer, nameOf) {
 // The funnel: each step's count and its share of the step before.
 function funnel(stages) {
   return stages.map((stage, i) => {
-    const before = stages[i - 1]?.n;
+    const n = Number(stage.n) || 0, before = Number(stages[i - 1]?.n) || 0;
     let share = "";
-    if (i) share = before ? `${((stage.n / before) * 100).toFixed(stage.n / before < 0.1 ? 1 : 0)}% of the step before` : "None the step before";
-    return `<div class="funnel-step"><strong>${stage.n.toLocaleString()}</strong><span>${esc(stage.stage)}</span><small>${share}</small></div>`;
+    if (i) share = before ? `${((n / before) * 100).toFixed(n / before < 0.1 ? 1 : 0)}% of the step before` : "None the step before";
+    return `<div class="funnel-step"><strong>${esc(n.toLocaleString())}</strong><span>${esc(stage.stage)}</span><small>${share}</small></div>`;
   }).join(`<span class="funnel-arrow" aria-hidden="true">${icon("arrow")}</span>`);
 }
 
 // Posts one change to the roles and redraws the page from the answer (the page's data, like GET /api/analysis).
 async function changeRoles(change, body) {
-  renderAnalysis(await api(`/api/analysis/roles/${change}`, { method: "POST", body }));
+  await renderAnalysis(await api(`/api/analysis/roles/${change}`, { method: "POST", body }));
 }
 
 // ---------------------------------------------------------------- actions
@@ -371,29 +418,36 @@ onAction("run-analysis", async () => {
   toast("Analyzing", "Scoring your fit for each role. About a minute.");
   renderAnalysis();
 });
-onAction("radar-toggle", (el) => {  // a legend button shows or hides its series
+onAction("radar-toggle", (el) => {  // a legend button shows or hides its series, redrawing the radar from what's loaded
   const key = el.dataset.k;
   if (radarOff.has(key)) radarOff.delete(key);
   else radarOff.add(key);
   store.set("radarOff", JSON.stringify([...radarOff]));
-  renderAnalysis();
+  el.classList.toggle("off", radarOff.has(key));
+  el.setAttribute("aria-pressed", String(!radarOff.has(key)));
+  if (radarView) drawRadar(radarView.rows, radarView.present);
 });
-onAction("role-row", (el) => {
-  const details = $(`[data-details="${el.dataset.id}"]`);
+onAction("role-row", (el) => {  // opens or closes a role's details
+  const details = $(`[data-details="${CSS.escape(el.dataset.id)}"]`);
   details.hidden = !details.hidden;
   el.setAttribute("aria-expanded", String(!details.hidden));
+  if (details.hidden) openRoles.delete(el.dataset.id);
+  else openRoles.add(el.dataset.id);
 });
 onAction("role-add", async () => {  // adds the typed title as a role of your own
   const input = $("#role-add"), title = input.value.trim();
   if (!title) return input.focus();
+  let d;
   try {
-    await changeRoles("add", { title });
+    d = await api("/api/analysis/roles/add", { method: "POST", body: { title } });
   } catch (err) {
     toast("Couldn't add that role", err.message, "error");
     return;
   }
-  toast("Role added", `${title} is on your chart now. Run the analysis to score it.`);
+  input.value = "";  // it's added: the redraw shouldn't put it back in the box
+  await renderAnalysis(d);
   $("#role-add")?.focus();
+  toast("Role added", `${title} is on your chart now. Run the analysis to score it.`);
 });
 onAction("role-remove", async (el) => {  // takes a role off the chart for good, with Undo
   const { id, label } = el.dataset, added = el.dataset.pinned === "1";
