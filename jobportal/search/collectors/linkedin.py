@@ -98,7 +98,7 @@ async def collect(ctx: Ctx) -> list[RawJob]:
         return []
     experience = sc.get("experience") or linkedin_experience(plan.levels(ctx.cfg))
     random.shuffle(searches)
-    searches = searches[: int(sc.get("max_requests", 70))]
+    searches = searches[: int(sc.get("max_requests", 100))]  # 100: the default in core/config.py
     out, seen, blocked, made = [], set(), 0, 0
     for i, (keywords, location, extra) in enumerate(searches):
         if ctx.cancel.is_set():

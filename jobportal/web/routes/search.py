@@ -27,6 +27,7 @@ async def start_run(body: dict):
 
 @router.post("/api/run/stop")
 async def stop_run():
+    """Stop the search in progress, if any. It saves what it has and ends as "stopped" (see pipeline.stop)."""
     await pipeline.stop()
     return {"ok": True}
 
@@ -55,11 +56,15 @@ def ai_calls():
 
 @router.post("/api/sources/detect")
 async def detect_source(body: dict):
+    """Find the company job board behind a pasted careers link ({"url", "name"}) and read it once
+    (sources.detect_board)."""
     return await sources.detect_board((body.get("url") or "").strip(), body.get("name") or "")
 
 
 @router.post("/api/sources/test/{key}")
 async def test_source(key: str):
+    """Run one job source by itself and report how many of its jobs would pass the rule filters
+    (sources.test_collector)."""
     if key not in COLLECTORS:
         raise HTTPException(404)
     return await sources.test_collector(key)

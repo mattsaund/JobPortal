@@ -171,8 +171,9 @@ def posting_regex(levels, roles: list[str] | None = None) -> re.Pattern:
     keeping.
 
     Early-career searches look for early-career words. Other searches look for words from the user's target roles (3 or
-    more letters, without filler like "senior" or "remote"). There's no word edge at the end, so "nurse" also finds
-    "nursing". With no usable role words, ANY_JOB_RE is used instead: a list of job words from many fields."""
+    more letters, without filler like "senior" or "remote"). There's no word edge at the end, so a word also finds the
+    longer words it starts: "nurse" finds "nurses" and "teacher" finds "teachers" (but "nurse" doesn't find "nursing").
+    With no usable role words, ANY_JOB_RE is used instead: a list of job words from many fields."""
     if early_career(levels):
         return EARLY_POST_RE
     filler = {"and", "the", "for", "with", "level", "senior", "junior", "entry", "remote"}

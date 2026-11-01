@@ -89,6 +89,7 @@ async def save_some_answers(body: dict):
 
 @router.get("/api/profile")
 def get_profile():
+    """Every profile section, keyed by name (empty sections come back with their empty value)."""
     return profile.get_all()
 
 
@@ -158,6 +159,7 @@ async def pick_main_resume():
 
 @router.delete("/api/profile/documents/{doc_id}")
 def remove_document(doc_id: str):
+    """Forget one extra document and delete its stored copy. The profile rebuilds once the user pauses."""
     if not documents.remove(doc_id):
         raise HTTPException(404, "no such document")
     return {"ok": True}
@@ -176,11 +178,13 @@ def edit_profile_section(key: str, body: dict):
 
 @router.get("/api/profile/status")
 def profile_status():
+    """What the profile is doing now (a build, an update, the last error) and how far setup has come."""
     return profile.status_snapshot()
 
 
 @router.get("/api/profile/overview")
 def profile_overview():
+    """The overview in Settings, Profile: who the user is, what the profile knows and what it has made so far."""
     return profile.overview()
 
 
@@ -219,11 +223,14 @@ def profile_history(key: str):
 
 @router.get("/api/questions")
 def questions():
+    """Every question asked along the way, oldest first, with its status and answer."""
     return profile.questions()
 
 
 @router.post("/api/questions/answer")
 def answer_question(body: dict):
+    """Save the user's answer to a question ({"question", "answer"}; a new question is added as answered). Returns the
+    updated list and the profile status. The answer joins the profile on the next update."""
     if not body.get("question") or not str(body.get("answer", "")).strip():
         raise HTTPException(400, "question and answer required")
     updated = profile.answer_question(body["question"], body["answer"])
@@ -232,4 +239,5 @@ def answer_question(body: dict):
 
 @router.post("/api/questions/dismiss")
 def dismiss_question(body: dict):
+    """Mark a question as not relevant ({"question"}). Returns the updated list."""
     return profile.dismiss_question(body.get("question", ""))
