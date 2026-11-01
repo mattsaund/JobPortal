@@ -392,6 +392,20 @@ def test_a_whole_run_finds_triages_and_packages(fake_ai, no_rendering, ready_to_
                                                                                          "Data Intern": "filtered"}
 
 
+def test_two_quick_starts_make_one_run(fake_ai, ready_to_search, monkeypatch):
+    fake_source(monkeypatch)
+
+    async def scenario():
+        first = await pipeline.start("boards")
+        with pytest.raises(RuntimeError, match="already in progress"):
+            await pipeline.start("boards")  # a double click: the first run's task hasn't had its first turn yet
+        await pipeline._current.task
+        return first
+
+    run_id = asyncio.run(scenario())
+    assert [row["id"] for row in db.q("SELECT id FROM runs")] == [run_id] and pipeline._current is None
+
+
 def test_stop_puts_the_lead_being_packaged_back_in_the_queue(fake_ai, no_rendering, ready_to_search, monkeypatch):
     fake_source(monkeypatch, RawJob("fake", "Software Engineering Intern", "Example Robotics", "https://jobs.example.com/1", location="Columbus, OH"))
     fake_ai.responses["triage"] = triage_answer(lambda item: 85)

@@ -693,7 +693,9 @@ async def start(mode: str = "full", overrides: dict | None = None) -> int:
     overrides holds one-off values for max_packages, max_triage or min_score; saved settings aren't touched. Raises
     RuntimeError when a run is already going or setup isn't finished (the message says what's missing)."""
     global _current
-    if _current and bus.state.get("running"):
+    # The run's task is what counts, not bus.state["running"]: that only turns on once the task gets its first turn, so two
+    # starts in a row (a double click, or the auto-run timer at the same moment) would otherwise both get through.
+    if _current is not None and not _current.task.done():
         raise RuntimeError("a run is already in progress")
     missing = profile_mod.ready_to_search()
     if missing:
