@@ -127,6 +127,25 @@ def test_excluded_companies_keywords_old_and_incomplete_postings():
     assert verdict(cfg, job(url="")) == "incomplete"
 
 
+def test_null_fields_from_a_source_become_empty_text(fake_ai):
+    j = RawJob("themuse", "Data Intern", None, "https://jobs.example.com/m", locations=[None, "Columbus, OH"], description=None)
+    assert (j.company, j.locations, j.description) == ("", ["Columbus, OH"], "")
+    settings.save(make_cfg())
+    assert verdict(settings.get(), j) == "pass"
+    fake_ai.responses["triage"] = triage_answer(lambda item: 80)
+
+    async def scenario():
+        run = pipeline.Pipeline("full")
+        try:
+            await run.add_jobs("test", [j])
+            await run.triage_batch(run.take_batch(10))  # used to fail joining the locations
+        finally:
+            await run.ctx.close()
+
+    asyncio.run(scenario())
+    assert db.one("SELECT company, location FROM leads") == {"company": "", "location": "Columbus, OH"}
+
+
 def test_dream_companies_may_skip_the_search_area():
     cfg = make_cfg(dream_bypass=True)
     cfg["dream_companies"] = ["Example Robotics"]

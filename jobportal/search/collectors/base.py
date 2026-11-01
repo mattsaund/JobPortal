@@ -68,6 +68,16 @@ class RawJob:
     # or job id. The search run also keeps meta["found"] here: every place the same job was seen during the run.
     meta: dict = field(default_factory=dict)
 
+    def __post_init__(self):
+        # Job sites (and AI answers) sometimes send null, or a number, where text belongs. Text fields are always strings
+        # from here on, and the location list holds only real places, so the filters, the triage batch ("A | B" joins) and
+        # the lead page (company[:30]) never meet None.
+        for name in ("title", "company", "url", "location", "description", "category_hint", "source_detail", "found_url"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                setattr(self, name, "" if value is None else str(value))
+        self.locations = [str(place) for place in self.locations or [] if place]
+
     def where_found(self) -> dict:
         """This job's entry for the lead's "found" list: {source, label, url}."""
         return {"source": self.source, "label": self.source_detail or self.source, "url": self.found_url or self.url}
