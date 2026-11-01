@@ -36,10 +36,10 @@ async function renderLeads(id, tab) {
     $("#live-log").innerHTML = S.logs.map(logLine).join("");
     $("#live-log").scrollTop = 1e9;  // start at the newest line
     await loadLeads();
-    if (S.openSources) {  // an old #/sources link
-      S.openSources = false;
-      openSources().catch((err) => toast("Couldn't open Sources", err.message, "error"));
-    }
+  }
+  if (S.openSources) {  // an old #/sources link, also when it was followed with Leads already open
+    S.openSources = false;
+    openSources().catch((err) => toast("Couldn't open Sources", err.message, "error"));
   }
   await expandLead(id ? +id : null, tab, arriving);
 }

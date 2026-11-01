@@ -257,6 +257,7 @@ function route() {
     return;
   }
   if (shownHash !== null && location.hash !== shownHash && (S.dirty || S.cfgDirty) && !confirm("Discard your unsaved edits?")) {
+    S.openSources = false;  // an old #/sources link stays where you are too: the dialog mustn't pop up on a later visit
     history.replaceState(null, "", shownHash || "#/home");  // stay, with the address you were on
     return;
   }
