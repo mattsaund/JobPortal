@@ -78,7 +78,8 @@ function areaTags(allowed) {
   return items.slice(0, 12).map((item) => `<span class="tag">${icon("pin")}${esc(item)}</span>`).join("") + more;
 }
 
-// The search area dialog. Every change redraws it from `area`; Save writes it to Settings.
+// The search area dialog. Every change redraws it from `area`; Save writes it to Settings. A redraw gives the focus back
+// to the button you pressed (a region, or the next city's Remove after removing one).
 async function openAreaEditor() {
   const loc = (await api("/api/settings")).locations;
   const area = parseArea(loc.allowed);
@@ -94,6 +95,7 @@ async function openAreaEditor() {
       + `<input type="checkbox" data-st="${abbr}"${area.states.has(abbr) ? " checked" : ""}><b>${abbr}</b><span>${esc(name)}</span></label>`;
     const cities = area.cities.map((city, i) => `<span class="tag">${esc(city)}<button class="tag-x" type="button" data-rmcity="${i}" aria-label="Remove ${esc(city)}">${icon("close")}</button></span>`).join("")
       || `<span class="muted-note">None yet.</span>`;
+    const focus = focusKey(box);
     box.innerHTML = `<h2>Where should JobPortal look?</h2>
       <p>Jobs outside this area are skipped before they're scored, except at dream companies when that's on below.</p>
       <div class="filters">${presets}</div>
@@ -112,6 +114,7 @@ async function openAreaEditor() {
       <div class="dialog-actions"><span class="area-summary muted-note"></span>
         <button class="button outline" type="button" data-act="close-dialog">Cancel</button>
         <button class="button primary" type="button" id="ar-save">Save search area</button></div>`;
+    refocus(box, focus);
     showSummary();
   };
   // The dialog keeps its own listeners: the area being edited lives here until you save.

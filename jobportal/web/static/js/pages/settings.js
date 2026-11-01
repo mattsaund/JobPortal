@@ -102,15 +102,16 @@ async function renderSearchSettings(box) {
   renderDreams($("#dream-card"));
 }
 
-// The search area's card (redrawn when the editor saves).
+// The search area's card (redrawn when the editor saves; setHtml gives the focus back to its button, which the closing
+// editor had just returned it to).
 function renderAreaCard() {
   const card = $("#area-card");
   if (!card) return;
   const loc = S.cfg?.locations || {};
-  card.innerHTML = `<div class="panel-heading"><h2>Where to look</h2><button class="button primary" type="button" data-act="edit-area">${icon("pin")}Change the search area</button></div>
+  setHtml(card, `<div class="panel-heading"><h2>Where to look</h2><button class="button primary" type="button" data-act="edit-area">${icon("pin")}Change the search area</button></div>
     <div class="tags area-tags">${areaTags(loc.allowed || S.searchArea)}</div>
     <p class="panel-note">${loc.dream_bypass ? "Dream companies can be anywhere in the US. " : ""}When a job's location is unclear,
-      ${loc.unknown_policy === "drop" ? "it's skipped" : "the AI decides"}.</p>`;
+      ${loc.unknown_policy === "drop" ? "it's skipped" : "the AI decides"}.</p>`);
 }
 
 // ---------------------------------------------------------------- AI
