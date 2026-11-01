@@ -90,11 +90,16 @@ def _clear_rendered(folder, *names: str) -> None:
 
 @router.patch("/api/leads/{lead_id}")
 def patch_lead(lead_id: int, body: dict):
-    """Save edits from the lead page: status, notes, follow-up date, the resume and cover letter text, package details.
+    """Save edits from the lead page and the Tracker: any field in EDITABLE (status, notes, follow-up date, the resume
+    and cover letter text, title, company, location, deadline, apply link, industry, the dream star), and "package",
+    which is merged into the saved package. Returns the lead as the Leads list shows it. An app_status outside
+    config.APP_STATUSES is refused with a 400.
 
-    Side effects: moving a lead to Application sent or later (config.APPLIED_STATUSES) records the date it was applied
-    for, and Application sent also schedules a follow-up in 7 days. Editing the resume
-    recomputes its keyword coverage. Editing a document deletes its rendered files so downloads stay current."""
+    Side effects: a status change goes into the lead's history. Moving a lead to Application sent or later
+    (config.APPLIED_STATUSES) records the date it was applied for, and Application sent also schedules a follow-up in 7
+    days. Setting the dream star by hand is remembered (dream_manual), so re-checking the Dream list leaves it alone.
+    Editing the resume recomputes its keyword coverage. Editing a document deletes its rendered files so downloads stay
+    current, and a "lead" event tells open dashboards."""
     current = lead_or_404(lead_id)
     fields = {k: v for k, v in body.items() if k in EDITABLE}
     if isinstance(body.get("package"), dict):

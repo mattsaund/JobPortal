@@ -1,11 +1,13 @@
 """Text helpers for the search, the documents and the dashboard routes.
 
 What's here:
-- Cleaning text: html_to_text() turns a posting's HTML into plain text, and clean() collapses whitespace.
+- Cleaning text: html_to_text() turns a posting's HTML into plain text, clean() collapses whitespace, and unique() drops
+  repeats from a list.
 - Spotting duplicates: fingerprint() and url_key() give the same answer for the same job found on two sites.
 - Dates: parse_date() reads the many date formats job boards use, and age_days() says how old a date is.
 - Locations: state_of() works out where a location string is, and LocationMatcher checks a job's locations against the
-  user's search area. search/pipeline.py drops jobs outside the area before any AI sees them.
+  user's search area. search/pipeline.py drops jobs outside the area before any AI sees them. NATIONWIDE_RE tells which
+  search area entries mean the whole country, for the matcher and the collectors alike.
 - Keywords: extract_terms() finds the skills, tools, certifications and licenses a posting (or any document) names, for
   any field, and coverage() measures how many of a job's keywords a resume contains, roughly the way applicant tracking
   systems scan resumes.
