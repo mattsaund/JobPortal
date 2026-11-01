@@ -351,6 +351,7 @@ const S = {
   q: "",                  // the search box in the top bar
   sort: "score",          // score, new, deadline, posted or industry
   industry: "",           // "" (all) or one industry
+  kind: "",               // "" (all), posting, program, event or intel (a company worth contacting, with no posting yet)
   dreamOnly: false,       // only dream companies and dream jobs
   feedOpen: store.get("feedOpen") !== "0",  // the live search feed is expanded
   expanded: null,         // the id of the lead card that's open
