@@ -3,7 +3,7 @@
      the AI agents at work) or the next useful step, Settings, and a line with your ChatGPT sign-in and the version.
    - The top bar: the search box (it searches your leads; "/" jumps to it), Run search or Stop, and your account button.
    - The hash router that picks the page (#/home, #/leads/12, #/settings/ai, ...) and sends old addresses where their
-     content lives now.
+     content lives now, and what a page shows when its data can't load (loadError, with Try again).
    The frame is static HTML in index.html; these functions fill its parts.
    APIs: GET /api/stats, POST /api/run and /api/run/stop, POST /api/ai/signin and /api/ai/signout. */
 "use strict";
@@ -275,6 +275,11 @@ function route() {
 }
 window.addEventListener("hashchange", route);
 
+// What a page shows where its content would be when loading it failed: what went wrong, and Try again, which draws the
+// page again. Without it, a failed request leaves a page half-drawn (no list, or "Loading" for good) until you leave it.
+const loadError = (err) => `<div class="empty-state"><h3>Couldn't load this</h3><p>${esc(err?.message || "")}</p>`
+  + `<button class="button outline" type="button" data-act="reload-page">${icon("refresh")}Try again</button></div>`;
+
 // ---------------------------------------------------------------- actions
 onAction("ai-signin", () => aiSignIn());
 onAction("ai-signout", async () => {
@@ -298,4 +303,9 @@ onAction("run", async (el) => {
 onAction("stop", async () => {
   await api("/api/run/stop", { method: "POST" });
   toast("Stopping", "Finishing up and saving what it found.");
+});
+onAction("reload-page", () => {  // Try again under a loadError: the same address, drawn from scratch
+  if ((S.dirty || S.cfgDirty) && !confirm("Discard your unsaved edits?")) return;
+  main.dataset.page = "";
+  route();
 });

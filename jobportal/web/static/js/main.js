@@ -44,13 +44,21 @@ window.addEventListener("beforeunload", (e) => {
 });
 
 // Loads what the frame and every page need, all at once. Anything that fails to load starts empty; the live events
-// fill it in later.
+// fill it in later. Only the facts from GET /api/meta are a must (the statuses, the menus): without them the page says
+// what went wrong, with a button to try again, instead of staying blank.
 (async function boot() {
   const quiet = (promise, fallback) => promise.catch(() => fallback);
-  const [meta, , profileStatus, questions, onboarding, cfg, runs] = await Promise.all([
-    api("/api/meta"), refreshStats(), quiet(api("/api/profile/status"), {}), quiet(api("/api/questions"), []),
-    quiet(api("/api/onboarding"), null), quiet(api("/api/settings"), null), quiet(api("/api/runs"), []),
-  ]);
+  let meta, profileStatus, questions, onboarding, cfg, runs;
+  try {
+    [meta, , profileStatus, questions, onboarding, cfg, runs] = await Promise.all([
+      api("/api/meta"), refreshStats(), quiet(api("/api/profile/status"), {}), quiet(api("/api/questions"), []),
+      quiet(api("/api/onboarding"), null), quiet(api("/api/settings"), null), quiet(api("/api/runs"), []),
+    ]);
+  } catch (err) {
+    main.innerHTML = `<div class="empty-state quit"><h3>JobPortal couldn't start</h3><p>${esc(err.message)}</p>`
+      + `<button class="button primary" type="button" data-act="reload-app">${icon("refresh")}Try again</button></div>`;
+    return;
+  }
   S.meta = meta;
   S.state = S.stats?.state || S.state;
   S.profileStatus = profileStatus;
@@ -66,3 +74,5 @@ window.addEventListener("beforeunload", (e) => {
   if (!/[?&]snapshot/.test(location.search)) connect();  // ?snapshot leaves the live stream off (headless screenshots)
   route();
 })();
+
+onAction("reload-app", () => location.reload());  // Try again when startup failed: load the whole dashboard again
