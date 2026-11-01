@@ -1,87 +1,100 @@
-/* dreams.js: the Dream list page. The companies and job titles you care most about: matching leads get the dream flag
-   (it never changes their score) and can skip the search area limits. Companies from your profile are listed too, and
-   removing one keeps it out for good.
-   APIs: GET /api/dreams and PUT /api/dreams (every change saves at once), POST /api/dreams/recheck. */
+/* dreams.js: the Dream list, a card in Settings, Search. The companies and job titles you care most about: leads that
+   match get the dream flag (it never changes their score) and can skip the search area. Companies from your profile
+   are listed too, and removing one keeps it out for good. Every change saves at once.
+   APIs: GET /api/dreams and PUT /api/dreams, POST /api/dreams/recheck. */
 "use strict";
 
-// Draws the page from GET /api/dreams (kept in S.dreams for the actions below).
-async function renderDreams() {
-  const d = (S.dreams = await api("/api/dreams"));
-  const chip = (name, i, kind) => `<span class="chip">${esc(name)}<span class="x" data-act="dream-rm" data-kind="${kind}" data-i="${i}" title="Remove"><i class=i-x></i></span></span>`;
-  const none = (text) => `<span class="muted small">${text}</span>`;
-  const fromProfile = d.profile_companies.map((name) => `<span class="chip blue">${esc(name)}`
-    + `<span class="x" data-act="dream-exclude" data-name="${esc(name)}" title="Remove from dream list"><i class=i-x></i></span></span>`).join("");
-  const restoreChip = (name) => `<span class="chip">${esc(name)}`
-    + `<span class="x" data-act="dream-restore" data-name="${esc(name)}" title="Restore"><i class=i-undo></i></span></span>`;
-  const removed = d.excluded.length
-    ? `<b class="small mono">REMOVED</b><div class="row" style="gap:6px;margin:8px 0">${d.excluded.map(restoreChip).join("")}</div>` : "";
-  main.innerHTML = `<div class="page"><div class="page-h"><h1>Dream list</h1><span class="sub">Leads that match get the dream flag (it never changes their score) and can skip your search-area limits.</span></div>
-    <div class="card" style="margin-bottom:14px"><div class="row"><span class="mono" style="font-size:15px;font-weight:700">${d.flagged}</span><span class="muted">leads flagged as dream right now</span>
-      <span class="spacer"></span><button class="btn" data-act="dream-view">View them</button>
-      <button class="btn primary" data-act="dream-recheck" title="Re-flag every lead against this list (stars you set by hand are kept)"><i class=i-refresh></i> Re-check all leads</button></div></div>
-    <div class="cols" style="grid-template-columns:1fr 1fr">
-      <div class="card"><h3>Dream companies</h3>
-        <div class="row" style="gap:6px;margin-bottom:10px">${d.companies.map((name, i) => chip(name, i, "companies")).join("") || none("none yet")}</div>
-        <div class="row"><input type="text" id="dc-add" placeholder="Add companies, comma-separated (e.g. Apple, Capital One, Mayo Clinic)" style="flex:1">
-          <button class="btn" data-act="dream-add" data-kind="companies">Add</button></div>
-        <div class="hr"></div>
-        <b class="small mono">FROM YOUR PROFILE (derived from your resume and answers; removing one drops it for good)</b>
-        <div class="row" style="gap:6px;margin:8px 0">${fromProfile || none("none")}</div>
-        ${removed}
-        <div class="row" style="margin-top:10px">${toggle(`data-dbyp="bypass"`, d.bypass)}<span class="small">Dream companies can be anywhere in the US (ignore my search area)</span></div></div>
-      <div class="card"><h3>Dream jobs (roles)</h3><p class="muted small" style="margin-top:-4px">Any lead whose title contains one of these phrases is a dream job, at any company.</p>
-        <div class="row" style="gap:6px;margin-bottom:10px">${d.jobs.map((name, i) => chip(name, i, "jobs")).join("") || none("none yet")}</div>
-        <div class="row"><input type="text" id="dj-add" placeholder="Add roles, comma-separated (e.g. iOS developer, data engineer, product designer)" style="flex:1">
-          <button class="btn" data-act="dream-add" data-kind="jobs">Add</button></div>
-        <div class="row" style="margin-top:14px">${toggle(`data-dbyp="jobs_bypass"`, d.jobs_bypass)}<span class="small">Dream jobs can be anywhere in the US too</span></div></div></div></div>`;
-  // Enter in an "Add" box clicks its Add button.
-  $$("#dc-add, #dj-add").forEach((input) => input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") input.nextElementSibling.click();
-  }));
+// Draws the card into box from GET /api/dreams (kept in S.dreams for the actions below). When the list doesn't load,
+// the card says so (with Try again) instead of staying empty. After a change, a focused button or Add box gets the
+// focus back in the redrawn card.
+async function renderDreams(box) {
+  if (!box) return;
+  let d;
+  try {
+    d = S.dreams = await api("/api/dreams");
+  } catch (err) {
+    box.innerHTML = loadError(err);
+    return;
+  }
+  const tag = (name, i, kind) => `<span class="tag">${esc(name)}<button class="tag-x" type="button" data-act="dream-rm" data-kind="${kind}" data-i="${i}" aria-label="Remove ${esc(name)}">${icon("close")}</button></span>`;
+  const none = `<span class="muted-note">None yet.</span>`;
+  const fromProfile = d.profile_companies.map((name) => `<span class="tag blue">${esc(name)}`
+    + `<button class="tag-x" type="button" data-act="dream-exclude" data-name="${esc(name)}" aria-label="Remove ${esc(name)}">${icon("close")}</button></span>`).join("");
+  const restore = (name) => `<span class="tag">${esc(name)}<button class="tag-x" type="button" data-act="dream-restore" data-name="${esc(name)}" aria-label="Bring back ${esc(name)}">${icon("undo")}</button></span>`;
+  const add = (kind, placeholder, label) => `<div class="inline-form"><input type="text" data-dream-add="${kind}" placeholder="${placeholder}" aria-label="${label}">
+    <button class="button outline" type="button" data-act="dream-add" data-kind="${kind}">${icon("plus")}Add</button></div>`;
+  const focus = focusKey(box);
+  box.innerHTML = `<div class="panel-heading"><div><h2>${icon("star")}Dream list</h2>
+      <p class="panel-note">Leads that match get a Dream tag. It never changes their score.</p></div>
+      <div class="heading-actions"><a class="button outline" href="#/leads" data-act="dream-view">${d.flagged} on your leads</a>
+        <button class="button light" type="button" data-act="dream-recheck" title="Tag every lead again (tags you set by hand stay)">${icon("refresh")}Check all leads again</button></div></div>
+    <div class="two-col">
+      <div><h3>Dream companies</h3><div class="tags">${d.companies.map((name, i) => tag(name, i, "companies")).join("") || none}</div>
+        ${add("companies", "Add companies, separated by commas", "Add dream companies, separated by commas")}
+        <h4>From your profile</h4><p class="panel-note">Made from your resume and answers. Removing one keeps it out for good.</p>
+        <div class="tags">${fromProfile || none}</div>
+        ${d.excluded.length ? `<h4>Removed</h4><div class="tags">${d.excluded.map(restore).join("")}</div>` : ""}
+        <label class="switch-row">${toggle(`data-dream-bypass="bypass"`, d.bypass)}<span>Dream companies can be anywhere in the US (outside my search area)</span></label></div>
+      <div><h3>Dream jobs</h3><p class="panel-note">Any lead whose title has one of these phrases is a dream job, at any company.</p>
+        <div class="tags">${d.jobs.map((name, i) => tag(name, i, "jobs")).join("") || none}</div>
+        ${add("jobs", "Add job titles, separated by commas", "Add dream job titles, separated by commas")}
+        <label class="switch-row">${toggle(`data-dream-bypass="jobs_bypass"`, d.jobs_bypass)}<span>Dream jobs can be anywhere in the US too</span></label></div></div>`;
+  refocus(box, focus);
 }
 
-// Saves part of the dream list (PUT /api/dreams with only the changed keys) and redraws the page.
+// Saves part of the Dream list (PUT /api/dreams with only the changed keys) and redraws the card. The settings form on
+// screen gets the new values too, so it shows them.
 async function saveDreams(patch, message) {
   S.dreams = await api("/api/dreams", { method: "PUT", body: patch });
-  toast("Dream list saved", message || "Click Re-check all leads to apply it to leads you already have.");
-  renderDreams();
+  if (S.cfg) {
+    Object.assign(S.cfg, { dream_companies: S.dreams.companies, dream_jobs: S.dreams.jobs });
+    Object.assign(S.cfg.locations, { dream_bypass: S.dreams.bypass, dream_jobs_bypass: S.dreams.jobs_bypass });
+  }
+  toast("Dream list saved", message || "Check all leads again to tag the ones you already have.");
+  renderDreams($("#dream-card"));
 }
 
 // ---------------------------------------------------------------- actions
 onAction("dream-add", async (el) => {  // adds the comma-separated names, skipping ones already on the list
   const kind = el.dataset.kind;
-  const input = $(kind === "companies" ? "#dc-add" : "#dj-add");
-  const add = input.value.split(",").map((x) => x.trim()).filter(Boolean);
+  const add = $(`[data-dream-add="${kind}"]`).value.split(",").map((x) => x.trim()).filter(Boolean);
   if (!add.length) return;
   const current = S.dreams[kind];
   const isNew = (name) => !current.some((have) => have.toLowerCase() === name.toLowerCase());
-  await saveDreams({ [kind]: [...current, ...add.filter(isNew)] }, `Added ${add.join(", ")}`);
+  await saveDreams({ [kind]: [...current, ...add.filter(isNew)] }, `Added ${add.join(", ")}.`);
 });
 onAction("dream-rm", async (el) => {
   const kind = el.dataset.kind, list = [...S.dreams[kind]];
   const [gone] = list.splice(+el.dataset.i, 1);
-  await saveDreams({ [kind]: list }, `Removed ${gone}`);
+  await saveDreams({ [kind]: list }, `Removed ${gone}.`);
 });
 onAction("dream-exclude", async (el) => {  // removes a company that came from your profile
-  await saveDreams({ excluded: [...S.dreams.excluded, el.dataset.name] }, `Removed ${el.dataset.name} from the profile-derived list`);
+  await saveDreams({ excluded: [...S.dreams.excluded, el.dataset.name] }, `${el.dataset.name} won't come back from your profile.`);
 });
 onAction("dream-restore", async (el) => {
-  await saveDreams({ excluded: S.dreams.excluded.filter((name) => name !== el.dataset.name) }, `Restored ${el.dataset.name}`);
+  await saveDreams({ excluded: S.dreams.excluded.filter((name) => name !== el.dataset.name) }, `${el.dataset.name} is back.`);
 });
 onAction("dream-recheck", async () => {
   const r = await api("/api/dreams/recheck", { method: "POST" });
-  toast("Leads re-checked", `${plural(r.changed, "lead")} changed, ${r.flagged} flagged as dream`);
+  toast("Leads checked again", `${plural(r.changed, "lead")} changed, ${r.flagged} tagged as a dream.`);
   refreshStats();
-  renderDreams();
+  renderDreams($("#dream-card"));
 });
-onAction("dream-view", () => {  // the Leads page with only dream leads, on the All tab
+onAction("dream-view", () => {  // Leads with only dream leads, on All
   S.dreamOnly = true;
   S.leadsTab = "all";
-  localStorage.setItem("leadsTab", "all");
-  location.hash = "#/leads";
+  store.set("leadsTab", "all");
 });
 onChange(async (el) => {
-  if (!el.dataset.dbyp) return false;  // the "anywhere in the US" switches
-  await saveDreams({ [el.dataset.dbyp]: el.checked }, el.checked ? "Location bypass on" : "Location bypass off");
+  if (!el.dataset.dreamBypass) return false;  // the "anywhere in the US" switches
+  await saveDreams({ [el.dataset.dreamBypass]: el.checked }, el.checked ? "They can be anywhere in the US now." : "They follow your search area now.")
+    .catch((err) => {
+      el.checked = !el.checked;  // not saved: the switch shows what is
+      throw err;
+    });
   return true;
+});
+// Enter in an Add box adds.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.target.matches?.("[data-dream-add]")) $(`[data-act="dream-add"][data-kind="${e.target.dataset.dreamAdd}"]`).click();
 });

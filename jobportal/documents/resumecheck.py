@@ -13,21 +13,34 @@ import re
 from jobportal.core.textutil import coverage
 from jobportal.documents.render import parse_resume
 
-# Section names an ATS maps to its own fields without guessing (compared in lowercase).
+# Section names an ATS maps to its own fields without guessing (compared in lowercase). They cover every field: clinical
+# and teaching experience, licenses, exhibitions and performances count as much as technical projects.
 STANDARD_HEADINGS = {
-    "summary", "professional summary", "education", "experience", "work experience", "professional experience",
-    "technical experience", "relevant experience", "projects", "technical projects", "research & technical projects",
-    "research and technical projects", "research experience", "skills", "technical skills", "certifications",
-    "certifications & training", "licenses & certifications", "relevant coursework", "coursework", "leadership",
-    "leadership & activities", "activities", "extracurricular and volunteer work", "volunteer work", "volunteer experience",
-    "awards", "honors & awards", "awards & honors", "publications", "clearance", "additional information",
+    "summary", "professional summary", "summary of qualifications", "qualifications", "core competencies", "education",
+    "experience", "work experience", "professional experience", "relevant experience", "technical experience",
+    "clinical experience", "clinical rotations", "teaching experience", "student teaching", "military experience",
+    "projects", "selected projects", "technical projects", "research & technical projects", "research and technical projects",
+    "research experience", "skills", "technical skills", "key skills", "skills & certifications", "skills and certifications",
+    "certifications", "certifications & training", "licenses & certifications", "licenses and certifications",
+    "certifications & licenses", "certifications and licenses", "licenses", "training", "professional development",
+    "relevant coursework", "coursework", "leadership", "leadership & activities", "activities",
+    "extracurricular and volunteer work", "volunteer work", "volunteer experience", "awards", "honors", "honors & awards",
+    "awards & honors", "publications", "exhibitions", "performances", "portfolio", "selected work", "languages",
+    "professional affiliations", "affiliations", "memberships", "clearance", "additional information",
 }
+# Headings that count as the Skills section an ATS looks for.
+SKILLS_HEADINGS = ("skills", "technical skills", "key skills", "core competencies", "skills & certifications", "skills and certifications")
 
 _PHONE_RE = re.compile(r"(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}")
 _EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27bf]")  # emoji, plus the older symbol and dingbat blocks
 # First person: "I" before a contraction or a lowercase word, and "me" and "my". A lone "I" before punctuation, "and" or
-# "or" is a Roman numeral (Calculus I, Physics I and II), and "I/O" means input/output, so those don't count.
-_FIRST_PERSON_RE = re.compile(r"(?<![A-Za-z])(?:I(?='[a-z]|\s+(?!(?:and|or)\b)[a-z])|me|my)(?![A-Za-z])")
+# "or" is a Roman numeral (Calculus I, Physics I and II), and so is one after a word like Title, Phase or Level ("a Title I
+# school", "Phase I trials", "a Level I trauma center"). "I/O" means input/output, so none of those count.
+_NUMERAL_NOUNS = ("Title", "Phase", "Level", "Type", "Stage", "Tier", "Class", "Grade", "Part")
+_FIRST_PERSON_RE = re.compile("".join(rf"(?<!{noun} )" for noun in _NUMERAL_NOUNS)
+                              + r"(?<![A-Za-z])(?:I(?='[a-z]|\s+(?!(?:and|or)\b)[a-z])|me|my)(?![A-Za-z])")
+# Web and email addresses ("about.me/jordan", "hire.me@example.com"), left out before looking for first person.
+_ADDRESS_RE = re.compile(r"\S*@\S*|\S*://\S*|\b\w+(?:\.\w+)+(?:/\S*)?")
 _WEAK_START_RE = re.compile(r"(responsible for|worked on|helped|assisted|duties)", re.I)
 _MONTH_DATE_RE = re.compile(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? \d{4}")  # May 2027
 _NUMERIC_DATE_RE = re.compile(r"\b(0[1-9]|1[0-2])/\d{4}\b")  # 05/2027
@@ -42,28 +55,36 @@ def _norm(text: str) -> str:
 
 def _listed_skills(resume: dict) -> list[str]:
     """Every skill named in the resume's Skills sections. A line like "**Languages:** Python, SQL" loses its bold label, then
-    splits at commas, semicolons and middle dots."""
+    splits at commas, semicolons and middle dots, except inside parentheses: "Python (pandas, NumPy)" is one skill."""
     skills = []
     for section in resume["sections"]:
-        if "skill" not in section["title"].lower():
+        if "skill" not in section["title"].lower() and "competenc" not in section["title"].lower():
             continue
         for entry in section["entries"]:
             for _, text in entry:
                 body = re.sub(r"\*\*", "", re.sub(r"^\*\*[^*]+\*\*:?\s*", "", text))
-                skills += [item.strip(" .") for item in re.split(r",|;|\u00b7", body) if item.strip(" .")]
+                skills += [item.strip(" .") for item in re.split(r"[,;\u00b7](?![^()]*\))", body) if item.strip(" .")]
     return skills
+
+
+def _has_words(text: str, words: str) -> bool:
+    """True when the normalized `words` appear in the normalized `text` as whole words ("react" in "react native", but
+    never "java" in "javascript" or "r" in "docker")."""
+    return f" {words} " in f" {text} "
 
 
 def _in_inventory(skill: str, inventory_names: list[str]) -> bool:
     """Whether a listed skill matches an inventory skill, loosely. Parentheses on the resume side are ignored ("Python
     (pandas)" is Python), an inventory name splits into its parts ("HTML/CSS" covers both), and a name longer than three
-    letters also matches as part of a longer one ("React" and "React Native")."""
+    letters also matches as whole words inside a longer one ("React" and "React Native"). Short names (R, C, Go, Git)
+    must match exactly: inside other words they would vouch for skills the profile never showed."""
     wanted = _norm(re.sub(r"\(.*?\)", "", skill))
     if not wanted:
         return True
     for name in inventory_names:
         parts = [_norm(p) for p in re.split(r"/|\(|\)|,| and ", name) if _norm(p)]
-        if wanted == _norm(name) or any(wanted == p or (len(wanted) > 3 and (wanted in p or p in wanted)) for p in parts):
+        if wanted == _norm(name) or any(wanted == p or (len(p) > 3 and _has_words(wanted, p))
+                                        or (len(wanted) > 3 and _has_words(p, wanted)) for p in parts):
             return True
     return False
 
@@ -108,7 +129,7 @@ def check(md: str, *, inventory: list[dict] | None = None, keywords: list[str] |
     for heading in headings:
         if heading.lower().strip() not in STANDARD_HEADINGS:
             add("warn", f"Non-standard heading “{heading}”; an ATS may not map it. Use a standard name.")
-    for need, names in (("Education", ("education",)), ("Skills", ("skills", "technical skills"))):
+    for need, names in (("Education", ("education",)), ("Skills", SKILLS_HEADINGS)):
         if not any(heading.lower() in names for heading in headings):
             add("error", f"Missing a {need} section.")
     if not any(re.search(r"experience|projects", heading, re.I) for heading in headings):
@@ -119,7 +140,7 @@ def check(md: str, *, inventory: list[dict] | None = None, keywords: list[str] |
         add("error", "Contains a table, which ATS parsers often scramble.")
     if _EMOJI_RE.search(text):
         add("warn", "Contains emoji or symbols that ATS may drop.")
-    if _FIRST_PERSON_RE.search(re.sub(r"\[.*?\]\(.*?\)", "", text)):  # link text and addresses don't count
+    if _FIRST_PERSON_RE.search(_ADDRESS_RE.sub(" ", re.sub(r"\[.*?\]\(.*?\)", "", text))):  # links and addresses don't count
         add("warn", "Uses first person (I / my). Resume bullets should drop pronouns.")
 
     # Bullets.
@@ -160,7 +181,7 @@ def check(md: str, *, inventory: list[dict] | None = None, keywords: list[str] |
     if keywords and keyword_share < 0.5:
         add("warn", f"Only {int(keyword_share * 100)}% of the posting's keywords appear. Add true ones: {', '.join(missing[:6])}")
     if len(skills) > MAX_SKILLS:
-        add("warn", f"{len(skills)} skills listed. Over 30 looks like padding; trim to the most relevant.")
+        add("warn", f"{len(skills)} skills listed. More than {MAX_SKILLS} looks like padding; trim to the most relevant.")
 
     score = 100 - sum(14 if issue["level"] == "error" else 5 for issue in issues)
     score = max(0, min(100, score + (5 if keyword_share >= 0.75 else 0)))

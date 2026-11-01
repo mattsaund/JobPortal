@@ -32,15 +32,16 @@ from jobportal.ai import client as ai, prompts
 from jobportal.candidate import profile as profile_mod
 from jobportal.core import bus, db, settings as settings_mod
 from jobportal.core.genres import DEFAULT_INDUSTRIES, classify, classify_industry
-from jobportal.core.textutil import LocationMatcher, age_days, fingerprint, outside_us, url_key
+from jobportal.core.levels import TITLE_MARKERS
+from jobportal.core.textutil import LocationMatcher, TargetMatcher, age_days, fingerprint, outside_us, url_key
 from jobportal.search import plan
 from jobportal.search.collectors import COLLECTORS, details, hunt
 from jobportal.search.collectors.base import SOCIAL_SOURCES, Ctx, RawJob
 from jobportal.search.packages import build_package, insert_lead, lead_summary
 
-# Sources that skip the tech-role title check: their "titles" are post headlines (social posts, feed items), or an AI agent
-# already judged the lead a match for the candidate (the AI hunt).
-NO_TECH_GATE = SOCIAL_SOURCES | {"rss", "ai_hunt"}
+# Sources that skip the target-role title check: their "titles" are post headlines (social posts, feed items), or an AI
+# agent already judged the lead a match for the candidate (the AI hunt).
+NO_TARGET_GATE = SOCIAL_SOURCES | {"rss", "ai_hunt"}
 TRIAGE_NOTES = ("summary", "reasons", "red_flags", "eligibility", "score")  # what a lead keeps from its triage result
 RUN_OVERRIDES = ("max_packages", "max_triage", "min_score")  # run settings start() may change for a single run
 BACKLOG_DAYS = 60  # candidates waiting longer than this leave the backlog
@@ -125,10 +126,11 @@ class RuleFilters:
     """The rule filters every collected job passes before any AI sees it, built from Settings.
 
     In order, check() drops a job that: has no title or URL; is from an excluded company; lacks a word for the user's levels
-    in its title (only for sources with strict_titles); has a too-senior or excluded title (postings only); isn't a tech
-    role (filters.tech_title, skipped for NO_TECH_GATE sources); is outside the search area (LocationMatcher), unless a
-    Dream list switch lets it through; has an unknown location when Settings says to drop those; is older than
-    run.max_age_days; or mentions an excluded keyword.
+    in its title (only for sources with strict_titles); has a too-senior or excluded title (postings only); is nowhere near
+    the user's target roles, role families and queries (filters.require_target_match, textutil.TargetMatcher, skipped for
+    NO_TARGET_GATE sources and while the user has no targets); is outside the search area (LocationMatcher), unless a Dream
+    list switch lets it through; has an unknown location when Settings says to drop those; is older than run.max_age_days;
+    or mentions an excluded keyword.
 
     A job that passes gets a pre-score (_pre_score). When a run finds more jobs than it can triage, the pre-score decides
     which go first. check() also flags dream jobs (RawJob.dream)."""
@@ -138,14 +140,16 @@ class RuleFilters:
         filters = cfg["filters"]
         self.include = _any_of(filters["title_include"], ".")  # level words (none for mid level: any title passes)
         self.exclude = _any_of(filters["title_exclude"], "$^")  # too-senior and other unwanted title words
-        self.tech = _any_of(filters.get("tech_title", []), ".")  # an empty list lets every title through
+        self.level_words = _any_of([p for k in plan.levels(cfg) for p in TITLE_MARKERS.get(k, [])], "$^")  # for the pre-score
         self.matcher = LocationMatcher(cfg["locations"]["allowed"])
         self.refresh()
 
     def refresh(self) -> None:
-        """Read again what comes from the profile (dream companies, skills). The run calls this after a profile update."""
+        """Read again what comes from the profile (dream companies, skills, the plan's role families and queries). The run
+        calls this after a profile update."""
         self.dreams = plan.all_dreams(self.cfg)
         self.skill_re = skill_regex()  # the pre-score rewards the candidate's skills, never an industry or a dream company
+        self.targets = TargetMatcher(plan.target_phrases(self.cfg), places=self.cfg["locations"]["allowed"])
 
     def check(self, j: RawJob) -> tuple[bool, str, float]:
         """Run the filters on one job. Returns (passed, why it was dropped, pre-score); a dropped job's pre-score is 0. The
@@ -160,8 +164,9 @@ class RuleFilters:
             return False, "title doesn't match your levels", 0
         if j.kind == "posting" and self.exclude.search(title):
             return False, "too senior / excluded title", 0
-        if filters.get("require_tech_title", True) and j.source not in NO_TECH_GATE and not self.tech.search(title):
-            return False, "not a tech role", 0
+        if (filters.get("require_target_match", True) and j.source not in NO_TARGET_GATE
+                and not self.targets.matches(j.title, j.description)):
+            return False, "outside your target roles", 0
         dream_company = j.dream or is_dream(j.company, self.dreams)  # j.dream is already True for a starred company board
         dream_job = is_dream_job(j.title, self.cfg.get("dream_jobs", []))
         j.dream = dream_company or dream_job
@@ -184,16 +189,16 @@ class RuleFilters:
         return True, "", self._pre_score(j, title, in_area, age)
 
     def _pre_score(self, j: RawJob, title: str, in_area: bool | None, age: int | None) -> float:
-        """A rough priority for triage, between 30 and 95. It starts at 40, then adds 10 for a location known to be in the
-        search area; 8 for an internship or co-op title, or 4 for new-grad, entry, junior or associate wording; up to 26 for
-        the candidate's skills (4 per skill in the title, 2 per other skill in the first 2,500 characters of the
-        description); 6 for an AI hunt lead, since an agent already judged it a match; and 5 for a program, event or intel
-        lead. It loses 1 point per 9 days of age, at most 10."""
+        """A rough priority for triage, between 30 and about 105. It starts at 40, then adds 10 for a location known to be in
+        the search area; 8 for a title that names one of the user's own levels (levels.TITLE_MARKERS: "intern" for an
+        internship search, "senior" for a senior one; mid level has no such words); 4 per target word in the title, at most
+        12 (textutil.TargetMatcher); up to 26 for the candidate's skills (4 per skill in the title, 2 per other skill in the
+        first 2,500 characters of the description); 6 for an AI hunt lead, since an agent already judged it a match; and 5
+        for a program, event or intel lead. It loses 1 point per 9 days of age, at most 10."""
         score = 40.0 + (10 if in_area else 0)
-        if re.search(r"intern|co-?op", title):
+        if self.level_words.search(title):
             score += 8
-        elif re.search(r"new grad|entry|junior|early career|associate", title):
-            score += 4
+        score += min(12, 4 * len(self.targets.hits(j.title)))
         if self.skill_re:
             in_title = {m.lower() for m in self.skill_re.findall(j.title or "")}
             in_description = {m.lower() for m in self.skill_re.findall((j.description or "")[:2500])}
@@ -235,10 +240,23 @@ def _qualifies(result: dict, min_score: int) -> bool:
 
 
 async def _ask_triage(items: list[dict], system: str, *, purpose: str, label: str, run_id: int | None = None) -> tuple[dict[str, dict], int]:
-    """Send one batch to the triage AI (stage "triage"). Returns (results by item id, AI tokens used). Raises ai.AIError."""
+    """Send one batch to the triage AI (stage "triage"). Returns (results by item id, AI tokens used). Raises ai.AIError.
+
+    ai.run() only makes sure the answer has its "results" list, not that each result is complete, so a result the run
+    can't use is left out here: one without a verdict or an eligibility, or without a score that reads as a number. Its
+    job then counts as one the AI skipped, instead of a KeyError ending the whole batch. Scores are held to 0..100."""
     out = await ai.run(json.dumps(items, indent=1), system=system, schema=prompts.TRIAGE_SCHEMA, stage="triage", purpose=purpose,
                        run_id=run_id, label=label, timeout=600)
-    return {r["id"]: r for r in out.get("results", [])}, int(out.get("_tokens", 0))
+    results = {}
+    for result in out.get("results") or []:
+        if not isinstance(result, dict) or not result.get("verdict") or not result.get("eligibility"):
+            continue
+        try:
+            score = max(0, min(100, int(result.get("score"))))
+        except (TypeError, ValueError):  # missing, or text that isn't a whole number
+            continue
+        results[str(result.get("id"))] = {**result, "score": score}
+    return results, int(out.get("_tokens", 0))
 
 
 # ---------------------------------------------------------------- dedupe helpers
@@ -284,6 +302,7 @@ class Pipeline:
         self.cancel = asyncio.Event()
         self.stats: Counter = Counter()
         self.pool: dict[str, tuple[float, RawJob]] = {}
+        self.kind_of_work: dict[str, str] = {}  # each pooled candidate's top genre, for take_batch
         self.backlog_scores: dict[str, float] = {}  # the saved rule score of each candidate loaded from the backlog
         self.collecting_done = asyncio.Event()  # tells the triage workers that no more candidates are coming
         self.package_q: asyncio.PriorityQueue = asyncio.PriorityQueue()
@@ -300,7 +319,7 @@ class Pipeline:
 
     # ------------------------------------------------------------ logging and live counters
     def log(self, source: str, msg: str, level: str = "info") -> None:
-        """Add a line to this run's log (the run_log table, shown on the Runs page) and to the live console."""
+        """Add a line to this run's log (the run_log table, shown in Settings, History) and to the live console."""
         ts = db.now()
         db.ex("INSERT INTO run_log(run_id, ts, level, source, msg) VALUES(?,?,?,?,?)", (self.run_id, ts, level, source, msg))
         bus.publish("log", {"run_id": self.run_id, "source": source, "level": level, "msg": msg, "ts": ts})
@@ -336,7 +355,8 @@ class Pipeline:
                 _note_sighting(known, j)
                 self.stats["already known"] += 1
                 continue
-            for genre in classify(j.title, j.description, self.genres):
+            genres = classify(j.title, j.description, self.genres)
+            for genre in genres:
                 self.stats[f"genre:{genre}"] += 1  # market demand signal for the Analysis page
             if fp in self.pool:
                 self.stats["duplicate"] += 1
@@ -344,6 +364,7 @@ class Pipeline:
                 _add_place(pooled.meta.setdefault("found", [pooled.where_found()]), j)
                 continue
             self.pool[fp] = (pre_score, j)
+            self.kind_of_work[fp] = genres[0] if genres else "other"
             added += 1
         self.stats["candidates"] += added
         self.log(source_name, f"{len(jobs)} found → {added} new candidates")
@@ -369,11 +390,15 @@ class Pipeline:
 
     def take_batch(self, n: int) -> list[tuple[str, RawJob]]:
         """Take up to n candidates out of the pool for triage: the best pre-scores first, but taken in turns across kinds of
-        work (each candidate's top genre), so one busy field can't crowd out the rest. Returns (fingerprint, job) pairs."""
+        work (each candidate's top genre), so one busy field can't crowd out the rest. Returns (fingerprint, job) pairs.
+
+        The top genre comes from kind_of_work, worked out once per candidate: classifying the whole pool again for every
+        batch would mean thousands of jobs times every genre, many times a run."""
         by_genre: dict[str, list] = {}
         for fp, (score, j) in self.pool.items():
-            genre = (classify(j.title, j.description, self.genres, top=1) or ["other"])[0]
-            by_genre.setdefault(genre, []).append((score, fp, j))
+            if fp not in self.kind_of_work:  # a candidate from the backlog
+                self.kind_of_work[fp] = (classify(j.title, j.description, self.genres, top=1) or ["other"])[0]
+            by_genre.setdefault(self.kind_of_work[fp], []).append((score, fp, j))
         for group in by_genre.values():
             group.sort(key=lambda x: -x[0])
         groups = sorted(by_genre.values(), key=lambda g: -g[0][0])  # the genre holding the best candidate goes first
@@ -384,6 +409,7 @@ class Pipeline:
                     picked.append(group.pop(0))
         for _, fp, _ in picked:
             self.pool.pop(fp, None)
+            self.kind_of_work.pop(fp, None)
         return [(fp, j) for _, fp, j in picked]
 
     # ---- the backlog: candidates the triage cap didn't reach are saved, then triaged first on later runs
@@ -393,12 +419,10 @@ class Pipeline:
         per day of waiting (at most 20), so old ones get triaged before new finds of the same quality."""
         known_fields = {f.name for f in dataclass_fields(RawJob)}
         db.ex("DELETE FROM candidates WHERE first_seen < ?", ((date.today() - timedelta(days=BACKLOG_DAYS)).isoformat(),))
+        db.ex("DELETE FROM candidates WHERE fingerprint IN (SELECT fingerprint FROM leads)")  # became leads some other way
         loaded = 0
         for row in db.q("SELECT fingerprint, data, rule_score, first_seen FROM candidates"):
             fp = row["fingerprint"]
-            if db.one("SELECT 1 FROM leads WHERE fingerprint=?", (fp,)):
-                db.ex("DELETE FROM candidates WHERE fingerprint=?", (fp,))
-                continue
             try:
                 # Only fields RawJob still has, so a backlog saved by an older version still loads.
                 job = RawJob(**{k: v for k, v in json.loads(row["data"]).items() if k in known_fields})
@@ -415,12 +439,12 @@ class Pipeline:
         """Save every candidate still in the pool to the backlog (the candidates table) and return how many there were. Only
         the best BACKLOG_MAX by rule score are kept. A candidate keeps the date it was first seen, which load_backlog uses."""
         now = db.now()
-        for fp, (score, job) in self.pool.items():
-            # Save the candidate's own rule score, not one raised for waiting, or the waiting bonus would pile up each run.
-            rule_score = self.backlog_scores.get(fp, score)
-            db.ex("""INSERT INTO candidates(fingerprint, data, rule_score, first_seen, last_seen) VALUES(?,?,?,?,?)
-                     ON CONFLICT(fingerprint) DO UPDATE SET data=excluded.data, rule_score=excluded.rule_score, last_seen=excluded.last_seen""",
-                  (fp, json.dumps(asdict(job), default=str), rule_score, now, now))
+        # One transaction for the lot (db.ex_many): a backlog can hold thousands of candidates. Each keeps its own rule
+        # score, not one raised for waiting, or the waiting bonus would pile up each run.
+        db.ex_many("""INSERT INTO candidates(fingerprint, data, rule_score, first_seen, last_seen) VALUES(?,?,?,?,?)
+                      ON CONFLICT(fingerprint) DO UPDATE SET data=excluded.data, rule_score=excluded.rule_score, last_seen=excluded.last_seen""",
+                   [(fp, json.dumps(asdict(job), default=str), self.backlog_scores.get(fp, score), now, now)
+                    for fp, (score, job) in self.pool.items()])
         kept = len(self.pool)
         db.ex("DELETE FROM candidates WHERE fingerprint IN (SELECT fingerprint FROM candidates ORDER BY rule_score ASC "
               "LIMIT max(0, (SELECT COUNT(*) FROM candidates) - ?))", (BACKLOG_MAX,))
@@ -678,14 +702,20 @@ async def start(mode: str = "full", overrides: dict | None = None) -> int:
 
     mode is "full" (everything), "boards" (job boards only), "hunt" (AI hunt only) or "backlog" (package queue only).
     overrides holds one-off values for max_packages, max_triage or min_score; saved settings aren't touched. Raises
-    RuntimeError when a run is already going or setup isn't finished (the message says what's missing)."""
+    RuntimeError when a run is already going or setup isn't finished (the message says what's missing), and ValueError
+    when an override isn't a whole number."""
     global _current
-    if _current and bus.state.get("running"):
+    # The run's task is what counts, not bus.state["running"]: that only turns on once the task gets its first turn, so two
+    # starts in a row (a double click, or the auto-run timer at the same moment) would otherwise both get through.
+    if _current is not None and not _current.task.done():
         raise RuntimeError("a run is already in progress")
     missing = profile_mod.ready_to_search()
     if missing:
         raise RuntimeError(missing)
-    one_off = {k: int(v) for k, v in (overrides or {}).items() if k in RUN_OVERRIDES}  # a bad value fails before the run row exists
+    try:  # a bad value fails here, before the run row exists
+        one_off = {k: int(v) for k, v in dict(overrides or {}).items() if k in RUN_OVERRIDES}
+    except (TypeError, ValueError):
+        raise ValueError("run overrides must be whole numbers: " + ", ".join(RUN_OVERRIDES)) from None
     p = Pipeline(mode)
     p.cfg["run"].update(one_off)
     _current = p
@@ -720,7 +750,8 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
     package. A new answer (a skill, a project, a certification) can turn an earlier "no" into a match, or the other way.
 
     Only leads without a resume and not in the trash are checked, RETRIAGE_BATCH per AI request (stage "triage"). Each lead's
-    score, verdict, triage notes and stage are updated; a stage change is recorded in its history and shown live. Returns
+    score, verdict, triage notes and stage are updated, unless its stage changed or it got a resume while the AI was
+    working (a package build during a search). A stage change is recorded in its history and shown live. Returns
     {ok, checked, promoted, demoted}, or ok False when a re-evaluation is already running. Toasts tell the user how it went;
     an AI failure stops it early with an error toast instead of raising."""
     if _retriage_lock.locked():
@@ -752,6 +783,11 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
             for k, lead in enumerate(batch):
                 result = results.get(str(k))
                 if not result:
+                    continue
+                # The AI takes a while, and this often runs during a search (a profile update at its start spawns it). A
+                # package worker may have built this lead meanwhile, or the user moved it: then the old stage is stale.
+                now = db.one("SELECT stage, resume_md FROM leads WHERE id=?", (lead["id"],))
+                if not now or now["stage"] != lead["stage"] or now["resume_md"] is not None:
                     continue
                 checked += 1
                 qualifies = _qualifies(result, min_score)

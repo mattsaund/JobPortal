@@ -3,19 +3,20 @@ all share.
 
 A collector is an async function `collect(ctx) -> list[RawJob]` (see collectors/__init__.py). The search run (pipeline.py)
 makes one Ctx per run and hands it to every collector, so they share one connection pool, one request limit per site and one
-stop flag. The Sources page checks (sources.py) and a package built outside a run (packages.py) make their own short-lived
-Ctx.
+stop flag. The Sources dialog's checks (sources.py) and a package built outside a run (packages.py) make their own
+short-lived Ctx.
 
 Nothing here touches the database or the AI."""
 import asyncio
 import json
 import random
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 import httpx
+
+from jobportal.core.textutil import NATIONWIDE_RE
 
 # A desktop Chrome user agent. Several job sites refuse or strip requests from clients they don't recognize.
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
@@ -26,8 +27,9 @@ RETRY_STATUSES = (429, 502, 503, 504)  # rate limited, or a passing server probl
 # itself, so there is no posting page to fetch more details from.
 SOCIAL_SOURCES = frozenset({"hackernews", "mastodon", "reddit", "bluesky"})
 # An allowed location that means the whole country ("Nationwide", "Anywhere in the US", "USA"). Match it against the
-# lowercased, stripped text with fullmatch(). core/textutil.LocationMatcher recognizes the same phrases.
-NATIONWIDE = re.compile(r"(anywhere( in the)?( us| usa| united states)?|nationwide|united states|usa|us)")
+# lowercased, stripped text with fullmatch(). It's the location filter's own pattern, so a source and the filter always
+# agree on which entries are nationwide.
+NATIONWIDE = NATIONWIDE_RE
 
 
 @dataclass
@@ -48,13 +50,15 @@ class RawJob:
     posted_at: str | None = None  # ISO date (YYYY-MM-DD)
     deadline: str | None = None  # ISO date when the source gives one
     apply_url: str | None = None  # a direct application link, when it differs from url
-    # "posting" (one specific opening), "program" (an internship, fellowship or rotational program), "event" (a career fair
-    # or info session) or "intel" (a strong hiring signal with no posting yet). Only the AI hunt reports the last three.
+    # "posting" (one specific opening), "program" (an internship, apprenticeship, fellowship or training program), "event"
+    # (a career fair, hiring event or info session) or "intel" (a strong hiring signal with no posting yet). Only the AI
+    # hunt reports the last three.
     # The too-senior title filter only applies to postings.
     kind: str = "posting"
     category_hint: str = ""  # the source's own category ("internship", "Full-time"), used when triage doesn't pick one
     source_detail: str = ""  # readable origin for the Leads page, such as "Greenhouse: Example Robotics"
-    dream: bool = False  # from a company board starred on the Sources page; the rule filters also set it for the Dream list
+    # From a company board starred in the Sources dialog; the rule filters also set it for the Dream list.
+    dream: bool = False
     # True means the title must contain a word for the user's levels (Settings filters.title_include) to pass the rule
     # filters. Sources that already narrow results to those levels (LinkedIn, The Muse, the internship lists) set it to
     # False, and so do sources whose titles rarely name a level (USAJobs) or aren't job titles at all (social posts, feeds,
@@ -67,6 +71,19 @@ class RawJob:
     # or job id. The search run also keeps meta["found"] here: every place the same job was seen during the run.
     meta: dict = field(default_factory=dict)
 
+    def __post_init__(self):
+        # Job sites (and AI answers) sometimes send null, or a number, where text belongs. Text fields are always strings
+        # from here on, and the location list holds only real places, so the filters, the triage batch ("A | B" joins) and
+        # the lead page (company[:30]) never meet None.
+        for name in ("title", "company", "url", "location", "description", "category_hint", "source_detail", "found_url"):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                setattr(self, name, "" if value is None else str(value))
+        places = [self.locations] if isinstance(self.locations, str) else self.locations or []  # one place sent as text
+        self.locations = [str(place) for place in places if place]
+        if not self.location and self.locations:
+            self.location = " | ".join(self.locations)  # collectors that have a list leave the display string to this
+
     def where_found(self) -> dict:
         """This job's entry for the lead's "found" list: {source, label, url}."""
         return {"source": self.source, "label": self.source_detail or self.source, "url": self.found_url or self.url}
@@ -77,7 +94,7 @@ class RawJob:
 
 
 class Ctx:
-    """The HTTP client that collectors share during one search run or one Sources page check.
+    """The HTTP client that collectors share during one search run or one check in the Sources dialog.
 
     It is polite by design. At most PER_HOST_LIMIT requests run at once per site (host_limit() lowers that for strict sites),
     rate-limit and server-busy answers are retried after a growing pause, and every request checks the run's stop flag first,

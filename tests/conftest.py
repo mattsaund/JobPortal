@@ -17,6 +17,8 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 @pytest.fixture(autouse=True)
 def zero_data():
+    """Before every test: close the database, empty the data folder and reset the in-memory state (profile status,
+    run state, AI flags, started sign-ins), so each test starts like a fresh install."""
     from jobportal.ai import client as ai, signin
     from jobportal.candidate import profile
     from jobportal.core import bus, config, db
@@ -27,7 +29,8 @@ def zero_data():
         else:
             p.unlink(missing_ok=True)
     profile.status.update(busy=False, phase="", error=None)
-    bus.state.update(running=False, active_agents={}, tokens=0)
+    profile._last_failure.clear()
+    bus.state.update(running=False, active_agents={}, tokens=0, model=None, ai_requests=0)
     ai.web_search_ok, ai._limit_hit_at = None, 0.0
     ai._models.update(at=0.0, ids=[])
     signin._pending.clear()
@@ -36,20 +39,26 @@ def zero_data():
 
 
 def pytest_sessionfinish(session, exitstatus):
+    """Delete the temporary data folder once every test has run."""
     shutil.rmtree(_HOME, ignore_errors=True)
 
 
 @pytest.fixture
 def sample_resume() -> str:
+    """The fictional sample resume (tests/fixtures/sample_resume.md) as text."""
     return (FIXTURES / "sample_resume.md").read_text(encoding="utf-8")
 
 
 class FakeAI:
+    """Stands in for ai.run(): answers each purpose from `responses` (a dict, or a function of the prompt) and records
+    every call in `calls`. A purpose with no response fails with AIError, like a real failed request."""
+
     def __init__(self):
         self.calls: list[dict] = []
         self.responses: dict = {}
 
     async def run(self, prompt, *, system, schema, stage, purpose, **kw):
+        """ai.run()'s signature: record the call, then return the response for `purpose` with ai.run's own extras."""
         self.calls.append({"purpose": purpose, "stage": stage, "prompt": prompt, "system": system})
         out = self.responses.get(purpose)
         if callable(out):
@@ -62,6 +71,7 @@ class FakeAI:
 
 @pytest.fixture
 def fake_ai(monkeypatch) -> FakeAI:
+    """Replace ai.run with a FakeAI for one test and hand it over, so the test can set responses and read calls."""
     from jobportal.ai import client as ai
     fake = FakeAI()
     monkeypatch.setattr(ai, "run", fake.run)

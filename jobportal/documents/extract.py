@@ -1,7 +1,8 @@
 """Reading imported resumes: turns a PDF, Word, OpenDocument, RTF, Markdown or plain-text file into plain text.
 
-Who calls it: candidate/onboarding.py (the resume imported during setup) and candidate/library.py (files added to the resume
-collection) call extract_text(). render.py borrows pdf_page_count() to count the pages of a printed resume.
+Who calls it: candidate/onboarding.py (the main resume), candidate/documents.py (extra documents, with a lower minimum
+length) and candidate/library.py (files added to the resume collection) call extract_text(). render.py borrows
+pdf_page_count() to count the pages of a printed resume.
 
 Everything except old word processor files is read in pure Python (pypdf, python-docx and the standard library), so it
 works the same on Windows, macOS and Linux with nothing else installed. Old Word (.doc), Apple Pages (.pages) and Microsoft
@@ -55,15 +56,25 @@ def _tidy(text: str) -> str:
 def pdf_text(data: bytes) -> str:
     """Text of every page. A PDF has no lines or paragraphs, only pieces of text placed at positions on the page. pypdf's
     layout mode rebuilds lines from those positions and keeps the columns of a two-column resume apart; the plain mode is
-    the fallback for files the stricter layout mode can't handle. A scanned PDF holds only images and yields no text."""
+    the fallback for files the stricter layout mode can't handle. A scanned PDF holds only images and yields no text.
+
+    Raises ExtractError for a protected PDF: one that needs a password, or one encrypted with AES, which pypdf can only
+    open with the optional cryptography package (not a JobPortal dependency)."""
     from pypdf import PdfReader
+    from pypdf.errors import DependencyError, FileNotDecryptedError
     pages = []
-    for page in PdfReader(io.BytesIO(data)).pages:
-        try:
-            text = page.extract_text(extraction_mode="layout")
-        except Exception:  # noqa: BLE001 (layout mode is stricter; plain mode reads anything)
-            text = page.extract_text()
-        pages.append(text or "")
+    try:
+        for page in PdfReader(io.BytesIO(data)).pages:
+            try:
+                text = page.extract_text(extraction_mode="layout")
+            except (DependencyError, FileNotDecryptedError):
+                raise
+            except Exception:  # noqa: BLE001 (layout mode is stricter; plain mode reads anything)
+                text = page.extract_text()
+            pages.append(text or "")
+    except (DependencyError, FileNotDecryptedError) as e:
+        raise ExtractError("that PDF is protected (it has a password or editing restrictions), so its text can't be read. "
+                           "Open it, save or print it as a new PDF, or export it as DOCX, and import that instead.") from e
     return "\n\n".join(pages)
 
 
@@ -273,11 +284,23 @@ def _soffice_text(name: str, data: bytes) -> str:
         # A throwaway LibreOffice profile. With the user's own, a LibreOffice window that is already open would take the job
         # and this call would return before the text file exists.
         profile = (Path(tmp) / "lo-profile").as_uri()
-        subprocess.run([soffice, "--headless", f"-env:UserInstallation={profile}", "--convert-to", "txt:Text", "--outdir", tmp, str(src)],
-                       capture_output=True, timeout=180, **osutil.popen_flags())
+        done = subprocess.run([soffice, "--headless", f"-env:UserInstallation={profile}", "--convert-to", "txt:Text", "--outdir", tmp,
+                               str(src)], capture_output=True, timeout=180, **osutil.popen_flags())
         out = Path(tmp) / "resume.txt"
         # LibreOffice writes UTF-8 starting with a byte order mark; _decode drops the mark and copes with other encodings.
-        return _decode(out.read_bytes()) if out.exists() else ""
+        text = _decode(out.read_bytes()) if done.returncode == 0 and out.exists() else ""
+    if not text.strip() or _raw_bytes(text):
+        raise ExtractError(f"LibreOffice couldn't read {name}. The file may be damaged: open it, save it as PDF or DOCX, and import "
+                           "that instead.")
+    return text
+
+
+def _raw_bytes(text: str) -> bool:
+    """True when LibreOffice gave up on a file (a damaged .doc) and opened it as plain text, so its "text" is the file's
+    raw bytes. Those are full of control characters, which its text export writes as "#", and replacement characters:
+    more than one character in twenty is never a resume."""
+    junk = sum(1 for c in text if c in "#�" or (c < " " and c not in "\t\n\r"))
+    return junk > len(text) / 20
 
 
 def extract_text(name: str, data: bytes, min_chars: int = MIN_CHARS) -> str:

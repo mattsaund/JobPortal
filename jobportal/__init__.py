@@ -1,3 +1,4 @@
-"""JobPortal: import your resume, answer the standard job questions, and it hunts for jobs and prepares every application."""
+"""JobPortal: drop in your resume and documents, answer a few questions, and it finds jobs in any field and prepares every
+application."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

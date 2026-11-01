@@ -9,6 +9,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from jobportal.core import bus, config, db, genres, osutil, settings, textutil
 from jobportal.core.textutil import LocationMatcher
 
@@ -112,8 +114,41 @@ def test_html_to_text():
     assert textutil.html_to_text(None) == ""
 
 
+def test_keywords_for_any_field():
+    # Whole words only: "c" isn't found inside "c++", and "go" isn't found inside "google".
+    tech = textutil.extract_terms("We use Python and C++ at Google, with some Go. C is a plus.")
+    assert {"Python", "C++", "Go", "C"} <= set(tech)
+    # Tech words that are everyday words don't count in a posting that isn't about tech.
+    assert textutil.extract_terms("Go the extra mile, rest assured, and test the web forms.") == []
+    # Credentials and licenses come first, then every field's vocabulary, then what the requirement lines ask for.
+    nursing = textutil.extract_terms("CNA certification and BLS required. Experience with patient care and vital signs.")
+    assert nursing[:2] == ["CNA", "BLS"] and {"patient care", "vital signs"} <= set(nursing)
+    trucking = textutil.extract_terms("Valid Class A CDL and OSHA 10. Ability to operate a forklift and pallet jack.")
+    assert {"CDL Class A", "OSHA 10", "forklift", "pallet jack"} <= set(trucking) and "CDL" not in trucking  # no repeats
+    kitchen = textutil.extract_terms("ServSafe required. Experience with point of sale systems and cash handling.")
+    assert {"ServSafe", "POS systems", "cash handling"} <= set(kitchen)
+    assert "Pharmacy Technician Certification" in textutil.extract_terms("Must hold a Pharmacy Technician Certification.")
+    office = textutil.extract_terms("Proficient in Microsoft Excel and QuickBooks. You will excel in a fast-paced environment.")
+    assert office[:2] == ["Microsoft Excel", "QuickBooks"] and not any("environment" in term for term in office)
+
+
+def test_target_roles_match_leniently():
+    nurse = textutil.TargetMatcher(["Registered Nurse", "new grad RN Columbus OH"], places=["Columbus, OH"])
+    assert nurse.matches("RN - Med Surg") and nurse.matches("Nursing Assistant") and nurse.matches("Charge Nurse")
+    assert not nurse.matches("Software Engineer") and not nurse.matches("Columbus Store Manager")  # places never count
+    assert nurse.matches("Clinician II", "Join our RN team providing nursing care.")  # two target words in the description
+    tech = textutil.TargetMatcher(["Software Engineer"])
+    assert tech.matches("Backend Developer") and not tech.matches("Cashier")
+    trades = textutil.TargetMatcher(["Apprentice Electrician"])
+    assert trades.matches("Journeyman Electrician") and trades.matches("Electrical Helper") and not trades.matches("Election Clerk")
+    assert textutil.TargetMatcher(["Assistant Manager"]).matches("Assistant Store Manager")  # only generic words: they count
+    it_support = textutil.TargetMatcher(["IT Support Specialist"])
+    assert it_support.matches("IT Help Desk Technician")  # "IT" counts in a title...
+    assert not it_support.matches("Line Cook", "It is a busy kitchen. It pays $18 per hr and it has a network of cafes.")  # ...not here
+    assert not textutil.TargetMatcher([]) and textutil.TargetMatcher([]).matches("Anything")  # no targets: everything passes
+
+
 def test_keywords_and_coverage():
-    assert textutil.extract_terms("We use C++ and Go at Google. C is a plus.") == ["c", "c++", "go"]
     resume = "Wrote Python services on GCP with Kubernetes. Added unit tests."
     share, hit, miss = textutil.coverage(["Python", "AWS / GCP", "Kubernetes (K8s)", "unit testing", "Rust"], resume)
     assert share == 0.8 and miss == ["Rust"] and "unit testing" in hit  # "tests" counts for "testing"
@@ -122,11 +157,19 @@ def test_keywords_and_coverage():
 
 def test_genres_and_industries():
     assert genres.classify("Site Reliability Engineer") == ["cloud_devops"]
-    assert genres.classify("Barista") == []
+    assert genres.classify("Registered Nurse") == ["nursing"] and genres.classify("Electrician Apprentice") == ["skilled_trades"]
+    assert genres.classify("Barista") == ["food_hospitality"] and genres.classify("Paralegal") == ["legal"]
+    assert genres.classify("Lorem ipsum") == []
     assert genres.classify("Data Engineer", genres=[{"id": "x", "label": "X", "keywords": "data(("}]) == []  # a bad regex doesn't raise
-    assert genres.classify_industry("Example Aerospace", "Software Intern") == "Space & Aerospace"
-    assert genres.classify_industry("Example Bank", "Data Analyst") == "Fintech & Finance"
-    assert genres.classify_industry("Example Co", "Barista", industries=["Cybersecurity", "Other"]) == "Other"
+    assert {genres.group_of(g) for g in genres.DEFAULT_GENRES} == set(genres.GROUPS)  # every field group has genres
+    assert genres.classify_industry("Example Aerospace", "Software Intern") == "Aerospace & Defense"
+    assert genres.classify_industry("Example Bank", "Data Analyst") == "Finance & Insurance"
+    assert genres.classify_industry("Riverside Hospital", "Registered Nurse") == "Healthcare & Biotech"
+    assert genres.classify_industry("Example Co", "Line Cook", "Our restaurant serves brunch.") == "Restaurants & Food Service"
+    # Benefits boilerplate, and big employers' names that are also ordinary words, don't decide the industry.
+    assert genres.classify_industry("Example Co", "Analyst", "Health insurance, medical and dental. Meet your targets.") == "Other"
+    assert genres.classify_industry("Example Co", "Barista", industries=["Technology & Software", "Other"]) == "Other"
+    assert set(genres.OLD_INDUSTRIES.values()) <= set(genres.DEFAULT_INDUSTRIES)  # every old name has a home
 
 
 # ---------------------------------------------------------------- the database
@@ -147,6 +190,7 @@ CREATE TABLE ai_calls (id INTEGER PRIMARY KEY, ts TEXT, run_id INTEGER, lead_id 
 
 
 def columns(table: str) -> set[str]:
+    """The column names of a database table."""
     return {r["name"] for r in db.q(f"PRAGMA table_info({table})")}
 
 
@@ -165,7 +209,7 @@ def test_old_databases_are_upgraded():
     assert github["found"] == [{"source": "github", "label": "GitHub SimplifyJobs/Summer2027-Internships, Software",
                                 "url": "https://github.com/SimplifyJobs/Summer2027-Internships"}]
     assert linkedin["found"] == [{"source": "linkedin", "label": "LinkedIn search", "url": "https://example.com/jobs/2"}]
-    assert (github["industry"], linkedin["industry"]) == ("Space & Aerospace", "Fintech & Finance")
+    assert (github["industry"], linkedin["industry"]) == ("Aerospace & Defense", "Finance & Insurance")
     assert github["dream_manual"] is None and github["tokens"] == 0
     upgraded = {t: columns(t) for t in ("leads", "runs", "ai_calls", "candidates")}
 
@@ -176,6 +220,12 @@ def test_old_databases_are_upgraded():
     db.conn()  # opening again changes nothing and doesn't fail
 
 
+def test_old_industry_names_are_renamed():
+    lead_id = db.ex("INSERT INTO leads(fingerprint, title, company, industry) VALUES('fp', 'Analyst', 'Example Co', 'Fintech & Finance')")
+    db.close()  # reopening runs the migration
+    assert db.one("SELECT industry FROM leads WHERE id=?", (lead_id,))["industry"] == "Finance & Insurance"
+
+
 def test_lead_helpers():
     lead_id = db.ex("INSERT INTO leads(fingerprint, title, company) VALUES('fp', 'Software Intern', 'Example Robotics')")
     db.update_lead(lead_id, package={"keywords": ["Python"]}, found=[{"source": "manual"}], notes="Applied online")
@@ -184,6 +234,17 @@ def test_lead_helpers():
     damaged = db.lead_row({"sources": "{oops", "found": "[oops", "triage": "oops", "package": "oops"})
     assert damaged == {"sources": [], "found": [], "triage": {}, "package": {}}  # list columns stay lists
     assert db.kv_get("missing", "fallback") == "fallback"
+
+
+def test_many_rows_are_written_in_one_transaction():
+    insert = "INSERT INTO leads(fingerprint, title, company) VALUES(?, ?, ?)"
+    db.ex_many(insert, [(f"fp{i}", "Medical Assistant", "Example Health") for i in range(3)])
+    assert db.one("SELECT COUNT(*) n FROM leads")["n"] == 3
+    with pytest.raises(sqlite3.IntegrityError):  # the second row repeats a fingerprint, which leads keeps unique
+        db.ex_many(insert, [("fp9", "Cook", "Example Bistro"), ("fp0", "Cook", "Example Bistro")])
+    assert db.one("SELECT COUNT(*) n FROM leads")["n"] == 3  # all or nothing: the first row of the failed batch isn't kept
+    db.ex(insert, ("fp10", "Barista", "Example Cafe"))  # the connection is back in autocommit afterwards
+    assert db.one("SELECT COUNT(*) n FROM leads")["n"] == 4
 
 
 # ---------------------------------------------------------------- settings
@@ -200,8 +261,23 @@ def test_settings_merge_over_defaults():
     assert settings.resume_playbook({"resume_playbook": ""}) == settings.default_playbook()
 
 
-def test_new_default_boards_are_offered_once():
-    defaults = config.DEFAULT_SETTINGS["sources"]["ats_boards"]["boards"]
+def test_a_broken_save_reads_as_the_defaults_for_what_it_broke():
+    # A section or list saved as something else (null, text) would break every reader that expects its shape.
+    settings.save({"run": None, "sources": {"linkedin": "off"}, "industries": "Healthcare", "filters": {"exclude_keywords": ["night shift"]}})
+    cfg = settings.get()
+    assert cfg["run"] == config.DEFAULT_SETTINGS["run"] and cfg["sources"]["linkedin"]["enabled"] is True
+    assert cfg["industries"] == genres.DEFAULT_INDUSTRIES
+    assert cfg["filters"]["exclude_keywords"] == ["night shift"]  # what was saved properly still counts
+    assert db.kv_get("settings")["run"] is None  # nothing stored is changed by reading it
+    settings.save({"industries": ["Education"]})
+    assert settings.reset_section("industries.extra")["industries"] == ["Education"]  # a path through a list changes nothing
+
+
+def test_new_default_boards_are_offered_once(monkeypatch):
+    # No company boards ship by default (each person adds their own), so pretend a later version added two.
+    defaults = [{"name": "Example Health", "ats": "greenhouse", "slug": "examplehealth"},
+                {"name": "Example Builders", "ats": "lever", "slug": "example-builders"}]
+    monkeypatch.setitem(config.DEFAULT_SETTINGS["sources"]["ats_boards"], "boards", defaults)
     assert settings.migrate_defaults() == []  # nothing saved yet, so the defaults already apply
     cfg = settings.get()
     cfg["sources"]["ats_boards"]["boards"] = [dict(defaults[0]), {"name": "Example Robotics", "ats": "lever", "slug": "example-robotics"}]
@@ -214,6 +290,68 @@ def test_new_default_boards_are_offered_once():
     settings.save(cfg)
     assert settings.migrate_defaults() == []
     assert defaults[1]["name"] not in {b["name"] for b in settings.get()["sources"]["ats_boards"]["boards"]}
+
+
+def test_tech_only_defaults_from_older_versions_are_retired():
+    from jobportal.core.genres import LEGACY_INDUSTRIES
+    old_genres = [{"id": "swe", "label": "Software Engineering", "keywords": "software"}, {"id": "cyber", "label": "Cybersecurity"}]
+    db.kv_set("settings", {"analysis": {"genres": old_genres}, "industries": LEGACY_INDUSTRIES,
+                           "filters": {"require_tech_title": False, "tech_title": ["software"], "exclude_companies": ["Example Staffing"]},
+                           "sources": {"reddit": {"enabled": True, "subreddits": ["forhire", "jobbit", "hiring", "cscareerquestions",
+                                                                                "internships", "EngineeringStudents", "remotejs", "techjobs"]},
+                                       "mastodon": {"enabled": True, "instances": ["mastodon.social", "example.social"]}}})
+    assert "genres for every field" in settings.migrate_defaults()
+    cfg = settings.get()
+    assert cfg["analysis"]["genres"] == config.DEFAULT_SETTINGS["analysis"]["genres"]
+    assert cfg["industries"] == config.DEFAULT_SETTINGS["industries"]
+    assert cfg["filters"]["require_target_match"] is False and "tech_title" not in cfg["filters"]  # the user had it off
+    assert cfg["filters"]["exclude_companies"] == ["Example Staffing"]  # their own choices stay
+    assert cfg["sources"]["reddit"]["subreddits"] == config.DEFAULT_SETTINGS["sources"]["reddit"]["subreddits"]
+    assert cfg["sources"]["mastodon"]["instances"] == ["mastodon.social", "example.social"]  # edited, so kept
+    assert settings.migrate_defaults() == []  # nothing left to change
+    db.kv_set("settings", {"industries": ["Fintech & Finance", "Education", "Finance & Insurance"]})  # a list the user edited
+    settings.migrate_defaults()
+    assert settings.get()["industries"] == ["Finance & Insurance", "Education"]
+
+
+def test_untouched_built_in_missions_get_the_new_wording(monkeypatch):
+    import hashlib
+
+    from jobportal.ai.prompts import DEFAULT_MISSIONS
+    current = {m["id"]: m for m in DEFAULT_MISSIONS}
+    old_prompt = "Find openings, especially at tech startups."  # stands in for a built-in prompt from an older version
+    monkeypatch.setitem(settings._LEGACY_MISSION_PROMPTS, "research", hashlib.sha1(old_prompt.encode()).hexdigest()[:16])
+    monkeypatch.setitem(settings._LEGACY_MISSION_PROMPTS, "social", hashlib.sha1(old_prompt.encode()).hexdigest()[:16])
+    db.kv_set("settings", {"sources": {"ai_hunt": {"missions": [
+        {"id": "research", "name": "My labs", "enabled": False, "prompt": old_prompt},
+        {"id": "social", "name": "Social", "prompt": "My own social search."}]}}})
+    assert "1 built-in AI missions reworded for every field" in settings.migrate_defaults()
+    missions = {m["id"]: m for m in settings.get()["sources"]["ai_hunt"]["missions"]}
+    assert missions["research"]["prompt"] == current["research"]["prompt"]
+    assert missions["research"]["only_groups"] == current["research"]["only_groups"]
+    assert (missions["research"]["name"], missions["research"]["enabled"]) == ("My labs", False)  # the user's choices stay
+    assert missions["social"]["prompt"] == "My own social search."  # an edited mission stays as the user wrote it
+    assert "apprenticeships" in missions  # the new built-in mission is offered too
+    assert settings.migrate_defaults() == []
+
+
+def test_the_legacy_mission_hashes_match_the_old_prompts():
+    """The hashes in settings._LEGACY_MISSION_PROMPTS must be those of the prompts v0.2.0 shipped, or no saved mission
+    would ever get the new wording. Checked against git history when this is a full source checkout."""
+    import ast
+    import hashlib
+    import subprocess
+
+    import pytest
+    try:
+        old_source = subprocess.run(["git", "show", "1c4efe2:jobportal/ai/prompts.py"], capture_output=True, text=True,
+                                    check=True, cwd=Path(__file__).parent).stdout
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("this checkout has no git history to compare with")
+    node = next(n for n in ast.parse(old_source).body
+                if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "DEFAULT_MISSIONS")
+    old = {m["id"]: hashlib.sha1(m["prompt"].encode()).hexdigest()[:16] for m in ast.literal_eval(node.value)}
+    assert old == settings._LEGACY_MISSION_PROMPTS
 
 
 # ---------------------------------------------------------------- live events
@@ -267,9 +405,29 @@ def test_a_missing_chrome_override_falls_back_to_the_bundled_engine(tmp_path, mo
     assert Path(osutil.find_pdf_engine()).resolve() == engine.resolve()
 
 
-def test_quoting_for_notifications():
-    assert osutil._ps_str("Jordan's offer") == "'Jordan''s offer'"
-    assert osutil._applescript_str('Say "hi" \\ bye') == '"Say \\"hi\\" \\\\ bye"'
+def test_upload_names_are_safe_to_store():
+    assert osutil.storable_name("../../uploads/Jordan Rivera: Resume|v2.pdf", "resume.txt") == "Jordan Rivera- Resume-v2.pdf"
+    assert osutil.storable_name("  ", "document.txt") == "document.txt" and osutil.storable_name(None, "resume.txt") == "resume.txt"
+
+
+def test_notification_text_never_becomes_part_of_a_script(monkeypatch):
+    started = []
+    monkeypatch.setattr(osutil.subprocess, "Popen", lambda cmd, **kw: started.append((cmd, kw.get("env"))))
+    monkeypatch.setattr(osutil, "popen_flags", lambda: {})  # CREATE_NO_WINDOW only exists on Windows
+    monkeypatch.setattr(osutil.shutil, "which", lambda name: f"/usr/bin/{name}")
+    # A posting title from the web. PowerShell ends a quoted string at a curly quote (’) too.
+    title, body = "Analyst’; Start-Process calc; ’", 'Example Health \\ "Children’s"'
+    for system in ("IS_WIN", "IS_MAC"):
+        for flag in ("IS_WIN", "IS_MAC", "IS_LINUX"):
+            monkeypatch.setattr(osutil, flag, flag == system)
+        assert osutil.notify(title, body)
+        cmd, env = started[-1]
+        script = cmd if system == "IS_WIN" else cmd[:-2]
+        assert not any(title in part or body in part for part in script), system
+        if system == "IS_WIN":
+            assert env["JOBPORTAL_TOAST_TITLE"] == title and env["JOBPORTAL_TOAST_BODY"] == body
+        else:
+            assert cmd[-2:] == [title, body]  # handed to the AppleScript run handler as argv
 
 
 def test_location_edge_cases_that_used_to_drop_good_jobs():
@@ -281,3 +439,9 @@ def test_location_edge_cases_that_used_to_drop_good_jobs():
     assert LocationMatcher(["Remote"]).match_one("Remote, Canada") is False
     assert state_of("Columbus, OH, on-site") == "OH" and LocationMatcher(["Ohio"]).match_one("Columbus, OH, on-site") is True
     assert state_of("Toronto, ON") == "FOREIGN"  # real province codes are still foreign
+    # Cities named after another state: the state after the comma wins in the filter. state_of() keeps its old answer,
+    # because saved leads' fingerprints were built from it.
+    for place, state in (("Kansas City, Missouri", "Missouri"), ("Delaware, Ohio", "Ohio"), ("Missouri City, Texas", "TX")):
+        assert LocationMatcher([state]).match_one(place) is True, place
+    assert LocationMatcher(["Kansas"]).match_one("Kansas City, Missouri") is False
+    assert state_of("Kansas City, Missouri") == "KS"

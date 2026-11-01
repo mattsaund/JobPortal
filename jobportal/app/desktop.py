@@ -36,7 +36,7 @@ from jobportal.core.config import CACHE, DATA, HOST, PORT, RESOURCES, STATIC
 os.environ.setdefault("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
 
 BASE = f"http://{HOST}:{PORT}"
-ICON = STATIC / "icon.svg"
+ICON = STATIC / "icon.png"  # the JP ring app icon (512 px), for the Linux window, menu entry and notifications
 
 
 # ---------------------------------------------------------------- the server
@@ -115,7 +115,7 @@ class Bridge:
 
     def save_file(self, path: str) -> dict:
         """Download one of JobPortal's own exports (a /api/... path) and save it where the user picks in a Save dialog.
-        Returns {"ok": True, "path"}, {"ok": False, "cancelled": True} or {"ok": False, "error"}."""
+        Returns {"ok": True, "path"}, {"ok": False, "canceled": True} or {"ok": False, "error"}."""
         import webview
         if not (path or "").startswith("/api/"):
             return {"ok": False, "error": "not a JobPortal file"}
@@ -132,9 +132,12 @@ class Bridge:
         picked = self._window.create_file_dialog(webview.FileDialog.SAVE, directory=str(downloads if downloads.exists() else Path.home()),
                                                  save_filename=name)
         if not picked:
-            return {"ok": False, "cancelled": True}
+            return {"ok": False, "canceled": True}
         dest = Path(picked if isinstance(picked, str) else picked[0])  # some platforms return a list of one path
-        dest.write_bytes(data)
+        try:
+            dest.write_bytes(data)
+        except OSError as e:  # a folder the user can't write to, a full disk, a file open in another program
+            return {"ok": False, "error": f"couldn't save {dest.name}: {e.strerror or e}"}
         return {"ok": True, "path": str(dest)}
 
     def notify(self, title: str, body: str = "") -> None:
@@ -246,7 +249,8 @@ def add_to_app_menu() -> bool:
         return False
     share = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
     entry = share / "applications" / "jobportal.desktop"
-    icon = share / "icons" / "hicolor" / "scalable" / "apps" / "jobportal.svg"
+    icon = share / "icons" / "hicolor" / "512x512" / "apps" / "jobportal.png"
+    old_icon = share / "icons" / "hicolor" / "scalable" / "apps" / "jobportal.svg"  # v0.2.0's icon, which would win over the PNG
     try:
         old = entry.read_text(encoding="utf-8") if entry.is_file() else None
     except (OSError, UnicodeDecodeError):
@@ -261,6 +265,7 @@ def add_to_app_menu() -> bool:
         entry.parent.mkdir(parents=True, exist_ok=True)
         icon.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ICON, icon)
+        old_icon.unlink(missing_ok=True)
         entry.write_text(text, encoding="utf-8")
     except OSError:
         return False

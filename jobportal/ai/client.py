@@ -85,9 +85,32 @@ def usage_high() -> bool:
     return time.time() - _limit_hit_at < USAGE_CAP_PAUSE
 
 
+def usage() -> dict:
+    """What the sidebar's AI card shows about the AI right now. Sent with GET /api/stats and as a "usage" event whenever a
+    task starts or ends.
+
+    - model: the model a task is using now, else the one used last, else the model Settings picks by default (or the first
+      one the account lists, once that list is loaded). model_note says which: "in use", "last used" or "default".
+    - running and slots: how many AI tasks run now, out of how many may run at once (Settings, AI). That's the card's
+      utilization. Sign in with ChatGPT doesn't report how much of the plan is used, so JobPortal can't show that.
+    - tokens and requests: this session's totals, since JobPortal started.
+    - capped: True for a while after OpenAI reported the plan's usage cap (usage_high()), when new tasks wait."""
+    cfg = settings_mod.get()
+    running = len(bus.state.get("active_agents") or {})
+    last = str(bus.state.get("model") or "")
+    default = str(cfg["ai"].get("model") or (_models["ids"][0] if _models["ids"] else ""))
+    if last:
+        model, note = last, ("in use" if running else "last used")
+    else:
+        model, note = default, ("default" if default else "")
+    return {"model": model, "model_note": note, "running": running, "slots": max(1, int(cfg["ai"].get("max_parallel", 3))),
+            "tokens": int(bus.state.get("tokens") or 0), "requests": int(bus.state.get("ai_requests") or 0), "capped": usage_high()}
+
+
 def _semaphore(n: int) -> asyncio.Semaphore:
-    """The shared limit on how many AI tasks run at once (Settings, max_parallel). When the setting changes, a new
-    semaphore replaces the old one, and tasks that already hold the old one simply finish under it."""
+    """The shared limit on how many AI tasks run at once (ai.max_parallel: Settings, AI, "AI tasks at the same time").
+    When the setting changes, a new semaphore replaces the old one, and tasks that already hold the old one simply finish
+    under it."""
     global _sem, _sem_size
     if _sem is None or _sem_size != n:
         _sem, _sem_size = asyncio.Semaphore(n), n
@@ -145,21 +168,24 @@ def _json_object(text: str) -> dict | None:
 async def models(force: bool = False) -> list[str]:
     """The ids of the models the signed-in account may use, in the order OpenAI lists them.
 
-    The Settings page fills its model menus from this list, and run() uses the first id when Settings names no model.
+    Settings, AI fills its model menus from this list, and run() uses the first id when Settings names no model.
     The list is cached for MODELS_CACHE_SECONDS, and force=True fetches it again. Network call on a cache miss.
-    Raises NotSignedIn or AIError."""
+    Raises NotSignedIn or AIError (also when OpenAI can't be reached or answers with something other than a JSON object)."""
     if not force and _models["ids"] and time.time() - _models["at"] < MODELS_CACHE_SECONDS:
         return list(_models["ids"])
     token = await _token()
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{API}/models", headers={"Authorization": f"Bearer {token}"})
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(f"{API}/models", headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError as e:  # run() turns these into AIError the same way
+        raise AIError(f"network problem talking to OpenAI: {type(e).__name__}") from None
     if r.status_code != 200:
         err = _error_body(r.text)
         raise _error(err.get("code"), err.get("message"), r.status_code)
-    # Skip models whose visibility is anything but "list" (for example "hide").
-    body = r.json()
-    entries = body.get("data")
-    if entries is None:
+    # The list comes as {"data": [...]} (the API's usual shape) or {"models": [...]}.
+    body = _json_object(r.text)
+    entries = body.get("data") if body is not None else None
+    if entries is None and body is not None:
         entries = body.get("models", [])
     if not isinstance(entries, list):
         raise AIError("OpenAI returned an unexpected model list format.")
@@ -168,7 +194,7 @@ async def models(force: bool = False) -> list[str]:
     for model in entries:
         if not isinstance(model, dict):
             continue
-        if model.get("visibility", "list") != "list":
+        if model.get("visibility", "list") != "list":  # skip models listed as anything else, for example "hide"
             continue
         model_id = model.get("id") or model.get("slug")
         if isinstance(model_id, str) and model_id.strip():
@@ -536,7 +562,10 @@ async def run(prompt: str, *, system: str, schema: dict, stage: str, purpose: st
         async with _semaphore(max(1, int(cfg["ai"].get("max_parallel", 3)))):
             convo.model = await _pick_model(cfg, stage)
             bus.state["active_agents"][agent_id] = f"{label} ({convo.model}, {effort})"
+            bus.state["model"] = convo.model  # the model in use, for the sidebar's AI card (usage())
+            bus.state["ai_requests"] = int(bus.state.get("ai_requests") or 0) + 1
             bus.publish("agents", bus.state["active_agents"])
+            bus.publish("usage", usage())
             # The conversation runs as its own task so kill_all() can cancel it.
             task = asyncio.create_task(convo.result(prompt))
             _tasks.add(task)
@@ -566,6 +595,7 @@ async def run(prompt: str, *, system: str, schema: dict, stage: str, purpose: st
                0 if error else 1, error))
         bus.state["tokens"] = int(bus.state.get("tokens") or 0) + convo.tokens
         bus.publish("tokens", bus.state["tokens"])
+        bus.publish("usage", usage())
     result["_tokens"] = convo.tokens
     result["_tools"] = {"searches": convo.searches, "pages": convo.pages}
     return result

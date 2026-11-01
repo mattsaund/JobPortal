@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from jobportal import __version__
 from jobportal.ai import client as ai, signin
-from jobportal.candidate import profile
+from jobportal.candidate import documents, profile
 from jobportal.core import background, bus, db, settings
 from jobportal.core.config import STATIC
 from jobportal.search import pipeline
@@ -24,7 +24,8 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
 
 
 async def auto_runner() -> None:
-    """Start a full search every N hours when Settings, "Auto-run every N hours" is above zero. Checks once a minute."""
+    """Start a full search every N hours when Settings, Search, "Search by itself every (hours)" is above zero. Checks
+    once a minute."""
     while True:
         await asyncio.sleep(60)
         try:
@@ -42,7 +43,8 @@ async def auto_runner() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Startup: open the database, clean up after a crash or a forced quit, publish the sign-in and profile status, and
-    start the two background loops. Shutdown: stop AI requests and all background work."""
+    start the two background loops and the AI reading of documents that only have their rules reading. Shutdown: stop AI
+    requests and all background work."""
     db.conn()
     signin.publish()
     settings.migrate_defaults()
@@ -53,6 +55,7 @@ async def lifespan(_app: FastAPI):
     profile.publish_status()
     background.spawn(auto_runner())
     background.spawn(profile.answers_watcher(settings.get))
+    background.spawn(documents.parse_pending())  # nothing to do unless signed in; it reports its own errors
     yield
     ai.kill_all()
     background.cancel_all()

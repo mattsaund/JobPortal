@@ -1,15 +1,15 @@
 """The AI hunt: web-search agents that dig for leads no job board API exposes, such as comment-thread mentions, recruiter
 posts, unadvertised programs and hiring signals.
 
-Each mission (Settings, Sources, AI hunt; the defaults are prompts.DEFAULT_MISSIONS) is one AI agent with web search and page
-reading (ai.run with web=True). It gets the candidate's profile digest, the allowed locations, the dream companies and the
-leads JobPortal already knows, and returns leads with evidence (prompts.HUNT_SCHEMA). The search run (pipeline.py) starts
-collect(), which runs the missions at the same time and hands each mission's leads over as soon as it finishes, so triage can
-start before the slowest mission is done.
+Each mission (the Sources dialog, AI hunt; the defaults are prompts.DEFAULT_MISSIONS) is one AI agent with web search
+and page reading (ai.run with web=True). It gets the candidate's profile digest, the allowed locations, the dream
+companies and the leads JobPortal already knows, and returns leads with evidence (prompts.HUNT_SCHEMA). The search run
+(pipeline.py) starts collect(), which runs the missions at the same time and hands each mission's leads over as soon as
+it finishes, so triage can start before the slowest mission is done.
 
-Keeping usage in check: an "Everything" run only runs missions_per_run missions, rotating through the list so each one still
-runs every few searches (pick_missions). "AI hunt only" runs them all. The depth setting (quick, standard, deep) sets how many
-searches and page reads each agent may use.
+Keeping usage in check: an "Everything" run only runs missions_per_run missions, rotating through the list so each one
+still runs every few searches (pick_missions). "AI hunt only" runs them all. The depth setting ("How deep": quick,
+standard, deep) sets how many searches and page reads each agent may use.
 
 Side effects: AI calls on the user's ChatGPT plan, and the rotation position saved in the kv table (hunt.rotation)."""
 import asyncio
@@ -92,13 +92,17 @@ ALREADY KNOWN LEADS (skip unless you found something new):
 def pick_missions(cfg: dict, all_missions: bool) -> list[dict]:
     """The missions to run this time.
 
-    Only enabled missions count, and a mission with only_levels (a campus pipeline, for example) only counts when the user
-    searches at one of those levels. With all_missions (an "AI hunt only" run), or when missions_per_run is 0 or covers them
-    all, every one runs. Otherwise the next missions_per_run in a rotation run, so every mission still runs every few
-    searches without using up the ChatGPT plan's usage window. Side effect: saves the rotation position (kv hunt.rotation)."""
+    Only enabled missions count. A mission with only_levels (a campus pipeline, for example) only counts when the user
+    searches at one of those levels, and one with only_groups (research labs) only when one of the user's field groups
+    (plan.groups, such as "science" or "healthcare") is in it, or while their fields aren't known yet. With all_missions
+    (an "AI hunt only" run), or when missions_per_run is 0 or covers them all, every one runs. Otherwise the next
+    missions_per_run in a rotation run, so every mission still runs every few searches without using up the ChatGPT plan's
+    usage window. Side effect: saves the rotation position (kv hunt.rotation)."""
     levels = set(plan.levels(cfg))
+    groups = set(plan.groups(cfg))
     missions = [m for m in cfg["sources"]["ai_hunt"]["missions"]
-                if m.get("enabled", True) and (not m.get("only_levels") or levels & set(m["only_levels"]))]
+                if m.get("enabled", True) and (not m.get("only_levels") or levels & set(m["only_levels"]))
+                and (not m.get("only_groups") or not groups or groups & set(m["only_groups"]))]
     if not missions:
         return []
     per_run = int(cfg["sources"]["ai_hunt"].get("missions_per_run") or 0)

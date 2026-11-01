@@ -1,5 +1,8 @@
+"""The profile (candidate/profile.py) and its inputs: building and updating it, the questions asked along the way,
+the background sync of documents and answers, the extra documents, and that only the user's own material feeds it."""
 import asyncio
 import copy
+import time
 
 from conftest import PROFILE_OUT, STANDARD_ANSWERS
 
@@ -18,7 +21,7 @@ def test_starts_with_zero_data():
 def _setup(fake_ai, sample_resume):
     fake_ai.responses["onboarding-prefill"] = {}
     fake_ai.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
-    fake_ai.responses["analysis"] = {"genres": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
+    fake_ai.responses["analysis"] = {"roles": [], "suggested_roles": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
                                          "search_steering": {"emphasize": [], "deemphasize": [], "add_queries": [], "add_companies": [], "notes": ""}}
     asyncio.run(onboarding.import_resume("resume.md", data=sample_resume.encode()))
     onboarding.save_answers(STANDARD_ANSWERS)
@@ -52,6 +55,23 @@ def test_answers_update_only_what_changes(fake_ai, sample_resume):
     q = profile.questions()[0]
     assert q["status"] == "answered" and q["synced"]
     assert "300 students" in profile.full_context()
+
+
+def test_a_failed_sync_waits_before_trying_again(fake_ai, sample_resume, monkeypatch):
+    _setup(fake_ai, sample_resume)
+    asyncio.run(profile.build("test"))
+    db.kv_set("profile.documents_changed_at", time.time() - 120)  # a document added two minutes ago
+    del fake_ai.responses["profile-build"]  # and now every build fails, as when the ChatGPT sign-in has ended
+    options = {"sync_delay_sec": 60}
+    assert asyncio.run(profile.sync_once(options)) == "failed"
+    assert asyncio.run(profile.sync_once(options)) == "waiting"  # not one failing AI call (and error toast) per tick
+    assert sum(c["purpose"] == "profile-build" for c in fake_ai.calls) == 2  # the first build, then one failed try
+    db.kv_set("profile.documents_changed_at", time.time() - 90)  # another document: worth a new try right away
+    assert asyncio.run(profile.sync_once(options)) == "failed"
+    fake_ai.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
+    monkeypatch.setattr(profile, "RETRY_AFTER_FAILURE_SEC", 0)  # the wait is over
+    assert asyncio.run(profile.sync_once(options)) == "done"
+    assert asyncio.run(profile.sync_once(options)) == ""  # the documents are in the profile now
 
 
 def test_answers_given_during_an_update_wait_for_the_next_one(fake_ai, sample_resume):
@@ -110,6 +130,70 @@ def test_the_profile_reads_documents_but_never_saved_resumes(fake_ai, sample_res
     assert "MARKER-NOT-FROM-THE-USER" not in build_prompt
     # The build remembers which documents it read, so the watcher only rebuilds when they change again.
     assert db.kv_get("profile.documents_built") == documents.changed_at()
+
+
+def test_document_details_reach_the_profile_build(fake_ai, sample_resume):
+    from jobportal.candidate import documents
+    _setup(fake_ai, sample_resume)
+    documents.add("RN license.txt", b"Ohio Board of Nursing\nThis certifies that\nJordan Rivera\nis licensed as a Registered Nurse\n"
+                                    b"Issued: 06/15/2024 Expires: 08/31/2026")
+    asyncio.run(profile.build("test"))
+    call = next(c for c in fake_ai.calls if c["purpose"] == "profile-build")
+    assert ("DETAILS (a rough reading by patterns; the text wins): kind: license; title: Registered Nurse License; "
+            "issuer: Ohio Board of Nursing; issued: 2024-06; expires: 2026-08") in call["prompt"]
+    assert "## Licenses & Certifications" in call["system"] and "## Awards & Honors" in call["system"]  # where they land
+
+
+def test_documents_from_before_readings_existed_are_read_lazily():
+    from jobportal.candidate import documents
+    db.kv_set("profile.answers", {"name": "Jordan Rivera"})
+    db.kv_set("profile.documents", [{"id": "old1", "name": "Jordan Rivera.txt", "kind": "award", "text": "Jordan Rivera\n"
+                                     "Example State University\nDean's List, Spring 2025", "chars": 60, "added_at": db.now(),
+                                     "sha1": "x", "stored_as": "old1 Jordan Rivera.txt"}])
+    (entry,) = documents.listing()
+    assert entry["parsed_by"] == "rules" and entry["parsing"] is False
+    assert entry["parsed"]["title"] == "Dean's List" and entry["parsed"]["issuer"] == "Example State University"
+    assert "Jordan" not in entry["parsed"]["title"] and entry["parsed"]["issued"] == "2025"  # never the user's own name
+    assert db.kv_get("profile.documents")[0]["parsed"] == entry["parsed"]  # saved, so it's read only once
+    assert db.kv_get("profile.documents_changed_at") is None  # nothing about the document changed: no rebuild
+
+
+def test_parse_pending_reads_what_only_the_rules_read(fake_ai, monkeypatch):
+    from jobportal.candidate import documents
+    documents.add("cpr.txt", b"American Heart Association\nBLS Provider\nIssue Date 2/2025 Renew By 2/2027")
+    documents.add("food.txt", b"Certificate of completion: Food Handler Training. Issued March 2025.")
+    assert asyncio.run(documents.parse_pending()) == 0  # nobody is signed in
+    monkeypatch.setattr(documents, "_signed_in", lambda: True)
+    assert asyncio.run(documents.parse_pending()) == 0  # the fake AI has no answer: the first failure ends the round
+    assert all(d["parsed_by"] == "rules" for d in documents.listing())
+    fake_ai.responses["document-parse"] = {"kind": "certificate", "title": "BLS Provider", "issuer": "American Heart Association",
+                                           "issued": "2025-02", "expires": "2027-02", "skills": ["CPR"], "summary": "A BLS card."}
+    assert asyncio.run(documents.parse_pending()) == 2 and all(d["parsed_by"] == "ai" for d in documents.listing())
+    assert asyncio.run(documents.parse_pending()) == 0  # nothing left to read
+
+
+def test_document_kinds_cover_british_spelling_and_resumes():
+    from jobportal.candidate import documents
+    british = "licen" + "ce"  # spelled out in pieces: the repo's own text sticks to American spelling
+    assert documents._kind("permit.txt", f"Driving {british} issued 2024 by the state") == "license"
+    resume_text = "Jordan Rivera\n## Experience\nCashier\n## Education\nExample High School\nFood handler certification"
+    assert documents._kind("Jordan Rivera.md", resume_text) == "resume"  # a resume that mentions a certificate is a resume
+    assert documents.recipients("This certifies that\nJordan Rivera\nhas completed CPR") == ["Jordan Rivera"]
+
+
+def test_a_word_that_ends_like_a_month_is_not_a_date():
+    from jobportal.candidate import documents
+    text = "Certificate of Completion\nAdvanced Grammar 2025\nExample Learning Center"
+    assert documents._rule_dates(text, "certificate") == ("2025", "")  # not March 2025
+    assert documents._rule_dates("Issued: Mar. 3, 2025\nExpires Dec 2027", "certificate") == ("2025-03", "2027-12")
+
+
+def test_a_document_without_a_stored_copy_can_still_be_removed():
+    from jobportal.candidate import documents
+    documents.DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    db.kv_set("profile.documents", [{"id": "d1", "name": "CPR card.txt", "kind": "certificate", "text": "CPR certified, 2025",
+                                     "chars": 19, "added_at": db.now(), "sha1": "x", "parsed": {"kind": "certificate"}}])
+    assert documents.remove("d1") and documents.all_documents() == [] and documents.DOCS_DIR.is_dir()
 
 
 def test_answers_used_in_a_resume_are_marked_applied():

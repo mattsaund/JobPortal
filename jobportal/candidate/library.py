@@ -1,15 +1,17 @@
-"""The resume library behind the Resumes page: resume versions the user keeps, edits, downloads and applies to leads.
+"""The resume library behind Settings, Resumes: resume versions the user keeps, edits, downloads and applies to leads.
 
 Saved resumes are storage only. They never feed the profile and are never used as a template. JobPortal learns about the
-user only from the imported resume, the standard answers and questions asked along the way (see candidate/profile.py), and
-every tailored resume is written fresh from the profile. A saved resume reaches a lead only when the user applies it on
-purpose (search/pipeline.py, use_saved_resume). The editable copy that setup can keep of the imported resume is storage too.
+user only from the imported resume, the extra documents, the standard answers and the questions asked along the way (see
+candidate/profile.py), and every tailored resume is written fresh from the profile. A saved resume reaches a lead only
+when the user applies it on purpose (search/packages.py, use_saved_resume). The editable copy that setup can keep of the
+imported resume is storage too.
 
 Each item is one row in the resume_library table: a name, the resume in JobPortal's markdown format (ai/prompts.RESUME_FORMAT),
 a style (theme and page limit), tags, notes, and where it came from (source, lead_id, original_file). Downloads are rendered
 on demand into LIB_DIR/<id>/ by documents/exports.py and deleted whenever the item changes.
 
-Called by web/routes/library.py (the Resumes page) and web/routes/candidate.py (the copy of a newly imported resume)."""
+Called by web/routes/library.py (Settings, Resumes) and web/routes/candidate.py (the copy of a newly imported resume)."""
+import asyncio
 import json
 import shutil
 from pathlib import Path
@@ -18,9 +20,9 @@ from jobportal.ai import client as ai, prompts
 from jobportal.core import db
 from jobportal.core.config import DATA
 from jobportal.documents import extract
+from jobportal.documents.render import DEFAULT_STYLE  # a saved resume's layout until the user picks one
 
 LIB_DIR = DATA / "library"
-DEFAULT_STYLE = {"theme": "classic", "max_pages": 1}
 
 IMPORT_SYSTEM = """Convert the extracted text of ONE resume into the markdown format below. Preserve the content exactly: same wording,
 dates, titles, bullets, order and sections. Only repair text-extraction damage (broken lines, hyphenation, merged columns, stray page
@@ -32,14 +34,16 @@ IMPORT_SCHEMA = {"type": "object", "properties": {"resume_md": {"type": "string"
 
 def _decode(row: dict | None) -> dict | None:
     """A database row with its JSON columns turned back into Python: style into a dict and tags into a list. A missing or
-    broken value reads as empty."""
+    broken value, or one of the wrong kind (the API stores what it's sent), reads as empty, so the preview and downloads
+    can always read the style."""
     if not row:
         return None
-    for column, empty in (("style", {}), ("tags", [])):
+    for column, kind in (("style", dict), ("tags", list)):
         try:
-            row[column] = json.loads(row.get(column) or "null") or empty
+            value = json.loads(row.get(column) or "null")
         except json.JSONDecodeError:
-            row[column] = empty
+            value = None
+        row[column] = value if isinstance(value, kind) else kind()
     return row
 
 
@@ -92,8 +96,10 @@ def delete(item_id: int) -> None:
 
 async def import_file(filename: str, data: bytes, name: str = "") -> dict:
     """Add a resume file to the library as editable markdown, wording kept exactly (see import_text()). Returns the new
-    item. Raises extract.ExtractError (a ValueError) when no text can be read from the file."""
-    return await import_text(extract.extract_text(filename, data), filename, name)
+    item. Raises extract.ExtractError (a ValueError) when no text can be read from the file. The file is read in a worker
+    thread, since a long PDF or a .doc (through LibreOffice) can take seconds and would otherwise hold up the server."""
+    text = await asyncio.to_thread(extract.extract_text, filename, data)
+    return await import_text(text, filename, name)
 
 
 async def import_text(text: str, filename: str = "resume.txt", name: str = "") -> dict:

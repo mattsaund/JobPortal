@@ -1,12 +1,16 @@
 ## What's new
 
-- JobPortal opens in a window of its own on every system, and comes with shortcuts: a one-click Windows installer with Start
-  menu and desktop shortcuts, and an app menu entry on Linux.
-- PDF export works out of the box on macOS and Linux too. The apps bring their own PDF engine.
-- Location search keeps jobs it used to drop: hybrid jobs on a US-wide search, remote jobs open to the U.S. and Canada, and
-  places written like "Columbus, OH, on-site".
-- Saving your standard answers again no longer resets the search area or the Dream list.
-- Dozens of fixes found during a full cleanup, from LinkedIn results getting lost to times showing in the wrong time zone.
+- A new look: the team's green design in light and dark themes, a new logo and app icon, and a simpler layout with five
+  menus: Home, Leads, Tracker, Analysis and Settings.
+- JobPortal works for any job and any level now, from high school and the trades to graduate degrees. Searches, sources,
+  keywords and the Analysis page adapt to your own fields, and tech is one field among many.
+- Home is where you start: sign in with ChatGPT, drop your resume with your certificates, licenses, cover letters and
+  awards all at once, and answer questions one at a time as they come in.
+- JobPortal reads each document you add: a certificate's name, issuer, dates and skills go into your profile.
+- Click a lead to open all of it in place: why it fits, the tailored resume and cover letter, emails, contacts and
+  interview prep.
+- The Tracker has five columns (Ready to apply, Application sent, In interview, Accepted and Rejected). Drag cards between
+  them, add a job in seconds, delete one, and find your contacts right there.
 
 Download the file for your system and open it. There's nothing else to install.
 

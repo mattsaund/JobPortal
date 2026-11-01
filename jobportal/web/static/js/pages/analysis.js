@@ -1,283 +1,484 @@
-/* analysis.js: the Analysis page. Where you fit and where the market is, per work genre: a radar chart of your fit, your
-   interest and market demand, the AI's read and its top moves, a sortable genre table, skill gaps, the pipeline funnel,
-   and which industries and sources produce qualified leads.
-   APIs: GET /api/analysis (market numbers, the latest AI assessment and its history), POST /api/analysis/run,
-   GET /api/profile and PUT /api/profile/search_plan (the "Add to search plan" buttons). An "analysis" event redraws it. */
+/* analysis.js: the Analysis page (#/analysis). Where you fit and where the jobs are, for the job titles that matter to you:
+   a radar chart of your fit, your interest and how many jobs there are for each role, the AI's read and its top moves, a
+   table of every role with where it came from, skills employers asked for that your resumes couldn't show, the funnel from
+   jobs found to offers, and which industries and sources bring good fits.
+   The roles aren't fixed. The server picks 3 to 8 job titles from your target roles, your search plan, your work history,
+   the AI's suggestions and your own leads (insights/analysis.py), and you can remove any of them or add your own.
+   Live redraws (an "analysis" event) keep your place: open role details stay open, and the focus and anything typed in
+   "Add a role" survive. Only the newest load draws, so a click and a live event can't race.
+   APIs: GET /api/analysis (the roles with their numbers and scores, the market numbers, the latest AI assessment and its
+   history), POST /api/analysis/run, POST /api/analysis/roles/add, /remove and /restore (each answers with the page's data
+   again), GET /api/profile and PUT /api/profile/search_plan (the "Add to search plan" buttons).
+   The chart colors are CSS variables (--viz-*), checked for color blindness and contrast in both themes. */
 "use strict";
 
-// Chart colors, checked on the dark surface #111317: every pair stays distinguishable with color blindness (color
-// difference ΔE 9.4 or more; 20.9 or more with normal vision), and each has at least 3:1 contrast with the background.
-const VIZ = { fit: "#3987e5", demand: "#d95926", interest: "#199e70", prev: "#6b7280", surface: "#111317", grid: "#262b34" };
-// The radar's series in drawing order: [key in each genre row, legend label].
-const RADAR_SERIES = [["demand", "Market demand"], ["interest", "Your interest"], ["prev", "Previous fit"], ["fit", "Your fit"]];
+// The radar's series in drawing order: [key in each row, legend label].
+const RADAR_SERIES = [["demand", "Jobs out there"], ["interest", "Your interest"], ["prev", "Your fit before"], ["fit", "Your fit"]];
 // The icon for each kind of suggested move.
-const MOVE_ICON = { project: "<i class=i-tool></i>", cert: "<i class=i-cert></i>", course: "<i class=i-book></i>", profile: "<i class=i-doc></i>",
-  document: "<i class=i-doc></i>", search: "<i class=i-search></i>" };
+const MOVE_ICON = { project: "tool", cert: "cert", course: "book", profile: "user", document: "file", search: "search" };
+// Where a role came from: [the tag in the table, its color, the words in its details].
+const ROLE_SOURCE = {
+  target: ["Your target", "green", "your target roles"],
+  added: ["Added by you", "green", "the roles you added"],
+  plan: ["Search plan", "blue", "your search plan"],
+  experience: ["Your experience", "", "your work history"],
+  suggested: ["AI suggestion", "purple", "the AI's suggestions"],
+  market: ["Your leads", "", "your leads"],
+};
 // The series you switched off in the legend, remembered between visits.
-const radarOff = new Set(JSON.parse(localStorage.getItem("radarOff") || "[]"));
+const radarOff = new Set(store.list("radarOff"));
+// The page between draws: the newest load's ticket (only it may draw), the rows and series on the radar (the legend
+// redraws the radar from them without loading again), the observer that redraws the radar when its box changes width a
+// lot (a window resized, a phone turned), and the roles whose details are open (they stay open through live redraws).
+let analysisLoad = 0, radarView = null, radarResize = null;
+const openRoles = new Set();
 
-// The floating tooltip for the chart and the bar rows. html = null hides it.
+// The floating tooltip for the chart and the bars. html = null hides it.
 function vizTip(html, e) {
   let tip = $("#viz-tip");
+  if (!html) {
+    if (tip) tip.hidden = true;
+    return;
+  }
   if (!tip) {
     tip = document.createElement("div");
     tip.id = "viz-tip";
     tip.className = "viz-tip";
     document.body.appendChild(tip);
   }
-  if (!html) {
-    tip.style.display = "none";
-    return;
-  }
   tip.innerHTML = html;
-  tip.style.display = "block";
+  tip.hidden = false;
   // Next to the pointer, but never past the window's edge.
   tip.style.left = `${Math.min(e.clientX + 16, innerWidth - tip.offsetWidth - 10)}px`;
   tip.style.top = `${Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 10)}px`;
 }
+// A tooltip showing when you leave the page would stay on screen: the element under it is gone.
+window.addEventListener("hashchange", () => vizTip(null));
 
 // A small color swatch for legends and table headers.
-const swatch = (color) => `<i class="sw" style="background:${color}"></i>`;
+const swatch = (key) => `<i class="swatch s-${key}" aria-hidden="true"></i>`;
 
-// The radar chart as SVG: one spoke per genre, rings at 25/50/75/100, one polygon per visible series, a label at each
-// series' peak, and an invisible wedge per genre that triggers its tooltip. present = the series that have data.
-function radarSVG(rows, present) {
-  const W = 660, H = 540, cx = W / 2, cy = H / 2 + 6, R = 190, N = rows.length;
-  const angle = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / N;  // the first genre points straight up
-  const point = (i, value) => [cx + R * (value / 100) * Math.cos(angle(i)), cy + R * (value / 100) * Math.sin(angle(i))];
+// "A", "A and B", "A, B and C".
+const listText = (items) => (items.length < 3 ? items.join(" and ") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+// A 0 to 100 value for the chart, or null when there's none. Anything that isn't a number (a stray value in an old saved
+// analysis) reads as missing, so it never reaches the drawing or the HTML.
+const score = (value) => (value == null || value === "" || !Number.isFinite(+value) ? null : Math.max(0, Math.min(100, Math.round(+value))));
+// A share (0.37) as a percent with one decimal ("37.0").
+const percent = (share) => ((Number(share) || 0) * 100).toFixed(1);
+// A list from the server, or [] when it isn't one.
+const listOf = (value) => (Array.isArray(value) ? value : []);
+
+// The width of text in the chart's font, for wrapping role names around the rim. One canvas, made on first use.
+let measureCanvas = null;
+function textWidth(text, size) {
+  measureCanvas ||= document.createElement("canvas").getContext("2d");
+  measureCanvas.font = `${size}px Arial, Helvetica, sans-serif`;
+  return measureCanvas.measureText(text).width;
+}
+
+// A line cut to maxWidth, ending in an ellipsis when it had to be cut.
+function clipLine(line, maxWidth, size) {
+  if (textWidth(line, size) <= maxWidth) return line;
+  let cut = line.replace(/\u2026$/, "");
+  while (cut.length > 1 && textWidth(`${cut}\u2026`, size) > maxWidth) cut = cut.slice(0, -1);
+  return `${cut.trimEnd()}\u2026`;
+}
+
+// A role's name as lines no wider than maxWidth: words wrap, three lines at most, and a name that still doesn't fit ends in
+// an ellipsis. The full name is in the tooltip and the table.
+function wrapLabel(label, maxWidth, size) {
+  const lines = [];
+  for (const word of String(label).split(/\s+/).filter(Boolean)) {
+    const joined = lines.length ? `${lines.at(-1)} ${word}` : word;
+    if (lines.length && textWidth(joined, size) <= maxWidth) lines[lines.length - 1] = joined;
+    else lines.push(word);
+  }
+  const shown = lines.slice(0, 3);
+  if (lines.length > 3) shown[2] += "\u2026";
+  return shown.map((line) => clipLine(line, maxWidth, size));
+}
+
+// The radar chart as SVG, `width` units wide (the width of its box, so its text shows at about its real size, on a phone
+// too): one spoke per role, rings at 25/50/75/100, one shape per visible series, a label at each series' peak, and an
+// invisible wedge per spoke for its tooltip. present = the series that have data. A series with a gap (a role the AI hasn't
+// scored yet) is drawn as lines between the roles that have a value, never as a dip to 0. On a small chart (a phone) the
+// peak labels are left out: they would crowd it, and the tooltip and the table have every value.
+function radarSVG(rows, present, width) {
+  const W = width, room = Math.round(Math.min(124, Math.max(62, W * 0.19)));  // room for the names beside the rings
+  const R = Math.round(W / 2 - room - 18), H = 2 * R + 150, cx = W / 2, cy = H / 2 + 4, N = rows.length, SIZE = 11.5;
+  const angle = (i) => -Math.PI / 2 + (i * 2 * Math.PI) / N;  // the first one points straight up
+  const point = (i, value) => [cx + R * (value / 100) * Math.cos(angle(i)), cy + R * (value / 100) * Math.sin(angle(i))].map((n) => +n.toFixed(1));
   const visible = (key) => present.has(key) && !radarOff.has(key);
   let svg = "";
-  for (const level of [25, 50, 75, 100]) {  // the rings and their numbers
-    svg += `<polygon points="${rows.map((_, i) => point(i, level).join(",")).join(" ")}" fill="none" stroke="${VIZ.grid}" stroke-width="1"/>`;
-    svg += `<text x="${cx + 4}" y="${cy - (R * level) / 100 - 3}" class="rt">${level}</text>`;
+  for (const level of [25, 50, 75, 100]) {  // the rings, and their numbers left of the top spoke (a peak label goes right of it)
+    svg += `<polygon class="grid" points="${rows.map((_, i) => point(i, level).join(",")).join(" ")}"/>`;
+    svg += `<text x="${cx - 4}" y="${+(cy - (R * level) / 100 - 3).toFixed(1)}" text-anchor="end" class="tick">${level}</text>`;
   }
-  rows.forEach((row, i) => {  // the spokes and the genre names around the rim
+  rows.forEach((row, i) => {  // the spokes and the names around the rim
     const [x, y] = point(i, 100);
-    svg += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="${VIZ.grid}" stroke-width="1" class="spoke" data-i="${i}"/>`;
-    const cos = Math.cos(angle(i)), sin = Math.sin(angle(i)), lx = cx + (R + 20) * cos, ly = cy + (R + 20) * sin;
+    svg += `<line class="grid spoke" x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" data-i="${i}"/>`;
+    const cos = Math.cos(angle(i)), sin = Math.sin(angle(i));
+    const lx = +(cx + (R + 14) * cos).toFixed(1), ly = +(cy + (R + 14) * sin).toFixed(1);
     const anchor = cos > 0.25 ? "start" : cos < -0.25 ? "end" : "middle";
-    const lines = [];  // wrap the name at 16 characters
-    for (const word of row.label.split(" ")) {
-      if (lines.length && (lines.at(-1) + " " + word).length <= 16) lines[lines.length - 1] += " " + word;
-      else lines.push(word);
-    }
+    const space = anchor === "start" ? W - lx - 6 : anchor === "end" ? lx - 6 : 2 * Math.min(lx, W - lx) - 12;
+    const lines = wrapLabel(row.label, Math.min(space, 170), SIZE);
     // Names above the center grow upward, names below grow downward, the rest are centered on their spoke.
-    const dy = sin < -0.5 ? -(lines.length - 1) * 14 : sin > 0.5 ? 6 : -((lines.length - 1) * 14) / 2 + 4;
-    svg += `<text x="${lx}" y="${ly + dy}" text-anchor="${anchor}" class="rl">${lines.map((line, k) => `<tspan x="${lx}" dy="${k ? 14 : 0}">${esc(line)}</tspan>`).join("")}</text>`;
+    const dy = sin < -0.5 ? -(lines.length - 1) * 14 : sin > 0.5 ? 8 : -((lines.length - 1) * 14) / 2 + 4;
+    svg += `<text x="${lx}" y="${ly + dy}" text-anchor="${anchor}" class="rim">${lines.map((line, k) => `<tspan x="${lx}" dy="${k ? 14 : 0}">${esc(line)}</tspan>`).join("")}</text>`;
   });
   for (const [key] of RADAR_SERIES) {  // the series
     if (!visible(key)) continue;
-    const color = VIZ[key], points = rows.map((row, i) => point(i, row[key] ?? 0));
-    svg += `<polygon points="${points.map((p) => p.join(",")).join(" ")}" fill="${color}" fill-opacity="${key === "prev" ? 0 : 0.1}" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>`;
-    svg += points.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="4" fill="${color}" stroke="${VIZ.surface}" stroke-width="2"/>`).join("");
+    const points = rows.map((row, i) => (row[key] == null ? null : point(i, row[key])));
+    if (points.every(Boolean)) {
+      svg += `<polygon class="series s-${key}" points="${points.map((p) => p.join(",")).join(" ")}"/>`;
+    } else {
+      svg += points.map((p, i) => {
+        const next = points[(i + 1) % N];
+        return p && next ? `<line class="series s-${key}" x1="${p[0]}" y1="${p[1]}" x2="${next[0]}" y2="${next[1]}"/>` : "";
+      }).join("");
+    }
+    svg += points.filter(Boolean).map(([x, y]) => `<circle class="dot s-${key}" cx="${x}" cy="${y}" r="4"/>`).join("");
   }
-  // A label at each visible series' peak only (not "Previous fit"), and never two on the same spoke.
+  // A label at each visible series' peak only (not "Your fit before"), and never two on the same spoke.
   const labeled = new Set();
   for (const [key, label] of RADAR_SERIES) {
-    if (!visible(key) || key === "prev") continue;
-    let peak = 0;
+    if (!visible(key) || key === "prev" || R < 120) continue;
+    let peak = -1;
     rows.forEach((row, i) => {
-      if ((row[key] ?? -1) > (rows[peak][key] ?? -1)) peak = i;
+      if (row[key] != null && (peak < 0 || row[key] > rows[peak][key])) peak = i;
     });
-    if (labeled.has(peak)) continue;
+    if (peak < 0 || labeled.has(peak)) continue;
     labeled.add(peak);
-    // Just inside the vertex, toward the center, so it never collides with the genre names at the rim.
-    const value = rows[peak][key] ?? 0, [x, y] = point(peak, Math.max(0, value - 13)), cos = Math.cos(angle(peak));
-    const anchor = Math.abs(cos) < 0.25 ? "middle" : cos > 0 ? "end" : "start";
-    svg += `<text x="${x}" y="${y + 4}" text-anchor="${anchor}" class="dl">${esc(label.replace("Your ", "").replace("Market ", ""))} ${rows[peak][key]}</text>`;
+    // Just inside the point, toward the center, so it never runs into the names at the rim. On an upright spoke it sits to
+    // the right, clear of the ring numbers.
+    const value = rows[peak][key], [x, y] = point(peak, Math.max(0, value - 13)), cos = Math.cos(angle(peak));
+    const upright = Math.abs(cos) < 0.25, anchor = upright || cos < 0 ? "start" : "end";
+    svg += `<text x="${upright ? x + 7 : x}" y="${y + 4}" text-anchor="${anchor}" class="peak">${esc(label.replace(/^Your /, ""))} ${esc(value)}</text>`;
   }
-  rows.forEach((_, i) => {  // invisible hit wedges, bigger than the marks, for the per-genre tooltip
+  rows.forEach((_, i) => {  // invisible wedges, bigger than the marks, for each spoke's tooltip
     const a0 = angle(i) - Math.PI / N, a1 = angle(i) + Math.PI / N, r = R + 34;
-    const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0), x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
-    svg += `<path class="hit" data-i="${i}" d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 0 1 ${x1},${y1} Z" fill="transparent"/>`;
+    const [x0, y0, x1, y1] = [cx + r * Math.cos(a0), cy + r * Math.sin(a0), cx + r * Math.cos(a1), cy + r * Math.sin(a1)].map((n) => +n.toFixed(1));
+    svg += `<path class="hit" data-i="${i}" d="M${cx},${cy} L${x0},${y0} A${r},${r} 0 0 1 ${x1},${y1} Z"/>`;
   });
-  return `<svg viewBox="0 0 ${W} ${H}" class="radar" role="img" aria-label="Radar chart of fit, interest and market demand per work genre; the table below lists every value">${svg}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" class="radar" role="img" aria-label="Radar chart of your fit, your interest and the jobs out there for each role. The table below lists every value.">${svg}</svg>`;
+}
+
+// The radar's width: its box's, between a phone's and the widest the layout needs.
+const radarWidth = (box) => Math.round(Math.min(660, Math.max(320, box.clientWidth || 660)));
+
+// Draws the radar into #radar at its box's width, and draws it again when that width changes a lot. rows and present are
+// kept (radarView), so the legend can redraw it without loading the page again.
+function drawRadar(rows, present) {
+  const box = $("#radar");
+  if (!box) return;
+  radarView = { rows, present };
+  box.dataset.width = radarWidth(box);
+  box.innerHTML = radarSVG(rows, present, +box.dataset.width);
+  radarResize?.disconnect();
+  if (!("ResizeObserver" in window)) return;
+  radarResize = new ResizeObserver(debounce(() => {
+    if (box.isConnected && Math.abs(radarWidth(box) - +box.dataset.width) > 30) drawRadar(rows, present);
+  }, 150));
+  radarResize.observe(box);
 }
 
 // A list of horizontal bars. Each item gives [label, value, value text, tooltip text].
 function bars(items, maxValue) {
-  return `<div class="bars">${items.map(([label, value, text, tip]) => `<div class="br" data-tip="${esc(tip)}">
-          <span class="bl">${esc(label)}</span><span class="bt"><i style="width:${(value / maxValue) * 100}%;background:${VIZ.fit}"></i></span><span class="bv">${text}</span></div>`).join("")}</div>`;
+  return `<div class="bars">${items.map(([label, value, text, tip]) => `<div class="bar-row" data-tip="${esc(tip)}">
+      <span class="bar-label">${esc(label)}</span><span class="bar-track"><i style="width:${((Number(value) || 0) / maxValue) * 100}%"></i></span>
+      <span class="bar-value">${esc(text)}</span></div>`).join("")}</div>`;
 }
 
-// Draws the page from GET /api/analysis, then wires the chart and bar tooltips.
-async function renderAnalysis() {
-  const d = await api("/api/analysis");
-  const market = d.market, latest = d.latest, result = latest?.result || null;
-  const byGenre = Object.fromEntries((result?.genres || []).map((g) => [g.id, g]));
-  const previousFit = d.history.length >= 2 ? d.history[d.history.length - 2].fit : null;
-  // One row per genre: the market numbers plus the AI's fit and interest, and the fit from the analysis before.
-  const rows = market.genres.map((g) => ({
-    ...g,
-    fit: byGenre[g.id]?.fit ?? null,
-    interest: byGenre[g.id]?.interest ?? null,
-    demand: market.demand_total ? g.demand_index : null,
-    prev: previousFit?.[g.id] ?? null,
-    ai: byGenre[g.id],
-  }));
+// The page's heading. With the page's data (d), it also says when the latest analysis ran and has the button that runs it.
+function analysisHeading(d = null) {
+  const latest = d?.latest, result = latest?.result;
+  const runLabel = d?.running ? `${spinner()} Analyzing` : result ? `${icon("refresh")} Analyze again` : `${icon("sparkle")} Run the analysis`;
+  const actions = d ? `<div class="heading-actions"><span class="muted-note">${latest ? `Analyzed ${esc(fmtTs(latest.ts))}, ${fmtTokens(+latest.tokens || 0)} tokens` : "Not analyzed yet"}</span>
+        <button class="button ${result ? "outline" : "primary"}" type="button" data-act="run-analysis"${d.running ? " disabled" : ""}>${runLabel}</button></div>` : "";
+  return `<div class="page-heading"><div><p class="eyebrow">YOUR MARKET</p><h1>Analysis</h1>
+      <p>Where you fit, where the jobs are, and what to work on next.</p></div>${actions}</div>`;
+}
+
+// Draws the page from GET /api/analysis, or from `data` when an action already has it, then wires the chart and bar
+// tooltips. Only the newest load draws. A first load that fails says so, with Try again; a live redraw that fails leaves
+// the page as it is.
+async function renderAnalysis(data = null) {
+  const ticket = ++analysisLoad;
+  let d = data;
+  if (!d) {
+    try {
+      d = await api("/api/analysis");
+    } catch (err) {
+      if (ticket === analysisLoad && S.route[0] === "analysis" && main.dataset.page !== "analysis") {
+        main.dataset.page = "analysis";
+        main.innerHTML = analysisHeading() + loadError(err);
+      }
+      return;
+    }
+  }
+  if (ticket !== analysisLoad || S.route[0] !== "analysis") return;
+  vizTip(null);  // what it points at is about to be replaced
+  // A redraw of the page on screen keeps your place: the focused element, and what you're typing in "Add a role".
+  const redraw = main.dataset.page === "analysis", focus = redraw ? focusKey(main) : "";
+  const typingBox = redraw ? $("#role-add") : null, typed = typingBox?.value || "";
+  const caret = [typingBox?.selectionStart ?? typed.length, typingBox?.selectionEnd ?? typed.length];
+  main.dataset.page = "analysis";
+  const market = d.market, latest = d.latest, result = latest?.result || null, fewest = d.limits.min;
+  // One row per role: its market numbers plus the AI's fit and interest, and the fit from the analysis before.
+  const rows = d.roles.map((role) => ({ ...role, fit: score(role.fit), interest: score(role.interest), prev: score(role.fit_before),
+    demand: market.demand_total ? score(role.demand_index) : null }));
+  const enough = rows.length >= fewest;
   const present = new Set(["fit", "interest", "demand", "prev"].filter((key) => rows.some((row) => row[key] != null)));
-  // Payoff: high demand x high interest x room to grow. A missing number counts as 50.
+  // Payoff: many jobs, high interest and room to grow. A missing number counts as 50.
   const payoff = (row) => ((row.demand ?? 50) / 100) * ((row.interest ?? 50) / 100) * (1 - (row.fit ?? 50) / 100);
   const sorted = [...rows].sort((a, b) => payoff(b) - payoff(a));
-  const labelOf = Object.fromEntries(rows.map((row) => [row.id, row.label]));
-  const legend = RADAR_SERIES.filter(([key]) => present.has(key))
-    .map(([key, label]) => `<button class="lg ${radarOff.has(key) ? "off" : ""}" data-act="radar-toggle" data-k="${key}">${swatch(VIZ[key])}${label}</button>`).join("");
+  const labelOf = Object.fromEntries([...rows, ...d.removed_roles].map((row) => [row.id, row.label]));
+  const nameOf = (id) => labelOf[id] || humanize(id);
+  const legend = RADAR_SERIES.filter(([key]) => present.has(key)).map(([key, label]) => `<button class="legend-item${radarOff.has(key) ? " off" : ""}"`
+    + ` type="button" data-act="radar-toggle" data-k="${key}" aria-pressed="${!radarOff.has(key)}">${swatch(key)}${label}</button>`).join("");
   const steer = result?.search_steering || {};
-  const notYet = `<span class="muted small">Appears after the analysis runs.</span>`;
-  const runButton = d.running ? `<span class="spin"></span> Analyzing` : result ? "<i class=i-refresh></i> Re-analyze" : "Run analysis";
-  const topMoves = (result?.top_priorities || []).map((t, i) => `<div style="padding:8px 0;border-bottom:1px solid var(--line)">
-          <div class="row" style="gap:6px"><span class="mono muted">${i + 1}.</span><b>${esc(t.title)}</b></div>
-          <div class="row" style="gap:5px;margin:4px 0"><span class="chip violet">${MOVE_ICON[t.type] || ""} ${esc(t.type)}</span><span class="chip">${esc(labelOf[t.genre] || t.genre)}</span></div>
-          <div class="small">${esc(t.detail)}</div>
-          <div class="small muted" style="margin-top:3px">Why: ${esc(t.why)}</div></div>`).join("")
-    || `<div class="muted small">Appears after the analysis runs.</div>`;
-  const maxGap = Math.max(1, ...market.gaps.map((x) => x.missing_in));
+  const notYet = `<p class="muted-note">Shows up after the analysis runs.</p>`;
+  const runAgain = `<button class="button primary" type="button" data-act="run-analysis"${d.running ? " disabled" : ""}>${d.running ? `${spinner()} Analyzing` : `${icon("refresh")} Analyze again`}</button>`;
+  const theseRoles = rows.length === 1 ? "this role" : rows.length ? `these ${rows.length} roles` : "your roles";
+  let banner = "";
+  if (d.outdated) {  // the last analysis is from before roles: its scores can't be shown, so run it again
+    banner = `<div class="banner info">${icon("sparkle")}<div><b>Your chart compares job titles now.</b> The last analysis scored kinds of work,
+      so run the analysis again to score ${theseRoles}.</div></div>`;
+  } else if (!result) {
+    banner = `<div class="banner info">${icon("sparkle")}<div><b>Run the analysis</b> to score your fit and interest for ${theseRoles} against the jobs
+      out there, get more roles suggested from your profile, and get concrete next steps. It runs again by itself whenever your profile changes.</div></div>`;
+  } else if (d.unscored.length) {
+    banner = `<div class="banner info">${icon("sparkle")}<div><b>New since the last analysis:</b> ${esc(listText(d.unscored.map(nameOf)))}.
+      Run it again to score ${d.unscored.length === 1 ? "it" : "them"}.</div>${runAgain}</div>`;
+  }
+  const topMoves = listOf(result?.top_priorities).map((t, i) => `<li class="move">
+      <span class="move-num">${i + 1}</span><div><b>${esc(t.title)}</b>
+        <div class="tags"><span class="tag purple">${icon(MOVE_ICON[t.type] || "arrow")}${esc(humanize(t.type))}</span>${t.role ? `<span class="tag">${esc(nameOf(t.role))}</span>` : ""}</div>
+        <p>${esc(t.detail)}</p><p class="why">Why: ${esc(t.why)}</p></div></li>`).join("");
+  const maxGap = Math.max(1, ...market.gaps.map((x) => Number(x.missing_in) || 0));
   const gaps = market.gaps.length
-    ? bars(market.gaps.map((x) => [x.skill, x.missing_in, `${x.missing_in}/${x.requested_in}`, `${x.skill}: missing in ${x.missing_in} of ${x.requested_in} postings that asked for it`]), maxGap)
-    : `<div class="empty" style="padding:24px"><b>No gaps measured yet</b>They appear as application packages are built.</div>`;
-  const qualifiedBars = (items, nameOf) => bars(items.map((x) => [nameOf(x), x.qualified, `${x.qualified} (avg ${x.avg_score ?? "-"})`,
-    `${nameOf(x)}: ${x.qualified} qualified of ${x.triaged} triaged, avg score ${x.avg_score ?? "-"}`]), Math.max(1, ...items.map((x) => x.qualified)));
+    ? bars(market.gaps.map((x) => [x.skill, x.missing_in, `${x.missing_in}/${x.requested_in}`, `${x.skill}: missing in ${x.missing_in} of the ${x.requested_in} jobs that asked for it`]), maxGap)
+    : `<div class="empty-state"><h3>Nothing measured yet</h3><p>This fills in as JobPortal tailors applications.</p></div>`;
+  const qualifiedBars = (items, nameOfItem) => bars(items.map((x) => [nameOfItem(x), x.qualified, `${x.qualified} (avg ${x.avg_score ?? "-"})`,
+    `${nameOfItem(x)}: ${x.qualified} good fits of ${x.triaged} scored, average score ${x.avg_score ?? "-"}`]), Math.max(1, ...items.map((x) => Number(x.qualified) || 0)));
   const industries = market.industries || [];
-  const suggestion = (x) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><b class="small"><i class=i-doc></i> ${esc(x.title)}</b>`
-    + `<div class="small muted">${esc(x.detail)}</div></div>`;
-  main.innerHTML = `<div class="page">
-    <div class="page-h"><h1>Analysis</h1><span class="sub">Where you fit, where the market is, and what to build next.</span><span class="spacer"></span>
-      <span class="muted small mono">${latest ? `analyzed ${esc(fmtTs(latest.ts))}, ${fmtTokens(+latest.tokens || 0)} tokens` : "not analyzed yet"}</span>
-      <button class="btn ${result ? "" : "primary"}" data-act="run-analysis" ${d.running ? "disabled" : ""}>${runButton}</button></div>
-    ${!result ? `<div class="banner accent"><div><b>Run the analysis</b> to score your fit and interest across ${rows.length} work genres against
-      real market demand and get concrete moves. It re-runs automatically whenever your profile changes.</div></div>` : ""}
-    <div class="cols" style="grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)">
-      <div class="card"><div class="row" style="margin-bottom:4px"><h3 style="margin:0">Work-genre radar</h3><span class="spacer"></span><div class="legend">${legend}</div></div>
-        <div class="muted small">Fit and interest: AI assessment of your profile (0 to 100). Demand: share of postings that passed your filters,
-          indexed so the busiest genre is 100 (${esc(market.demand_source)}).</div>
-        <div id="radar">${radarSVG(rows, present)}</div></div>
+  const suggestion = (x) => `<li><b>${esc(x.title)}</b><p>${esc(x.detail)}</p></li>`;
+  const chart = enough
+    ? `<p class="panel-note">Fit and interest: the AI's read of your profile, 0 to 100. Jobs out there: postings that passed your filters and match
+        the role, scaled so the busiest role is 100 (${esc(market.demand_source)}).</p><div id="radar" class="radar-box"></div>`
+    : `<div class="empty-state"><h3>${rows.length ? "Add a few more roles" : "No roles yet"}</h3>
+        <p>The chart compares at least ${fewest} job titles.${rows.length ? ` You have ${rows.length} so far.` : ""} Add the titles you want to your answers,
+          add documents so JobPortal learns more about you, or add a role below. The analysis suggests roles from your profile too.</p>
+        <div class="block-actions"><a class="button outline" href="#/settings/profile/answers">Edit your target roles</a>
+          <a class="button outline" href="#/home">Add documents</a></div></div>`;
+  const table = rows.length
+    ? `<div class="table-wrap"><table class="table numbers roles-table"><thead><tr><th>Role</th><th>From</th><th>${swatch("fit")}Fit</th>
+        <th>${swatch("interest")}Interest</th><th>${swatch("demand")}Jobs out there</th><th>Good fits</th><th>Average score</th><th>Fit change</th>
+        <th>Skills your resumes lacked</th></tr></thead><tbody>${sorted.map(roleRows).join("")}</tbody></table></div>`
+    : `<p class="muted-note">No roles yet. Add one below.</p>`;
+  const ideas = listOf(d.more_roles);
+  const removed = d.removed_roles.map((role) => `<span class="tag">${esc(role.label)}<button class="tag-x" type="button" data-act="role-restore"`
+    + ` data-id="${esc(role.id)}" data-label="${esc(role.label)}" title="Bring it back" aria-label="Bring back ${esc(role.label)}">${icon("undo")}</button></span>`).join("");
+  main.innerHTML = `${analysisHeading(d)}
+    ${banner}
+    <div class="analysis-top">
+      <section class="panel"><div class="panel-heading"><h2>Fit and demand by role</h2>${enough ? `<div class="legend">${legend}</div>` : ""}</div>
+        ${chart}</section>
       <div class="stack">
-        <div class="card"><h3>The read</h3>${result ? `<p style="margin:0">${esc(result.summary)}</p>` : `<p class="muted" style="margin:0">No assessment yet.</p>`}</div>
-        <div class="card"><h3>Top moves, ranked by payoff</h3>${topMoves}</div></div></div>
-
-    <div class="card" style="margin-top:14px"><h3>Every genre, sorted by payoff (high demand x high interest x room to grow)</h3>
-      <table class="t gt"><thead><tr><th>Genre</th><th>${swatch(VIZ.fit)}Fit</th><th>${swatch(VIZ.interest)}Interest</th><th>${swatch(VIZ.demand)}Demand</th>
-        <th>Qualified leads</th><th>Avg lead score</th><th>Δ fit</th><th>Skills your resumes lacked</th></tr></thead>
-      <tbody>${sorted.map(genreRows).join("")}</tbody></table></div>
-
-    <div class="cols" style="margin-top:14px">
-      <div class="card"><h3>Skills employers asked for that your tailored resumes couldn't show</h3>
-        <div class="muted small" style="margin-bottom:10px">Across ${plural(market.packaged_leads, "packaged lead")}. Build or document these and every future resume can claim them.</div>
-        ${gaps}</div>
+        <section class="panel"><h2>The read</h2>${result ? `<p>${esc(result.summary)}</p>` : `<p class="muted-note">No assessment yet.</p>`}</section>
+        <section class="panel"><h2>Top moves, best payoff first</h2>${topMoves ? `<ol class="move-list">${topMoves}</ol>` : notYet}</section></div></div>
+    <section class="panel"><h2>Your roles, best payoff first</h2>
+      <p class="panel-note">Payoff is high when there are many jobs, your interest is high, and you have room to grow. Click a role for the details.
+        Remove the ones you don't want, or add your own.</p>
+      ${table}
+      <div class="role-controls">
+        <div class="inline-form"><input type="text" id="role-add" list="role-ideas" maxlength="80" autocomplete="off" aria-label="Add a role"
+            placeholder="${esc(ideas.length ? `Add a role, like ${ideas[0]}` : "Add a job title")}">
+          <button class="button outline" type="button" data-act="role-add">${icon("plus")}Add a role</button></div>
+        <datalist id="role-ideas">${ideas.map((title) => `<option value="${esc(title)}"></option>`).join("")}</datalist>
+        ${removed ? `<div class="role-removed"><span>Removed:</span><div class="tags">${removed}</div></div>` : ""}</div></section>
+    <div class="two-col">
+      <section class="panel"><h2>Skills employers asked for that your resumes couldn't show</h2>
+        <p class="panel-note">Across ${esc(plural(market.packaged_leads, "tailored application"))}. Learn or document these, and every future resume can use them.</p>
+        ${gaps}</section>
       <div class="stack">
-        <div class="card"><h3>Requested skills you already show</h3>
-          <div class="cov">${market.strengths.map((x) => `<span class="chip good" title="requested in ${x.requested_in}">${esc(x.skill)}</span>`).join("")
-            || `<span class="muted small">Appears as packages are built.</span>`}</div></div>
-        <div class="card"><h3>Steer the search</h3>${result ? steerSearch(steer, labelOf) : notYet}</div>
-        <div class="card"><h3>Add these to your profile</h3>
-          ${(result?.profile_suggestions || []).map(suggestion).join("") || notYet}
-          <div class="row" style="margin-top:10px"><a class="btn sm" href="#/profile/questions">Tell JobPortal about it</a>
-            <a class="btn sm ghost" href="#/profile/questions">Answer open questions →</a></div></div></div></div>
-
-    <div class="card" style="margin-top:14px"><h3>Pipeline</h3><div class="funnel">${funnel(market.funnel)}</div></div>
-
-    <div class="card" style="margin-top:14px"><h3>Qualified leads by industry</h3>
-      ${industries.length ? qualifiedBars(industries, (x) => x.industry) : `<span class="muted small">Run a search first.</span>`}</div>
-    <div class="card" style="margin-top:14px"><h3>Which sources produce qualified leads</h3>
-      ${market.sources.length ? qualifiedBars(market.sources, (x) => LABEL_SRC[x.source] || x.source) : `<span class="muted small">Run a search first.</span>`}</div>
-  </div>`;
-  const svg = $("#radar svg");
-  const unhighlight = () => $$(".spoke", svg).forEach((spoke) => spoke.classList.remove("on"));
-  svg.addEventListener("mousemove", (e) => {  // the genre under the pointer: highlight its spoke and show its numbers
-    const hit = e.target.closest(".hit");
-    unhighlight();
-    if (!hit) return vizTip(null);
-    const row = rows[+hit.dataset.i];
-    $(`.spoke[data-i="${hit.dataset.i}"]`, svg).classList.add("on");
-    const values = [["fit", "Your fit"], ["interest", "Your interest"], ["demand", "Market demand"], ["prev", "Previous fit"]].filter(([key]) => row[key] != null)
-      .map(([key, label]) => `<div class="tr">${swatch(VIZ[key])}<span>${label}</span><b>${row[key]}</b></div>`).join("");
-    vizTip(`<b>${esc(row.label)}</b>${values}<div class="muted" style="margin-top:4px">${row.qualified} qualified leads, ${(row.demand_share * 100).toFixed(1)}% of postings</div>`, e);
-  });
-  svg.addEventListener("mouseleave", () => {
-    vizTip(null);
-    unhighlight();
-  });
-  $$(".br", main).forEach((bar) => {
+        <section class="panel"><h2>Skills employers asked for that you already show</h2>
+          <div class="tags">${market.strengths.map((x) => `<span class="tag green" title="Asked for in ${esc(x.requested_in)}">${esc(x.skill)}</span>`).join("")
+            || `<span class="muted-note">This fills in as applications are tailored.</span>`}</div></section>
+        <section class="panel"><h2>Steer the search</h2>${result ? steerSearch(steer, nameOf) : notYet}</section>
+        <section class="panel"><h2>Add these to your profile</h2>
+          ${listOf(result?.profile_suggestions).length ? `<ul class="suggestions">${result.profile_suggestions.map(suggestion).join("")}</ul>` : notYet}
+          <div class="block-actions"><a class="button outline" href="#/settings/profile/questions">Tell JobPortal about it</a>
+            <a class="text-button" href="#/home">Answer open questions ${icon("arrow")}</a></div></section></div></div>
+    <section class="panel"><h2>From found to hired</h2><div class="funnel">${funnel(market.funnel)}</div></section>
+    <div class="two-col">
+      <section class="panel"><h2>Good fits by industry</h2>
+        ${industries.length ? qualifiedBars(industries, (x) => x.industry) : `<p class="muted-note">Run a search first.</p>`}</section>
+      <section class="panel"><h2>Which sources bring good fits</h2>
+        ${market.sources.length ? qualifiedBars(market.sources, (x) => LABEL_SRC[x.source] || humanize(x.source)) : `<p class="muted-note">Run a search first.</p>`}</section></div>`;
+  if (typed) $("#role-add").value = typed;
+  refocus(main, focus);
+  if (typed && document.activeElement?.id === "role-add") document.activeElement.setSelectionRange(...caret);
+  if (enough) {
+    drawRadar(rows, present);
+    const box = $("#radar");
+    const unhighlight = () => $$(".spoke.on", box).forEach((spoke) => spoke.classList.remove("on"));
+    box.addEventListener("mousemove", (e) => {  // the spoke under the pointer: highlight it and show its numbers
+      const hit = e.target.closest(".hit");
+      unhighlight();
+      if (!hit) return vizTip(null);
+      const row = rows[+hit.dataset.i];
+      $(`.spoke[data-i="${hit.dataset.i}"]`, box)?.classList.add("on");
+      const values = [["fit", "Your fit"], ["interest", "Your interest"], ["demand", "Jobs out there"], ["prev", "Your fit before"]].filter(([key]) => row[key] != null)
+        .map(([key, label]) => `<div class="tip-row">${swatch(key)}<span>${label}</span><b>${esc(row[key])}</b></div>`).join("");
+      vizTip(`<b>${esc(row.label)}</b>${values}<div class="tip-note">${esc(plural(row.qualified, "good fit"))}, ${esc(percent(row.demand_share))}% of jobs.`
+        + ` From ${esc((ROLE_SOURCE[row.source] || [])[2] || row.source)}.</div>`, e);
+    });
+    box.addEventListener("mouseleave", () => {
+      vizTip(null);
+      unhighlight();
+    });
+  } else {
+    radarView = null;
+    radarResize?.disconnect();
+  }
+  $$(".bar-row", main).forEach((bar) => {
     bar.addEventListener("mousemove", (e) => vizTip(esc(bar.dataset.tip), e));
     bar.addEventListener("mouseleave", () => vizTip(null));
   });
   S.analysis = { steer };
 }
 
-// One suggested move for a genre: its title, the effort and impact, and the details.
-const genreMove = (move) => `<div class="small" style="margin:6px 0"><b>${MOVE_ICON[move.type] || ""} ${esc(move.title)}</b>`
-  + ` <span class="muted">(${esc(move.effort)}, ${esc(move.impact)} impact)</span><div>${esc(move.detail)}</div></div>`;
+// One suggested move for a role: its title, the effort and impact, and the details.
+const roleMove = (move) => `<li><b>${icon(MOVE_ICON[move.type] || "arrow")}${esc(move.title)}</b>`
+  + ` <span class="muted-note">(${esc(move.effort)} effort, ${esc(move.impact)} impact)</span><p>${esc(move.detail)}</p></li>`;
 
-// Two table rows per genre: its numbers, and a hidden row with the AI's evidence, gaps and moves (a click on the first
-// row shows it).
-function genreRows(row) {
+// Two table rows per role: its numbers with where it came from and a remove button, and a details row with where it came
+// from in full and the AI's reason, evidence, gaps and moves (a click on the first row opens it, and it stays open through
+// live redraws).
+function roleRows(row) {
   const change = row.fit != null && row.prev != null
-    ? `${row.fit - row.prev > 0 ? "<i class=i-up></i>" : row.fit - row.prev < 0 ? "<i class=i-down></i>" : ""} ${Math.abs(row.fit - row.prev)}` : "-";
-  const details = row.ai ? `<div class="grid3">
-          <div><b class="small mono">EVIDENCE</b> <span class="chip">${esc(row.ai.confidence)} confidence</span>${bulletList(row.ai.evidence, "good small")}</div>
-          <div><b class="small mono">GAPS</b>${bulletList(row.ai.gaps, "warn small")}</div>
-          <div><b class="small mono">MOVES</b>${row.ai.moves.map(genreMove).join("")}</div></div>`
-    : `<span class="muted small">Run the analysis for evidence, gaps and moves.</span>`;
-  return `<tr class="gr" data-act="genre-row" data-id="${row.id}" style="cursor:pointer"><td><b>${esc(row.label)}</b> <span class="muted small"><i class=i-chev></i></span></td>
-        <td class="num">${row.fit ?? "-"}</td><td class="num">${row.interest ?? "-"}</td>
-        <td class="num">${row.demand ?? "-"} <span class="muted small">(${(row.demand_share * 100).toFixed(1)}%)</span></td>
-        <td class="num">${row.qualified}</td><td class="num">${row.avg_score ?? "-"}</td>
-        <td class="num">${change}</td>
-        <td class="small">${esc(row.top_missing.join(", ")) || `<span class="muted">none</span>`}</td></tr>
-        <tr class="gd" id="gd-${row.id}" style="display:none"><td colspan="8">${details}</td></tr>`;
+    ? `${row.fit > row.prev ? icon("up") : row.fit < row.prev ? icon("chevron") : ""}${esc(Math.abs(row.fit - row.prev))}` : "-";
+  const [tag, color] = ROLE_SOURCE[row.source] || [humanize(row.source), ""];
+  const from = `<span class="tag${color ? ` ${color}` : ""}">${row.source === "suggested" ? icon("sparkle") : ""}${esc(tag)}</span>`;
+  const origins = listOf(row.sources).map((source) => (ROLE_SOURCE[source] || [])[2] || source);
+  const ai = row.assessment, open = openRoles.has(row.id);
+  const details = `<p class="role-origin">From ${esc(listText(origins))}.${row.pinned ? " You added it, so it stays on the chart until you remove it." : ""}</p>`
+    + (row.why ? `<p class="role-why"><b>Why it could fit:</b> ${esc(row.why)}</p>` : "")
+    + (ai ? `<div class="three-col">
+        <div><h4>Evidence <span class="tag">${esc(humanize(ai.confidence))} confidence</span></h4>${bulletList(listOf(ai.evidence), "good")}</div>
+        <div><h4>Gaps</h4>${bulletList(listOf(ai.gaps), "warn")}</div>
+        <div><h4>Moves</h4><ul class="plain-list">${listOf(ai.moves).map(roleMove).join("")}</ul></div></div>`
+      : row.why ? "" : `<p class="muted-note">Run the analysis for the evidence, gaps and moves.</p>`);
+  return `<tr class="role-row" data-act="role-row" data-id="${esc(row.id)}" tabindex="0" aria-expanded="${open}">
+      <td><div class="role-name"><b>${esc(row.label)}</b>${icon("chevron")}<button class="icon-button role-remove" type="button" data-act="role-remove"
+        data-id="${esc(row.id)}" data-label="${esc(row.label)}" data-pinned="${row.pinned ? 1 : 0}" title="Remove from the chart"
+        aria-label="Remove ${esc(row.label)} from the chart">${icon("close")}</button></div></td>
+      <td>${from}</td><td>${esc(row.fit ?? "-")}</td><td>${esc(row.interest ?? "-")}</td>
+      <td>${esc(row.demand ?? "-")}${row.demand == null ? "" : ` <small>(${esc(percent(row.demand_share))}%)</small>`}</td>
+      <td>${esc(row.qualified)}</td><td>${esc(row.avg_score ?? "-")}</td><td class="change">${change}</td>
+      <td class="wrap">${esc(listOf(row.top_missing).join(", ")) || `<span class="muted-note">None</span>`}</td></tr>
+    <tr class="role-details" data-details="${esc(row.id)}"${open ? "" : " hidden"}><td colspan="9">${details}</td></tr>`;
 }
 
-// The "Steer the search" card: genres to emphasize and de-emphasize, a note, and queries and companies you can add to
-// your search plan with one click.
-function steerSearch(steer, labelOf) {
-  const genres = (ids, cls) => (ids || []).map((id) => `<span class="chip${cls}">${esc(labelOf[id] || id)}</span>`).join(" ") || "none";
-  const addList = (items, title, kind, button) => ((items || []).length
-    ? `<div style="margin-top:10px"><b class="small mono">${title}</b><div class="cov" style="margin:6px 0">${items.map((q) => `<span class="chip">${esc(q)}</span>`).join("")}</div>`
-      + `<button class="btn sm" data-act="plan-add" data-kind="${kind}">${button}</button></div>`
+// "Steer the search": roles to lean into and away from, a note, and search terms and companies you can add to your search
+// plan with one click.
+function steerSearch(steer, nameOf) {
+  const roles = (ids, cls) => listOf(ids).map((id) => `<span class="tag${cls}">${esc(nameOf(id))}</span>`).join("") || `<span class="muted-note">None</span>`;
+  const addList = (items, title, kind, button) => (listOf(items).length
+    ? `<h4>${title}</h4><div class="tags">${items.map((q) => `<span class="tag">${esc(q)}</span>`).join("")}</div>`
+      + `<button class="button outline small" type="button" data-act="plan-add" data-kind="${kind}">${icon("plus")}${button}</button>`
     : "");
-  return `
-          <div class="small"><b class="mono">EMPHASIZE</b> ${genres(steer.emphasize, " blue")}</div>
-          <div class="small" style="margin-top:6px"><b class="mono">DE-EMPHASIZE</b> ${genres(steer.deemphasize, "")}</div>
-          ${steer.notes ? `<p class="small" style="margin:8px 0 0">${esc(steer.notes)}</p>` : ""}
-          ${addList(steer.add_queries, "QUERIES TO ADD", "queries", "+ Add to search plan")}
-          ${addList(steer.add_companies, "COMPANIES TO ADD", "dream_companies", "+ Add to target companies")}`;
+  return `<h4>Lean into</h4><div class="tags">${roles(steer.emphasize, " blue")}</div>
+    <h4>Ease off</h4><div class="tags">${roles(steer.deemphasize, "")}</div>
+    ${steer.notes ? `<p>${esc(steer.notes)}</p>` : ""}
+    ${addList(steer.add_queries, "Search terms to add", "queries", "Add to my search plan")}
+    ${addList(steer.add_companies, "Companies to add", "dream_companies", "Add to my target companies")}`;
 }
 
-// The pipeline funnel: each stage's count and the share of the stage before it.
+// The funnel: each step's count and its share of the step before.
 function funnel(stages) {
   return stages.map((stage, i) => {
-    const before = stages[i - 1]?.n;
-    let share = "&nbsp;";
-    if (i) share = before ? `${((stage.n / before) * 100).toFixed(stage.n / before < 0.1 ? 1 : 0)}% of previous` : "- of previous";
-    return `<div class="fs"><div class="n">${stage.n.toLocaleString()}</div><div class="l">${esc(stage.stage)}</div>
-      <div class="cv">${share}</div></div>`;
-  }).join(`<div class="fa">→</div>`);
+    const n = Number(stage.n) || 0, before = Number(stages[i - 1]?.n) || 0;
+    let share = "";
+    if (i) share = before ? `${((n / before) * 100).toFixed(n / before < 0.1 ? 1 : 0)}% of the step before` : "None the step before";
+    return `<div class="funnel-step"><strong>${esc(n.toLocaleString())}</strong><span>${esc(stage.stage)}</span><small>${share}</small></div>`;
+  }).join(`<span class="funnel-arrow" aria-hidden="true">${icon("arrow")}</span>`);
+}
+
+// Posts one change to the roles and redraws the page from the answer (the page's data, like GET /api/analysis).
+async function changeRoles(change, body) {
+  await renderAnalysis(await api(`/api/analysis/roles/${change}`, { method: "POST", body }));
 }
 
 // ---------------------------------------------------------------- actions
 onAction("run-analysis", async () => {
   await api("/api/analysis/run", { method: "POST" });
-  toast("Analyzing", "Scoring your fit across every work genre. About a minute.");
+  toast("Analyzing", "Scoring your fit for each role. About a minute.");
   renderAnalysis();
 });
-onAction("radar-toggle", (el) => {  // a legend button shows or hides its series
+onAction("radar-toggle", (el) => {  // a legend button shows or hides its series, redrawing the radar from what's loaded
   const key = el.dataset.k;
   if (radarOff.has(key)) radarOff.delete(key);
   else radarOff.add(key);
-  localStorage.setItem("radarOff", JSON.stringify([...radarOff]));
-  renderAnalysis();
+  store.set("radarOff", JSON.stringify([...radarOff]));
+  el.classList.toggle("off", radarOff.has(key));
+  el.setAttribute("aria-pressed", String(!radarOff.has(key)));
+  if (radarView) drawRadar(radarView.rows, radarView.present);
 });
-onAction("genre-row", (el) => {
-  const details = $(`#gd-${el.dataset.id}`);
-  details.style.display = details.style.display === "none" ? "" : "none";
+onAction("role-row", (el) => {  // opens or closes a role's details
+  const details = $(`[data-details="${CSS.escape(el.dataset.id)}"]`);
+  details.hidden = !details.hidden;
+  el.setAttribute("aria-expanded", String(!details.hidden));
+  if (details.hidden) openRoles.delete(el.dataset.id);
+  else openRoles.add(el.dataset.id);
 });
-onAction("plan-add", async (el) => {  // adds the suggested queries or companies to the search plan
+onAction("role-add", async () => {  // adds the typed title as a role of your own
+  const input = $("#role-add"), title = input.value.trim();
+  if (!title) return input.focus();
+  let d;
+  try {
+    d = await api("/api/analysis/roles/add", { method: "POST", body: { title } });
+  } catch (err) {
+    toast("Couldn't add that role", err.message, "error");
+    return;
+  }
+  input.value = "";  // it's added: the redraw shouldn't put it back in the box
+  await renderAnalysis(d);
+  $("#role-add")?.focus();
+  toast("Role added", `${title} is on your chart now. Run the analysis to score it.`);
+});
+onAction("role-remove", async (el) => {  // takes a role off the chart for good, with Undo
+  const { id, label } = el.dataset, added = el.dataset.pinned === "1";
+  await changeRoles("remove", { id });
+  // A role you added comes back by adding it again; any other comes back from the removed list.
+  const undo = () => (added ? changeRoles("add", { title: label }) : changeRoles("restore", { id }));
+  toast("Role removed", `${label} is off your chart and stays off.`, "", null, { label: "Undo", run: undo });
+});
+onAction("role-restore", async (el) => {
+  await changeRoles("restore", { id: el.dataset.id });
+  toast("Role back", `${el.dataset.label} is on your chart again.`);
+});
+onAction("plan-add", async (el) => {  // adds the suggested search terms or companies to the search plan
   const kind = el.dataset.kind;
   const add = S.analysis.steer[kind === "queries" ? "add_queries" : "add_companies"] || [];
   const plan = (await api("/api/profile")).search_plan || {};
   plan[kind] = [...new Set([...(plan[kind] || []), ...add])];
   await api("/api/profile/search_plan", { method: "PUT", body: { value: plan } });
-  toast("Search plan updated", `${add.length} added, used on the next run`);
+  toast("Search plan updated", `${add.length} added. The next search uses them.`);
   el.disabled = true;
   el.textContent = "Added";
+});
+document.addEventListener("keydown", (e) => {
+  // Enter or Space on a focused table row opens its details, like a click.
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches?.("tr[data-act=role-row]")) {
+    e.preventDefault();
+    e.target.click();
+  }
+  // Enter in the "Add a role" box adds.
+  if (e.key === "Enter" && e.target.id === "role-add") {
+    e.preventDefault();
+    $('[data-act="role-add"]')?.click();
+  }
 });

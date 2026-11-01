@@ -1,23 +1,30 @@
-/* main.js: starts the dashboard. It loads last, after every page file has registered its actions. It holds the one click
-   listener and the one change listener for <main>, guards unsaved edits, loads what every page needs, connects the live
-   stream and shows the first page. */
+/* main.js: starts the dashboard. It loads last, after every file has registered its actions. It holds the one click
+   listener and the one change listener for the whole window (the page in <main>, the dialogs, the sidebar and the top
+   bar), guards unsaved edits, loads what every page needs, connects the live stream and shows the first page.
+   APIs, all at startup: GET /api/meta, GET /api/stats, GET /api/profile/status, GET /api/questions, GET /api/onboarding,
+   GET /api/settings, GET /api/runs and GET /api/runs/{id}/log. */
 "use strict";
 
-// Clicks inside <main>: run the action of the nearest element with data-act (see onAction in core.js). An action that
-// fails shows its error in a toast.
-main.addEventListener("click", async (e) => {
+// Clicks: run the action of the nearest element with data-act (see onAction in core.js). An action that fails shows its
+// error in a toast. While an element's action is still running (most wait on the server), more clicks on that element
+// are ignored, so a double click never saves, sends, adds or deletes twice.
+const busy = new WeakSet();
+document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-act]");
   const action = el && ACTIONS[el.dataset.act];
-  if (!action) return;
+  if (!action || el.disabled || busy.has(el)) return;
+  busy.add(el);
   try {
     await action(el, e);
   } catch (err) {
     toast("Something went wrong", err.message, "error");
+  } finally {
+    busy.delete(el);
   }
 });
 
-// Changes to selects and checkboxes inside <main>: offer the change to each onChange handler until one takes it.
-main.addEventListener("change", async (e) => {
+// Changes to selects, checkboxes and file pickers: offer the change to each onChange handler until one takes it.
+document.addEventListener("change", async (e) => {
   for (const handle of CHANGE_HANDLERS) {
     try {
       if (await handle(e.target)) return;
@@ -28,7 +35,7 @@ main.addEventListener("change", async (e) => {
   }
 });
 
-// Reloading or closing with unsaved edits (in an editor, an answers form, Settings or Sources) asks first.
+// Reloading or closing with unsaved edits (an editor, a form, an answer on Home, Settings or Sources) asks first.
 window.addEventListener("beforeunload", (e) => {
   if (S.dirty || S.cfgDirty) {
     e.preventDefault();
@@ -36,24 +43,36 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 
+// Loads what the frame and every page need, all at once. Anything that fails to load starts empty; the live events
+// fill it in later. Only the facts from GET /api/meta are a must (the statuses, the menus): without them the page says
+// what went wrong, with a button to try again, instead of staying blank.
 (async function boot() {
-  S.meta = await api("/api/meta");
-  await refreshStats();
-  S.state = S.stats.state;
-  renderAI();
-  renderAgents();
-  try { S.profileStatus = await api("/api/profile/status"); } catch (_) { S.profileStatus = {}; }
-  renderProfilePill();
-  try { S.questions = await api("/api/questions"); } catch (_) {}
+  const quiet = (promise, fallback) => promise.catch(() => fallback);
+  let meta, profileStatus, questions, onboarding, cfg, runs;
   try {
-    const cfg = await api("/api/settings");
+    [meta, , profileStatus, questions, onboarding, cfg, runs] = await Promise.all([
+      api("/api/meta"), refreshStats(), quiet(api("/api/profile/status"), {}), quiet(api("/api/questions"), []),
+      quiet(api("/api/onboarding"), null), quiet(api("/api/settings"), null), quiet(api("/api/runs"), []),
+    ]);
+  } catch (err) {
+    main.innerHTML = `<div class="empty-state quit"><h3>JobPortal couldn't start</h3><p>${esc(err.message)}</p>`
+      + `<button class="button primary" type="button" data-act="reload-app">${icon("refresh")}Try again</button></div>`;
+    return;
+  }
+  S.meta = meta;
+  S.state = S.stats?.state || S.state;
+  S.profileStatus = profileStatus;
+  S.questions = questions;
+  S.onboarding = onboarding;
+  S.documents = onboarding?.documents || [];
+  if (cfg) {
     S.searchArea = cfg.locations.allowed;
     S.industries = cfg.industries;
-  } catch (_) {}
-  try {  // show the most recent run's log in the live feed after a reload
-    const last = (await api("/api/runs"))[0];
-    if (last) S.logs = (await api(`/api/runs/${last.id}/log`)).slice(-250);
-  } catch (_) {}
+  }
+  if (runs[0]) S.logs = (await quiet(api(`/api/runs/${runs[0].id}/log`), [])).slice(-250);  // the last search's feed
+  renderFrame();
   if (!/[?&]snapshot/.test(location.search)) connect();  // ?snapshot leaves the live stream off (headless screenshots)
   route();
 })();
+
+onAction("reload-app", () => location.reload());  // Try again when startup failed: load the whole dashboard again

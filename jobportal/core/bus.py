@@ -7,8 +7,8 @@ js/live.js decides what to redraw for each kind of event.
 
 Key ideas:
 - An event is JSON: {"kind": ..., "data": ...}. The dashboard reads both by name, so keep kind names and data fields
-  stable. Kinds in use: state, log, lead, toast, ai, tokens, agents, run_done, profile, profile_status, questions and
-  analysis.
+  stable. Kinds in use: state, log, lead, toast, ai, tokens, agents, run_done, profile, profile_status, questions,
+  documents (the extra documents' listing, also when their details have been read) and analysis.
 - `state` is one shared snapshot of what the app is doing. A dashboard gets it first when it connects, and set_state()
   sends it again after every change.
 - publish() never waits and never fails. It can be called from any thread, and FastAPI runs plain `def` routes in worker
@@ -32,6 +32,8 @@ state = {
     "tokens": 0,  # AI tokens used since JobPortal started (ai/client.py adds to it)
     "ai": None,  # ChatGPT sign-in status (ai/signin.py)
     "active_agents": {},  # AI requests running now, id -> label (ai/client.py)
+    "model": None,  # the model of the AI request that started last (ai/client.py; shown on the sidebar's AI card)
+    "ai_requests": 0,  # AI requests started since JobPortal started (ai/client.py)
 }
 # Other modules add keys as they go: search/pipeline.py sets started_at and run_tokens_start when a run begins, and
 # candidate/profile.py sets profile (the profile's build status).

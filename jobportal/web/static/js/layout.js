@@ -1,68 +1,132 @@
-/* layout.js: the frame around every page. It draws the sidebar (the navigation with its badges, the profile status pill,
-   the AI agents at work and the ChatGPT card) and runs the hash router that picks the page to show (#/leads, #/lead/12,
-   #/profile/questions, ...). The sidebar is static HTML in index.html; these functions fill its parts. */
+/* layout.js: the frame around every page, and the router.
+   - The sidebar: the menu with its badges (leads ready, follow-ups due), a card that says what's happening (a search,
+     the AI agents at work) or the next useful step, Settings, and a line with your ChatGPT sign-in and the version.
+   - The top bar: the search box (it searches your leads; "/" jumps to it), Run search or Stop, and your account button.
+   - The hash router that picks the page (#/home, #/leads/12, #/settings/ai, ...) and sends old addresses where their
+     content lives now, and what a page shows when its data can't load (loadError, with Try again).
+   The frame is static HTML in index.html; these functions fill its parts.
+   APIs: GET /api/stats, POST /api/run and /api/run/stop, POST /api/ai/signin and /api/ai/signout. */
 "use strict";
 
-// ---------------------------------------------------------------- navigation
-// The links on the left. Badges: leads ready to apply, follow-ups due and open questions. "Set up" shows until setup is
-// done and ChatGPT is connected.
+// Puts html into el only when it changed. Live events redraw the frame (and parts of pages) often during a search; this
+// way what you're pointing at (a menu, a hovered button) stays as it is. When it does change, a focused button or link
+// inside gets the focus back in the new HTML (focusKey in core.js). Only use it on an element nothing else writes into:
+// it compares with the last HTML it put there, not with what's on screen.
+function setHtml(el, html) {
+  if (!el || el.shownHtml === html) return;
+  const focus = focusKey(el);
+  el.innerHTML = html;
+  el.shownHtml = html;
+  refocus(el, focus);
+}
+
+// ---------------------------------------------------------------- the menu
+// The pages in the menu: [route, label, icon]. Settings sits at the bottom of the sidebar.
+const NAV = [["home", "Home", "home"], ["leads", "Leads", "briefcase"], ["tracker", "Tracker", "columns"], ["analysis", "Analysis", "chart"],
+  ["settings", "Settings", "settings"]];
+
+// The menu with its badges: leads ready to apply, and follow-ups due on the Tracker.
 function renderNav() {
   const stats = S.stats || {};
-  const openQuestions = (S.questions || []).filter((q) => q.status === "open").length;
-  const items = [  // [route, label, badge]
-    ...(onboarded() && aiReady() ? [] : [["setup", "Set up", "!"]]),
-    ["leads", "Leads", stats.ready],
-    ["crm", "Equity mining"],
-    ["tracker", "Tracker", stats.followups_due],
-    ["resumes", "Resumes"],
-    ["analysis", "Analysis"],
-    ["dreams", "Dream list"],
-    ["contacts", "Contacts"],
-    ["sources", "Sources"],
-    ["profile", "Profile", openQuestions],
-    ["settings", "Settings"],
-    ["runs", "Runs"],
-  ];
-  const current = S.route[0] === "lead" ? "leads" : S.route[0];  // a lead's own page keeps Leads highlighted
-  $("#nav").innerHTML = items.map(([key, label, badge]) => {
-    const badgeHtml = badge ? `<span class="badge">${badge}</span>` : "";
-    return `<a href="#/${key}" class="${current === key ? "on" : ""}">${I[key]}${label}${badgeHtml}</a>`;
-  }).join("");
+  const badges = { leads: stats.ready ? `${plural(stats.ready, "lead")} ready` : "",
+    tracker: stats.followups_due ? `${plural(stats.followups_due, "follow-up")} due` : "" };
+  const counts = { leads: stats.ready, tracker: stats.followups_due };
+  const page = S.route[0];
+  const inside = (key, label, name) => icon(name) + label
+    + (badges[key] ? `<span class="nav-badge" title="${badges[key]}">${counts[key]}<span class="sr-only"> ${badges[key]}</span></span>` : "");
+  setHtml($("#navigation"), NAV.map(([key, label, name]) => `<a class="nav-item${page === key ? " active" : ""}" href="#/${key}"`
+    + `${page === key ? ' aria-current="page"' : ""}>${inside(key, label, name)}</a>`).join(""));
+}
+
+// ---------------------------------------------------------------- the sidebar card
+// What a search is doing, in plain words (the server's phases are collecting, triaging and packaging).
+const RUN_PHASES = { collecting: "Looking for jobs", triaging: "Scoring what it found", packaging: "Tailoring applications" };
+const runPhase = (phase) => RUN_PHASES[phase] || humanize(phase || "Starting");
+
+// A run's counts in words: "120 found, 40 new, 12 good fits". Each count shows once the run has it.
+const RUN_COUNTS = [["found", "found"], ["candidates", "new"], ["triaged", "scored"], ["qualified", "good fits"], ["packaged", "ready"]];
+const runCounts = (counts) => RUN_COUNTS.filter(([key]) => (counts || {})[key] != null).map(([key, label]) => `${counts[key]} ${label}`).join(", ");
+
+// The AI card at the bottom of the sidebar. Once you're signed in, its top part shows the AI's usage (aiUsage), and under
+// it comes what's happening: a search running (its phase, its counts and the AI agents at work), else the next useful step.
+function renderNextStep() {
+  const el = $("#next-step");
+  if (!el) return;  // the frame is gone after Quit
+  const run = S.state || {}, profile = S.profileStatus || {};
+  const agents = Object.values(run.active_agents || {});
+  const waiting = homeWaiting();
+  const go = (href, label) => `<a class="button mint" href="${href}">${label} ${icon("arrow")}</a>`;
+  const act = (name, label) => `<button class="button mint" type="button" data-act="${name}">${label} ${icon("arrow")}</button>`;
+  let card;  // [eyebrow, title, text, button]
+  if (run.running) card = ["SEARCH RUNNING", runPhase(run.phase), runCounts(run.counts), go("#/leads", "Watch it live")];
+  else if (agents.length) card = ["AI AT WORK", `${plural(agents.length, "agent")} working`, "", ""];
+  else if (!aiReady()) card = ["START HERE", "Sign in with ChatGPT", "JobPortal's AI runs on your own ChatGPT plan.", act("ai-signin", "Continue with ChatGPT")];
+  else if (!profile.has_resume) card = ["NEXT STEP", "Drop your resume", "Add it with any certificates, awards or transcripts.", go("#/home", "Add documents")];
+  else if (profile.busy) card = ["BUILDING YOUR PROFILE", humanize(profile.phase || "Working"), "Usually 1 to 4 minutes.", ""];
+  else if (profile.error) card = ["NEEDS A LOOK", "The profile build stopped", "Try it again from Home.", go("#/home", "See what happened")];
+  else if (waiting) card = ["NEXT STEP", `Answer ${plural(waiting, "question")}`, "Each answer sharpens your matches.", go("#/home", "Answer now")];
+  else if (profile.built) card = ["READY WHEN YOU ARE", "Run a search", "JobPortal looks everywhere and ranks what it finds.", act("run", "Run search")];
+  else card = ["NEXT STEP", "Build your profile", "It's what every search and application is made from.", go("#/home", "Go to Home")];
+  const [eyebrow, title, text, button] = card;
+  const more = agents.length > 5 ? `<li>and ${agents.length - 5} more</li>` : "";
+  const working = agents.length ? `<ul class="agent-list">${agents.slice(0, 5).map((label) => `<li><span class="pulse"></span>${esc(label)}</li>`).join("")}${more}</ul>` : "";
+  setHtml(el, `${aiReady() ? aiUsage() : ""}<span class="eyebrow">${eyebrow}</span><h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ""}`
+    + `${working}${button}`);
+}
+
+// The AI's usage, from S.state.usage (GET /api/stats, then "usage" events; ai/client.py usage() says what each field means):
+// the model in use (or the last one used, or the default), utilization as the AI tasks running out of the ones that may run
+// at once (Settings, AI), and this session's tokens and requests. Sign in with ChatGPT doesn't report how much of the plan
+// is used, so the card shows JobPortal's own numbers, and "Paused" while OpenAI's usage cap holds new work back.
+function aiUsage() {
+  const u = S.state.usage || {};
+  const running = +u.running || 0, slots = Math.max(1, +u.slots || 1);
+  const status = u.capped ? ["Paused", "warn"] : running ? ["Working", "on"] : ["Idle", ""];
+  const model = u.model ? `${esc(u.model)}${u.model_note ? ` <small>${esc(u.model_note)}</small>` : ""}` : "Picked from your plan";
+  const capped = u.capped ? `<p class="ai-capped">Your ChatGPT usage cap was reached. New AI work waits a few minutes.</p>` : "";
+  return `<div class="ai-usage"><div class="ai-usage-head"><span class="eyebrow">CHATGPT</span>`
+    + `<span class="ai-state ${status[1]}">${status[0]}</span></div>`
+    + `<dl><div><dt>Model</dt><dd>${model}</dd></div>`
+    + `<div><dt>Utilization</dt><dd>${running} of ${plural(slots, "AI task")}</dd></div>`
+    + `<progress value="${Math.min(running, slots)}" max="${slots}" aria-label="AI tasks running">${running} of ${slots}</progress>`
+    + `<div><dt>This session</dt><dd>${fmtTokens(+u.tokens || 0)} tokens, ${plural(+u.requests || 0, "request")}</dd></div></dl>${capped}</div>`;
 }
 
 // ---------------------------------------------------------------- ChatGPT
-// 950, 45k or 1.2M
-const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : (n || 0).toLocaleString());
-
 // True once you're signed in with ChatGPT. The AI features only work then.
 const aiReady = () => !!(S.state.ai && S.state.ai.signed_in);
 
-// The ChatGPT card at the bottom of the sidebar: who is signed in and the tokens used this session, or a sign-in button.
-function renderAI() {
-  const el = $("#usage");
-  if (!el) return;  // the sidebar is gone after Quit
-  const ai = S.state.ai || {};
-  if (ai.signed_in) {
-    const tokens = fmtTokens(+S.state.tokens || 0);
-    el.innerHTML = `<div>ChatGPT</div>`
-      + `<div class="small" style="overflow:hidden;text-overflow:ellipsis" title="${esc(ai.email || "")}">${esc(ai.name || ai.email || "signed in")}</div>`
-      + `<div class="small">${tokens} tokens this session</div>`;
-  } else {
-    el.innerHTML = `<div>ChatGPT</div><div class="small">not signed in</div>`
-      + `<button class="btn sm primary" data-act="ai-signin" style="margin-top:6px">Continue with ChatGPT</button>`;
-  }
+// Your name for the avatar: from your standard answers, else from your ChatGPT account.
+const yourName = () => String(S.onboarding?.answers?.name || "").trim() || String(S.state.ai?.name || "").trim();
+
+// The line at the bottom of the sidebar, under the divider: the sign-in and the version. (The AI card above it has the usage.)
+function renderSidebarFoot() {
+  const el = $("#sidebar-foot");
+  if (!el) return;
+  setHtml(el, `<span class="status-dot${aiReady() ? "" : " off"}"></span><span>${aiReady() ? "ChatGPT connected" : "Not signed in"}</span>`
+    + `<span>v${esc(S.meta?.version || "")}</span>`);
 }
 
-// Handles an "ai" event (the sign-in status changed): redraw the card and the navigation, say hello after signing in, and
-// move on from the ChatGPT step of setup.
+// The account button at the right of the top bar. It opens Settings.
+function renderUserButton() {
+  const el = $("#user-button");
+  if (!el) return;
+  const name = yourName();
+  setHtml(el, `<span class="avatar">${esc(initials(name)) || icon("user")}</span>`
+    + `<span class="user-name"><strong>${esc(name || "Your account")}</strong><small>${aiReady() ? "ChatGPT connected" : "Not signed in"}</small></span>${icon("chevron")}`);
+  el.setAttribute("aria-label", `${name || "Your account"}, settings`);
+}
+
+// Handles an "ai" event (the sign-in changed): redraw the frame, say hello after signing in, and swap Home's welcome for
+// the dashboard (or back).
 function onAIStatus(data) {
   const wasReady = aiReady();
   S.state.ai = data;
-  renderAI();
-  renderNav();
-  if (!wasReady && aiReady()) toast("Signed in with ChatGPT", data.email || data.name || "JobPortal can use your plan now.");
-  if (S.route[0] === "setup" && S.setupStep === "chatgpt" && aiReady()) renderSetup("resume");
-  if (S.route[0] === "settings" && !S.cfgDirty) renderSettings();
+  renderFrame();
+  if (wasReady === aiReady()) return;
+  if (aiReady()) toast("Signed in with ChatGPT", data.email || data.name || "JobPortal can use your plan now.");
+  if (S.route[0] === "home") renderHome();
+  if (S.route[0] === "settings" && S.route[1] === "ai" && !S.cfgDirty) renderSettings("ai");
 }
 
 // Starts Sign in with ChatGPT. It happens in the system browser: POST /api/ai/signin returns OpenAI's sign-in page, OpenAI
@@ -82,160 +146,181 @@ async function aiSignIn() {
   }
 }
 
-// The card's sign-in button is outside <main>, so it needs its own listener.
-$("#usage").addEventListener("click", (e) => {
-  if (e.target.closest("[data-act=ai-signin]")) aiSignIn();
-});
-
-// ---------------------------------------------------------------- profile status
-// True once setup is done: a resume imported, the standard questions answered and the profile built.
-const onboarded = () => {
-  const st = S.profileStatus || {};
-  return !!(st.has_resume && st.answers_saved && st.built);
-};
-
-// Handles a "profile_status" event: update the pill, show or hide "Set up", and refresh the pages that show progress.
+// ---------------------------------------------------------------- the profile and the counts
+// Handles a "profile_status" event: a build starting, moving on, failing or finishing.
 function onProfileStatus(data) {
-  const wasOnboarded = onboarded();
+  const was = S.profileStatus || {};
   S.profileStatus = data;
-  renderProfilePill();
-  if (wasOnboarded !== onboarded()) renderNav();
-  if (S.route[0] === "setup") setupStatusChanged();
-  if (S.route[0] === "profile" && S.profileTab === "overview" && !S.dirty) renderProfile("overview");
+  if (was.busy && !data.busy && data.built && !data.error) S.buildDone = true;  // Home says "Your profile is ready"
+  renderNextStep();
+  if (S.route[0] === "home") homeStatusChanged();
+  if (S.route[0] === "settings" && S.route[1] === "profile") renderProfileStatusLine();
 }
 
-// The pill under the navigation. It says whether the profile is up to date, updating, failed, waiting for setup, or has
-// answers waiting to be added, and links to the place that deals with it.
-function renderProfilePill() {
-  const el = $("#profile-pill");
-  if (!el) return;  // the sidebar is gone after Quit
-  const st = S.profileStatus || {};
-  let cls = "ok";
-  let html = `<i class=i-check></i> profile up to date`;
-  let href = "#/profile";
-  let tip = "Your profile has everything you've told JobPortal.";
-  if (st.busy) {
-    cls = "busy";
-    html = `<span class="spin"></span> ${esc(st.phase || "updating your profile")}`;
-    tip = "JobPortal is updating your profile.";
-  } else if (st.error) {
-    cls = "err";
-    html = `<i class=i-warn></i> profile update failed`;
-    tip = st.error;
-  } else if (!onboarded()) {
-    cls = "dirty";
-    html = `<i class=i-dot></i> finish setting up`;
-    href = "#/setup";
-    tip = "Import your resume and answer the standard questions to start searching.";
-  } else if (st.unsynced) {
-    cls = "dirty";
-    html = `<i class=i-dot></i> ${plural(st.unsynced, "answer")} to add`;
-    href = "#/profile/questions";
-    tip = "New answers are added to your profile automatically after a short pause.";
-  }
-  el.className = `status-pill ${cls}`;
-  el.href = href;
-  el.innerHTML = html;
-  el.title = tip;
-}
-
-// ---------------------------------------------------------------- agents and counts
-// The AI agents working right now, under the navigation (six at most).
-function renderAgents() {
-  const agents = Object.values(S.state.active_agents || {});
-  if (!agents.length) {
-    $("#agents").innerHTML = "";
-    return;
-  }
-  $("#agents").innerHTML = `<div class="small" style="margin-bottom:4px">${plural(agents.length, "agent")} working</div>`
-    + agents.slice(0, 6).map((label) => `<div class="a"><span class="dot"></span>${esc(label)}</div>`).join("");
-}
-
-// Fetches the counts behind the navigation badges and the Leads page tiles (GET /api/stats). A failure keeps the old
-// numbers until the next refresh.
+// Fetches the counts behind the menu badges and Home's stats (GET /api/stats). A failure keeps the old numbers.
 async function refreshStats() {
   try {
     S.stats = await api("/api/stats");
-    renderNav();
-    if (S.route[0] === "leads") renderTiles();
-  } catch (_) {}
-}
-
-// ---------------------------------------------------------------- router
-// The first part of the hash picks the page; the rest are its parameters (#/lead/12/emails opens lead 12 on its Emails
-// tab). Every entry is an arrow function because the page files load after this one: their render functions don't exist
-// yet when this object is built.
-const ROUTES = {
-  setup: () => renderSetup(),
-  leads: () => renderLeads(),
-  lead: (id, tab) => {
-    if (tab) S.leadTab = tab;
-    renderLead(+id);
-  },
-  tracker: () => renderTracker(),
-  contacts: () => renderContacts(),
-  resumes: (id) => renderLibrary(id),
-  analysis: () => renderAnalysis(),
-  dreams: () => renderDreams(),
-  crm: () => renderCRM(),
-  sources: () => renderSources(),
-  profile: (tab) => renderProfile(tab),
-  settings: () => renderSettings(),
-  runs: (id) => renderRuns(id),
-};
-
-// Shows the page the hash names. An empty hash opens Leads once setup is done, and Set up before that.
-function route() {
-  const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  S.route = parts.length ? parts : [onboarded() ? "leads" : "setup"];
-  // Edits on the page you left are gone, so they no longer hold back live redraws or the leave warning.
-  S.dirty = false;
-  S.cfgDirty = false;
+  } catch (_) {
+    return;
+  }
   renderNav();
-  (ROUTES[S.route[0]] || ROUTES.leads)(...S.route.slice(1));
-  main.scrollTop = 0;
+  if (S.route[0] === "home") renderHomeStats();
 }
-window.addEventListener("hashchange", route);
 
-// ---------------------------------------------------------------- actions
-onAction("ai-signin", () => {
-  aiSignIn();
+// ---------------------------------------------------------------- the top bar
+// The ways to run a search. The button runs everything; its menu offers the rest.
+const RUN_MODES = [["full", "Run everything"], ["boards", "Job boards only"], ["hunt", "AI hunt only"], ["backlog", "Only the waiting queue"]];
+
+// Run search (with its menu), or Stop while a search runs. Starting or stopping swaps the buttons; when one of them had
+// the focus, the button that replaces it gets it, so a keyboard user can stop the search they just started.
+function renderRunControl() {
+  const el = $("#run-control");
+  if (!el) return;
+  const hadFocus = el.contains(document.activeElement);
+  if (S.state.running) {
+    setHtml(el, `<span class="run-status">${spinner()}<span>${esc(runPhase(S.state.phase))}</span></span>`
+      + `<button class="button stop" type="button" data-act="stop">${icon("stop", "filled")}<span>Stop</span></button>`);
+  } else {
+    const modes = RUN_MODES.map(([mode, label]) => `<button type="button" role="menuitem" data-act="run" data-mode="${mode}">${label}</button>`).join("");
+    setHtml(el, `<div class="split menu-wrap"><button class="button primary" type="button" data-act="run">${icon("play", "filled")}<span>Run search</span></button>`
+      + `<button class="button primary split-more" type="button" data-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Other ways to run">${icon("chevron")}</button>`
+      + `<div class="menu" role="menu" hidden>${modes}</div></div>`);
+  }
+  if (hadFocus && !el.contains(document.activeElement)) $("button", el)?.focus();
+}
+
+// Everything in the frame that shows the sign-in, the run or the counts.
+function renderFrame() {
+  renderNav();
+  renderNextStep();
+  renderSidebarFoot();
+  renderUserButton();
+  renderRunControl();
+}
+
+// The search box searches your leads: typing shows the Leads page filtered to what you typed.
+$("#search-box").innerHTML = `${icon("search")}<input id="search" type="search" placeholder="Search your leads" aria-label="Search your leads" autocomplete="off">`;
+const searchLeads = () => {
+  S.q = $("#search").value.trim();
+  if (S.route[0] === "leads") loadLeads();
+  else location.hash = "#/leads";
+};
+$("#search").addEventListener("input", debounce(searchLeads, 250));
+$("#search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") searchLeads();
+  if (e.key === "Escape" && e.target.value) {
+    e.target.value = "";
+    searchLeads();
+  }
 });
-onAction("ai-signout", async () => {
-  const r = await api("/api/ai/signout", { method: "POST" });
-  toast("Signed out of ChatGPT", r.note || "JobPortal no longer uses your plan.");
-  if (S.route[0] === "settings") renderSettings();
+// "/" anywhere (outside a text box and a dialog) jumps to the search box.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || $("dialog[open]")) return;
+  if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+  e.preventDefault();
+  $("#search").focus();
 });
 
 // ---------------------------------------------------------------- theme
-// Save only the display preference. Storage may be unavailable in some windows.
-function setDisplayTheme(theme) {
-  const selected = theme === "dark" ? "dark" : "light";
-  document.documentElement.dataset.theme = selected;
+// Switches between the light and dark theme and remembers it. The script at the top of index.html restores it on load.
+function applyTheme(theme) {
+  const chosen = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = chosen;
+  store.set("jobportal-theme", chosen);
+}
 
-  const button = $("#theme-toggle");
-  if (button) {
-    const dark = selected === "dark";
-    button.textContent = dark ? "Switch to light theme" : "Switch to dark theme";
-    button.setAttribute("aria-pressed", String(dark));
+// ---------------------------------------------------------------- router
+// The first part of the hash picks the page; the rest are its parameters (#/leads/12/emails opens lead 12 on its Emails
+// tab). Every entry is an arrow function because the page files load after this one.
+const ROUTES = {
+  home: () => renderHome(),
+  leads: (id, tab) => renderLeads(id, tab),
+  tracker: (view) => renderTracker(view),
+  analysis: () => renderAnalysis(),
+  settings: (tab, item) => renderSettings(tab, item),
+};
+
+// Where the addresses of pages that moved land now: Set up and Equity mining on Home, a lead on Leads, the Profile,
+// Resumes, Runs and Dream list pages in Settings, Contacts on the Tracker, and Sources in a dialog on Leads.
+function movedRoute([page, a, b]) {
+  const under = (base, ...parts) => [base, ...parts.filter(Boolean)].join("/");
+  switch (page) {
+    case "lead": return under("#/leads", a, b);
+    case "profile":
+      if (a === "questions" || a === "resume") return "#/home";  // open questions and documents are on Home
+      return a === "search_plan" ? "#/settings/search" : under("#/settings/profile", a);
+    case "resumes": return under("#/settings/resumes", a);
+    case "runs": return under("#/settings/history", a);
+    case "dreams": return "#/settings/search";
+    case "contacts": return "#/tracker/contacts";
+    case "sources":
+      S.openSources = true;  // Leads opens the Sources dialog once it's drawn
+      return "#/leads";
+    default: return "#/home";  // #/setup, #/crm and anything unknown
   }
-
-  try {
-    localStorage.setItem("jobportal-theme", selected);
-  } catch (_) {}
 }
 
-onAction("theme-toggle", () => {
-  const current = document.documentElement.dataset.theme;
-  setDisplayTheme(current === "dark" ? "light" : "dark");
+// Shows the page the hash names. A new page closes any dialog and starts at the top; a new address on the same page
+// (another lead, another Settings tab) updates it in place. Unsaved edits ask before they're dropped.
+let shownHash = null;
+function route() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  if (parts.length && !ROUTES[parts[0]]) {
+    location.replace(movedRoute(parts));  // replace: the old address doesn't stay in the history
+    return;
+  }
+  if (shownHash !== null && location.hash !== shownHash && (S.dirty || S.cfgDirty) && !confirm("Discard your unsaved edits?")) {
+    S.openSources = false;  // an old #/sources link stays where you are too: the dialog mustn't pop up on a later visit
+    history.replaceState(null, "", shownHash || "#/home");  // stay, with the address you were on
+    return;
+  }
+  shownHash = location.hash;
+  S.dirty = false;
+  S.cfgDirty = false;
+  const next = parts.length ? parts : ["home"];
+  if (next[0] !== S.route[0]) {
+    $$("dialog[open]").forEach((dialog) => dialog.close());
+    if (S.leadView) closeLeadDetails();  // the lead that was open went with the page
+    window.scrollTo(0, 0);
+  }
+  S.route = next;
+  renderNav();
+  Promise.resolve(ROUTES[next[0]](...next.slice(1))).catch((err) => toast("Couldn't show this page", err.message, "error"));
+}
+window.addEventListener("hashchange", route);
+
+// What a page shows where its content would be when loading it failed: what went wrong, and Try again, which draws the
+// page again. Without it, a failed request leaves a page half-drawn (no list, or "Loading" for good) until you leave it.
+const loadError = (err) => `<div class="empty-state"><h3>Couldn't load this</h3><p>${esc(err?.message || "")}</p>`
+  + `<button class="button outline" type="button" data-act="reload-page">${icon("refresh")}Try again</button></div>`;
+
+// ---------------------------------------------------------------- actions
+onAction("ai-signin", () => aiSignIn());
+onAction("ai-signout", async () => {
+  const r = await api("/api/ai/signout", { method: "POST" });
+  toast("Signed out of ChatGPT", r.note || "JobPortal no longer uses your plan.");
 });
-
-// The sidebar sits outside main, so its theme button needs a separate listener.
-const displayThemeButton = $("#theme-toggle");
-if (displayThemeButton) {
-  displayThemeButton.addEventListener("click", () => {
-    ACTIONS["theme-toggle"]();
-  });
-}
-
-setDisplayTheme(document.documentElement.dataset.theme);
+onAction("run", async (el) => {
+  // In a browser tab, the first run with alerts on asks for permission to notify.
+  if (S.notify && !desktop() && "Notification" in window && Notification.permission === "default") Notification.requestPermission();
+  try {
+    await api("/api/run", { method: "POST", body: { mode: el.dataset.mode || "full" } });
+  } catch (err) {
+    toast("Can't search yet", err.message, "error");
+    return;
+  }
+  S.logs = [];
+  S.buildDone = false;
+  clearLog();
+  toast("Searching", "New leads show up on Leads as they're ready.");
+});
+onAction("stop", async () => {
+  await api("/api/run/stop", { method: "POST" });
+  toast("Stopping", "Finishing up and saving what it found.");
+});
+onAction("reload-page", () => {  // Try again under a loadError: the same address, drawn from scratch
+  if ((S.dirty || S.cfgDirty) && !confirm("Discard your unsaved edits?")) return;
+  main.dataset.page = "";
+  route();
+});

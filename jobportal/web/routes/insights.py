@@ -1,9 +1,12 @@
-"""The Analysis, Equity mining and Dream list pages."""
-from fastapi import APIRouter
+"""The Analysis and Dream list pages.
+
+The Analysis page's role controls (add, remove and bring back a role) each answer with the whole page's data, the same as
+GET /api/analysis, so the page redraws from one request."""
+from fastapi import APIRouter, HTTPException
 
 from jobportal.candidate import profile
 from jobportal.core import background, db, settings
-from jobportal.insights import analysis, crm
+from jobportal.insights import analysis
 from jobportal.search import pipeline, plan
 
 router = APIRouter()
@@ -11,6 +14,8 @@ router = APIRouter()
 
 @router.get("/api/analysis")
 def get_analysis():
+    """The Analysis page: the radar's roles with their numbers and scores, the market numbers, the latest AI assessment
+    and its history (see insights/analysis.get)."""
     return analysis.get()
 
 
@@ -21,22 +26,35 @@ async def run_analysis():
     return {"ok": True}
 
 
-@router.get("/api/crm")
-def equity_book():
-    """The Equity mining page: the ranked worklist of next moves and the companies rolled up as accounts."""
-    return crm.book()
+@router.post("/api/analysis/roles/add")
+def add_analysis_role(body: dict):
+    """Add a job title of the user's own to the radar, {"title": "..."}. It stays until they remove it. A 400 explains a
+    title that can't be added (empty, too long, only a level, or too many added already)."""
+    try:
+        analysis.add_role(str(body.get("title") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return analysis.get()
 
 
-@router.post("/api/crm/snooze")
-def snooze_move(body: dict):
-    crm.snooze(body["key"], int(body.get("days", 3)))
-    return {"ok": True}
+@router.post("/api/analysis/roles/remove")
+def remove_analysis_role(body: dict):
+    """Take a role off the radar for good, {"id": "<role id>"}."""
+    analysis.remove_role(str(body.get("id") or ""))
+    return analysis.get()
+
+
+@router.post("/api/analysis/roles/restore")
+def restore_analysis_role(body: dict):
+    """Bring back a role the user removed, {"id": "<role id>"}."""
+    analysis.restore_role(str(body.get("id") or ""))
+    return analysis.get()
 
 
 @router.get("/api/dreams")
 def get_dreams():
-    """The Dream list page. Companies come from two places: the ones the user added, and the ones the profile's search plan
-    suggested (minus any the user removed)."""
+    """The Dream list (in Settings, Search). Companies come from two places: the ones the user added, and the ones the
+    profile's search plan suggested (minus any the user removed)."""
     cfg = settings.get()
     suggested = (profile.get("search_plan") or {}).get("dream_companies", [])
     removed = cfg.get("dream_exclude", [])
@@ -71,10 +89,10 @@ def recheck_dreams():
     """Re-flag every lead against the current Dream list. Leads the user starred or unstarred by hand are left alone."""
     cfg = settings.get()
     companies, jobs = plan.all_dreams(cfg), cfg.get("dream_jobs", [])
-    changed = 0
+    now, changes = db.now(), []
     for row in db.q("SELECT id, company, title, dream FROM leads WHERE dream_manual IS NULL"):
         dream = 1 if (pipeline.is_dream(row["company"], companies) or pipeline.is_dream_job(row["title"], jobs)) else 0
         if dream != (row["dream"] or 0):
-            db.update_lead(row["id"], dream=dream)
-            changed += 1
-    return {"changed": changed, **get_dreams()}
+            changes.append((dream, now, row["id"]))
+    db.ex_many("UPDATE leads SET dream=?, updated_at=? WHERE id=?", changes)  # one transaction, however many leads change
+    return {"changed": len(changes), **get_dreams()}

@@ -1,14 +1,15 @@
 """The SQLite database: every lead, run, event and saved value lives in one file, DATA/jobportal.db (see config.py).
 
-Who calls it: nearly every package. Read with q() (many rows) or one() (a single row), and write with ex(). Small JSON
-values go in the kv table through kv_get() and kv_set(). Leads have their own helpers: update_lead(), add_event() and
-lead_row().
+Who calls it: nearly every package. Read with q() (many rows) or one() (a single row), and write with ex(), or ex_many()
+for a batch of rows. Small JSON values go in the kv table through kv_get() and kv_set(). Leads have their own helpers:
+update_lead(), add_event() and lead_row().
 
 Key ideas:
 - One shared connection, opened on first use. FastAPI runs requests on several threads, so every query holds _lock (a
   re-entrant lock, so a function that holds it can still call q() or ex()). This is a single-user app, so one connection
   is plenty.
-- Autocommit: each statement is saved the moment it runs. There are no transactions to commit.
+- Autocommit: each statement is saved the moment it runs, and there is nothing to commit. The one exception is ex_many(),
+  which writes a whole batch in one transaction, since one disk sync per row adds up to seconds for thousands of rows.
 - Rows come back as plain dicts keyed by column name. Columns that hold JSON stay text until lead_row() decodes them.
 - Timestamps are UTC text from now(), so sorting them as text sorts them by time.
 - The tables are created by SCHEMA and upgraded by _migrate(). People installed v0.1.0, so their databases must keep
@@ -16,8 +17,8 @@ Key ideas:
 
 The tables (columns not listed are plain and named for what they hold):
   kv               one JSON value per key: "settings" (settings.py), "profile.<section>", "profile.answers",
-                   "profile.questions" and the other profile keys (candidate/), "analysis.latest" and "analysis.history"
-                   (insights/analysis.py), "crm.snoozed" (insights/crm.py), "hunt.rotation" (where the AI missions rotation resumes)
+                   "profile.questions", "profile.documents" and the other profile keys (candidate/), "analysis.latest" and
+                   "analysis.history" (insights/analysis.py), "hunt.rotation" (where the AI missions rotation resumes)
   profile_history  the previous value of a profile section, saved before every change (candidate/profile.py)
   leads            one row per job (or program, event or company lead) JobPortal found. Important columns:
                      fingerprint       company + title + state, hashed (textutil.fingerprint): one row per job
@@ -38,19 +39,20 @@ The tables (columns not listed are plain and named for what they hold):
                      cost_usd          always 0. Left from before v0.1.0, when JobPortal counted dollars, not tokens
   events           a lead's history (status changes, notes, packages built), shown on the lead page
   runs             one row per search run: mode, status, stats (JSON counters) and tokens. cost_usd is always 0
-  run_log          the log lines of each run, shown on the Runs page
+  run_log          the log lines of each run, shown in Settings, History
   candidates       the triage backlog: jobs that passed the rule filters but haven't been scored yet (RawJob as JSON)
   ai_calls         one row per AI request: purpose, model, effort, tokens, how long it took and any error. Open
                    /api/ai_calls to look at it while developing. cost_usd is always 0
-  resume_library   saved resumes on the Resumes page (candidate/library.py). Storage only: they never feed the profile"""
+  resume_library   saved resumes in Settings, Resumes (candidate/library.py). Storage only: they never feed the
+                   profile"""
 import json
 import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
 
-from jobportal.core.config import DATA, DB_PATH
-from jobportal.core.genres import classify_industry
+from jobportal.core.config import APPLIED_STATUSES, DATA, DB_PATH, OLD_STATUSES
+from jobportal.core.genres import OLD_INDUSTRIES, classify_industry
 
 _lock = threading.RLock()  # held for every query; re-entrant, so code holding it can call q() and ex()
 _conn: sqlite3.Connection | None = None  # the shared connection, opened by conn()
@@ -167,6 +169,20 @@ def _migrate(c: sqlite3.Connection) -> None:
         for row in c.execute("SELECT id, company, title, description FROM leads").fetchall():
             industry = classify_industry(row["company"], row["title"], row["description"])
             c.execute("UPDATE leads SET industry=? WHERE id=?", (industry, row["id"]))
+    # v0.3.0 cut the application statuses down to the Tracker's five columns (config.OLD_STATUSES). This is a row update,
+    # not a column change, and it finds nothing to change once it has run.
+    for old, new in OLD_STATUSES.items():
+        c.execute("UPDATE leads SET app_status=? WHERE app_status=?", (new, old))
+    # Reaching Application sent or later records when the user applied (config.APPLIED_STATUSES). Older leads moved past it
+    # without one get the day they last changed, so the Tracker's and Analysis's counts line up. Finds nothing once it ran.
+    c.execute(f"UPDATE leads SET applied_at=substr(updated_at, 1, 10) WHERE applied_at IS NULL AND updated_at IS NOT NULL "
+              f"AND app_status IN ({','.join('?' * len(APPLIED_STATUSES))})", APPLIED_STATUSES)
+    # v0.3.0 also replaced the tech-heavy industry list with one for every field (genres.OLD_INDUSTRIES says what each old
+    # name became). Another row update that finds nothing to change once it has run.
+    for old, new in OLD_INDUSTRIES.items():
+        c.execute("UPDATE leads SET industry=? WHERE industry=?", (new, old))
+    # v0.3.0 dropped the Equity mining page. Its only saved value was the list of snoozed moves, which nothing reads now.
+    c.execute("DELETE FROM kv WHERE key='crm.snoozed'")
 
 
 def _columns(c: sqlite3.Connection, table: str) -> set[str]:
@@ -202,6 +218,23 @@ def ex(sql: str, args=()) -> int:
     """Run a statement that changes data (INSERT, UPDATE, DELETE). Returns the new row's id after an INSERT."""
     with _lock:
         return conn().execute(sql, args).lastrowid
+
+
+def ex_many(sql: str, rows) -> None:
+    """Run one statement for every set of values in `rows`, all in one transaction: either every row is written or none.
+
+    In autocommit each statement is its own transaction, and each one waits for the disk to confirm the write. For a
+    few rows that doesn't matter, but saving a triage backlog of thousands of candidates took about 10 seconds that way
+    (on the event loop, so the dashboard froze), and well under one second as one transaction."""
+    with _lock:
+        c = conn()
+        c.execute("BEGIN")
+        try:
+            c.executemany(sql, rows)
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise
+        c.execute("COMMIT")
 
 
 def kv_get(key: str, default=None):

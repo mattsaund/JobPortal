@@ -1,16 +1,17 @@
 <!doctype html>
+<!-- index.html: the dashboard's one page, served by web/server.py. It holds the frame (the sidebar, the top bar and an
+     empty <main>) and loads the plain scripts in js/ in order; they draw every page into <main> by the address after #
+     (js/layout.js) and talk to the server's /api/. See "How it works" in CONTRIBUTING.md. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JobPortal</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230c0d10'/><circle cx='12.5' cy='16' r='7.5' fill='%23ff7a1a'/><circle cx='19.5' cy='16' r='7.5' fill='none' stroke='%23a98bff' stroke-width='2.4' stroke-dasharray='3.4 2.4'/></svg>">
-<!-- Restore the display preference before the styles load. -->
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<!-- Restore the light or dark theme (Settings, Appearance) before the page paints, so it never flashes the other one. -->
 <script>
   try {
-    const savedTheme = localStorage.getItem("jobportal-theme");
-    document.documentElement.dataset.theme =
-      savedTheme === "dark" ? "dark" : "light";
+    document.documentElement.dataset.theme = localStorage.getItem("jobportal-theme") === "dark" ? "dark" : "light";
   } catch (_) {
     document.documentElement.dataset.theme = "light";
   }
@@ -18,52 +19,50 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<!-- The sidebar is filled in by js/layout.js; every page draws itself inside <main>. -->
-<div class="shell">
-  <aside class="side">
-<div class="logo">
-  <img src="/static/jobportal-brand.png" alt="JobPortal">
-</div>    <nav class="nav" id="nav"></nav>
-    <a class="status-pill ok" id="profile-pill" href="#/profile"></a>
-   <button
-  type="button"
-  class="theme-toggle"
-  id="theme-toggle"
-  data-act="theme-toggle"
-  aria-label="Dark theme"
-  aria-pressed="false"
->
-  Switch to dark theme
-</button>
-    <div class="grow"></div>
-    <div class="agents" id="agents"></div>
-    <div class="usage" id="usage" title="Your ChatGPT sign-in and the AI tokens used this session"></div>
+<a href="#main" class="skip-link">Skip to content</a>
+<!-- The frame. js/layout.js fills in the sidebar and the top bar; every page draws itself inside <main>. -->
+<div class="app-shell">
+  <aside class="sidebar" aria-label="Main navigation">
+    <a class="brand" href="#/home" aria-label="JobPortal home"><img src="/static/logo.png" alt="JobPortal" width="640" height="205"></a>
+    <nav id="navigation" aria-label="Pages"></nav>
+    <div class="sidebar-bottom">
+      <div class="next-step" id="next-step" aria-live="polite"></div>
+      <div class="sidebar-foot" id="sidebar-foot"></div>
+    </div>
   </aside>
-  <main id="main"></main>
+  <div class="workspace">
+    <header class="topbar">
+      <label class="search-box" id="search-box"></label>
+      <div class="top-actions">
+        <div class="run-control" id="run-control"></div>
+        <a class="user-button" id="user-button" href="#/settings"></a>
+      </div>
+    </header>
+    <main id="main" tabindex="-1"></main>
+  </div>
 </div>
-<div class="toasts" id="toasts"></div>
-<div id="modal"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 <!-- Plain scripts that share one global scope, loaded in this order. Code that runs at load time may only use names from
      files above it; calls inside functions can reach any file. main.js starts the app, so it stays last. -->
 <script src="/static/js/core.js"></script>
 <script src="/static/js/live.js"></script>
 <script src="/static/js/layout.js"></script>
-<script src="/static/js/components/search-area.js"></script>
 <script src="/static/js/components/file-drops.js"></script>
+<script src="/static/js/components/search-area.js"></script>
 <script src="/static/js/components/answers-form.js"></script>
 <script src="/static/js/components/settings-form.js"></script>
+<script src="/static/js/components/documents.js"></script>
+<script src="/static/js/pages/home.js"></script>
 <script src="/static/js/pages/leads.js"></script>
 <script src="/static/js/pages/lead.js"></script>
-<script src="/static/js/pages/tracker.js"></script>
 <script src="/static/js/pages/sources.js"></script>
-<script src="/static/js/pages/profile.js"></script>
-<script src="/static/js/pages/settings.js"></script>
-<script src="/static/js/pages/runs.js"></script>
+<script src="/static/js/pages/tracker.js"></script>
 <script src="/static/js/pages/analysis.js"></script>
+<script src="/static/js/pages/settings.js"></script>
+<script src="/static/js/pages/profile.js"></script>
 <script src="/static/js/pages/dreams.js"></script>
-<script src="/static/js/pages/crm.js"></script>
 <script src="/static/js/pages/resumes.js"></script>
-<script src="/static/js/pages/setup.js"></script>
+<script src="/static/js/pages/runs.js"></script>
 <script src="/static/js/main.js"></script>
 </body>
 </html>

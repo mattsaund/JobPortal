@@ -3,11 +3,14 @@
 
 A lead's documents are its resume, cover letter, interview prep, company brief, application answers, outreach emails,
 contacts and the original posting. Rendered resume and cover letter files are kept in the lead's folder in the data folder
-(leads/<id>/). Editing a document deletes its rendered files (routes/leads.py), so the next download shows the edit."""
+(leads/<id>/) and reused while they exist. Editing a document deletes its rendered files (routes/leads.py), so the next
+download shows the edit, and a cover letter rendered on an earlier day is rendered again, since it carries the date.
+Called by web/routes/documents.py and web/routes/library.py."""
 import csv
 import io
 import re
 import zipfile
+from datetime import date
 from pathlib import Path
 
 from jobportal.candidate import profile
@@ -32,14 +35,24 @@ def safe_filename(text: str) -> str:
     return re.sub(r"[^\w .&()-]+", "", text or "").strip()[:60]
 
 
+def _rendered_today(path: Path) -> bool:
+    """True when the file exists and was written today (by this computer's clock)."""
+    try:
+        return date.fromtimestamp(path.stat().st_mtime) == date.today()
+    except OSError:  # no such file
+        return False
+
+
 def _write_text(path: Path, text: str) -> Path:
+    """Write a text download (UTF-8), making its folder first, and return its path."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")  # UTF-8 on every system; Windows would otherwise pick a legacy code page
     return path
 
 
 def document_markdown(lead: dict, doc: str) -> tuple[str, str]:
-    """A lead's document as Markdown, with the user's latest edits, and its title."""
+    """A lead's document as Markdown, with the user's latest edits, and its title. Parts the AI left out of a package
+    (an email's subject, an answer's question) read as blank instead of failing the download."""
     package = lead.get("package") or {}
     if doc == "resume":
         return lead.get("resume_md") or "", "Resume"
@@ -50,10 +63,11 @@ def document_markdown(lead: dict, doc: str) -> tuple[str, str]:
     if doc == "company_intel":
         return package.get("company_brief_md") or "", "Company intel"
     if doc == "answers":
-        return "\n\n".join(f"## {a['question']}\n{a['answer']}" for a in package.get("application_answers") or []), "Application answers"
+        return "\n\n".join(f"## {a.get('question', '')}\n{a.get('answer', '')}" for a in package.get("application_answers") or []), \
+            "Application answers"
     if doc == "emails":
-        parts = [f"## {e['kind'].replace('_', ' ').title()}\n**To:** {e.get('to_addr') or e.get('to', '')}  \n**Subject:** {e['subject']}\n\n{e['body']}"
-                 for e in package.get("emails") or []]
+        parts = [f"## {str(e.get('kind') or 'email').replace('_', ' ').title()}\n**To:** {e.get('to_addr') or e.get('to', '')}  \n"
+                 f"**Subject:** {e.get('subject', '')}\n\n{e.get('body', '')}" for e in package.get("emails") or []]
         if package.get("linkedin_note"):
             parts.append(f"## LinkedIn connection note\n{package['linkedin_note']}")
         return "\n\n".join(parts), "Outreach emails"
@@ -105,7 +119,7 @@ async def lead_file(lead: dict, name: str) -> tuple[Path, str]:
         out = await resume_file(md, folder, ext, style.get("theme", "classic"), style.get("max_pages", 1))
     elif doc == "cover_letter":
         out = folder / f"cover_letter.{ext}"
-        if not out.exists():
+        if not _rendered_today(out):  # the letter is dated, so one rendered on an earlier day (a package built last week) is stale
             folder.mkdir(parents=True, exist_ok=True)
             if ext == "pdf":
                 await render.cover_pdf(md, facts, lead["company"], lead["location"], out)
@@ -136,18 +150,30 @@ async def package_zip(lead: dict) -> tuple[Path, str]:
                 continue
             z.write(file, download_name)
         for i, email in enumerate((lead.get("package") or {}).get("emails") or []):
-            z.writestr(f"email-{i + 1}-{email['kind']}.eml", render.eml(email.get("to_addr") or "", email["subject"], email["body"]))
+            z.writestr(f"email-{i + 1}-{_email_name(email)}.eml", _email_bytes(email))
     return path, f"Application package - {safe_filename(lead['company'])} - {safe_filename(lead['title'])}.zip"
 
 
+def _email_name(email: dict) -> str:
+    """A file name for one of the AI's email drafts, from its kind ("recruiter", "hiring_manager"): the kind is the AI's
+    free text, so it's cut down to safe characters before it names a file."""
+    return safe_filename(str(email.get("kind") or "")) or "email"
+
+
+def _email_bytes(email: dict, sender: str = "") -> bytes:
+    """One of the AI's email drafts as .eml bytes, addressed to to_addr (the address the user filled in; the AI's "to"
+    only describes who it's for). A field the AI left out is blank, not an error."""
+    return render.eml(email.get("to_addr") or "", str(email.get("subject") or ""), str(email.get("body") or ""), sender)
+
+
 def email_file(lead: dict, index: int) -> tuple[bytes, str]:
-    """One outreach email as an .eml file that opens as a ready-to-send draft in the user's mail app."""
+    """One outreach email as an .eml file that opens as a ready-to-send draft in the user's mail app. Returns (the file's
+    bytes, its download name). Raises NotAvailable for an index the package doesn't have."""
     emails = (lead.get("package") or {}).get("emails") or []
     if not 0 <= index < len(emails):
         raise NotAvailable("no such email")
     email = emails[index]
-    sender = profile.get("facts").get("email", "")
-    return render.eml(email.get("to_addr") or "", email["subject"], email["body"], sender), f"{email['kind']}.eml"
+    return _email_bytes(email, profile.get("facts").get("email", "")), f"{_email_name(email)}.eml"
 
 
 async def library_file(item: dict, fmt: str) -> tuple[Path, str]:

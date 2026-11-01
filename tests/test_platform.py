@@ -1,3 +1,5 @@
+"""The cross-platform pieces: the command line and its server modes, the app window and its bridge, the Linux app menu
+entry and the PDF engine lookup. (The notification commands are tested in test_core.py.)"""
 import os
 import subprocess
 import sys
@@ -39,6 +41,67 @@ def test_stop_never_signals_a_stale_pid_file(monkeypatch):
         bystander.wait()
 
 
+def test_stop_asks_the_server_to_quit_and_never_signals_the_pid_file(monkeypatch):
+    """With a server up, a PID file can still be stale (left by a crash, while another server took the port), so --stop
+    asks the server itself to quit instead of signaling the number in the file."""
+    from jobportal.app import desktop
+    answering = [True]
+    monkeypatch.setattr(desktop, "up", lambda: answering[0])
+    bystander = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    pid_file = cli._pid_file()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(bystander.pid), encoding="utf-8")
+    try:
+        monkeypatch.setattr(cli, "_request_quit", lambda: False)  # a server that can't be stopped this way
+        assert cli.stop() == 1 and pid_file.exists()
+
+        def quit_server():
+            answering[0] = False
+            return True
+        monkeypatch.setattr(cli, "_request_quit", quit_server)
+        assert cli.stop() == 0 and not pid_file.exists()
+        assert bystander.poll() is None  # alive both times
+    finally:
+        bystander.kill()
+        bystander.wait()
+
+
+def test_a_second_server_on_a_busy_port_leaves_the_pid_file_alone(monkeypatch):
+    from jobportal.app import desktop
+    monkeypatch.setattr(desktop, "up", lambda: True)  # --background already runs on this port
+    pid_file = cli._pid_file()
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text("4242", encoding="utf-8")
+    assert cli.serve() == 1
+    assert pid_file.read_text(encoding="utf-8") == "4242"  # so --stop still knows the first server
+
+
+def test_saving_a_download_where_it_cannot_be_written_is_reported(tmp_path, monkeypatch):
+    from jobportal.app import desktop
+
+    class Reply:
+        headers = {"Content-Disposition": 'attachment; filename="Jordan Rivera Resume.pdf"'}
+
+        def read(self):
+            return b"%PDF-1.4"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Window:
+        def create_file_dialog(self, *args, **kwargs):
+            return str(tmp_path / "no-such-folder" / "Jordan Rivera Resume.pdf")  # the folder is gone by the time it's saved
+
+    monkeypatch.setattr(desktop.urllib.request, "urlopen", lambda url, timeout=0: Reply())
+    bridge = desktop.Bridge()
+    bridge._window = Window()
+    result = bridge.save_file("/api/leads/1/export/resume.pdf")  # the dashboard shows the error instead of nothing
+    assert result["ok"] is False and "couldn't save Jordan Rivera Resume.pdf" in result["error"]
+
+
 def test_cli_version_and_doctor(tmp_path):
     env = {**os.environ, "JOBPORTAL_HOME": str(tmp_path)}
     out = subprocess.run([sys.executable, "-m", "jobportal", "--version"], capture_output=True, text=True, env=env, timeout=60)
@@ -55,13 +118,15 @@ class FakeThread:
         self.server = server
 
     def is_alive(self):
+        """Alive until the server is told to exit."""
         return not self.server.should_exit
 
     def join(self, timeout=None):
-        pass
+        """Nothing to wait for."""
 
 
 class FakeServer:
+    """Stands in for the uvicorn server: only its should_exit flag matters to the window code."""
     should_exit = False
 
 
@@ -124,7 +189,7 @@ def test_appimage_adds_itself_to_the_app_menu(tmp_path, monkeypatch):
     entry = tmp_path / "applications" / "jobportal.desktop"
     assert desktop.add_to_app_menu()
     assert 'Exec="/home/jordan/Apps/JobPortal.AppImage"' in entry.read_text(encoding="utf-8")
-    assert (tmp_path / "icons" / "hicolor" / "scalable" / "apps" / "jobportal.svg").is_file()
+    assert (tmp_path / "icons" / "hicolor" / "512x512" / "apps" / "jobportal.png").is_file()
     assert not desktop.add_to_app_menu()  # already up to date
     monkeypatch.setenv("APPIMAGE", "/home/jordan/Downloads/JobPortal.AppImage")
     assert desktop.add_to_app_menu() and "Downloads" in entry.read_text(encoding="utf-8")  # the entry follows a moved file

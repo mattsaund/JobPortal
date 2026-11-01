@@ -4,10 +4,10 @@ The guest endpoint (SEARCH) answers with a page of job cards as HTML, which pars
 searches every query from the search plan in every allowed location (li_locations), plus "<company> <role>" searches for
 dream companies when the dream bypass is on.
 
-LinkedIn rate-limits hard, so this collector is slow on purpose: one request at a time, a 1 to 2 second pause after each
-search, a 30 second back-off after a 429 (too many requests), and it gives up after three of those. Settings caps the number
-of searches per run (max_requests). The list is shuffled first, so each run covers a different sample when there are more
-query and location pairs than the cap.
+LinkedIn rate-limits hard, so this collector is slow on purpose: one request at a time, a 1 to 2 second pause between
+searches (failed ones included), a 30 second back-off after a block (429, LinkedIn's own 999, or 403), and it gives up after
+three of those. Settings caps the number of searches per run (max_requests). The list is shuffled first, so each run covers
+a different sample when there are more query and location pairs than the cap.
 
 Full descriptions are fetched later, one posting at a time, by collectors/details.py."""
 import asyncio
@@ -22,8 +22,10 @@ from jobportal.search.collectors.base import NATIONWIDE, Ctx, RawJob
 
 SEARCH = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?"
 DREAM_SEARCHES = 12  # dream companies searched by name when the dream bypass is on
-BACKOFF_SECONDS = 30  # wait after a 429 before the next search
-MAX_429 = 3  # stop LinkedIn for this run after this many 429 answers
+BACKOFF_SECONDS = 30  # wait after a block before the next search
+MAX_429 = 3  # stop LinkedIn for this run after this many blocks
+# How LinkedIn refuses a guest it thinks is too busy: 429 (too many requests), its own 999, and sometimes 403.
+BLOCKED_STATUSES = (429, 999, 403)
 
 
 def li_locations(allowed: list[str]) -> list[tuple[str, dict]]:
@@ -96,11 +98,14 @@ async def collect(ctx: Ctx) -> list[RawJob]:
         return []
     experience = sc.get("experience") or linkedin_experience(plan.levels(ctx.cfg))
     random.shuffle(searches)
-    searches = searches[: int(sc.get("max_requests", 70))]
-    out, seen, blocked = [], set(), 0
+    searches = searches[: int(sc.get("max_requests", 100))]  # 100: the default in core/config.py
+    out, seen, blocked, made = [], set(), 0, 0
     for i, (keywords, location, extra) in enumerate(searches):
         if ctx.cancel.is_set():
             break
+        if i:  # every search waits its turn, a failed or blocked one too, so LinkedIn never sees a burst
+            await asyncio.sleep(1.0 + random.random() * 1.2)
+        made += 1
         params = {"keywords": keywords, "location": location,
                   "f_TPR": sc.get("time_window", "r2592000"),  # posted within this many seconds ("r2592000" = 30 days)
                   "f_E": experience,  # experience levels: 1 internship, 2 entry, 3 associate, 4 mid-senior, 5 director
@@ -111,9 +116,9 @@ async def collect(ctx: Ctx) -> list[RawJob]:
         except Exception as e:  # noqa: BLE001 (one failed search shouldn't end the others)
             ctx.log("linkedin", f"request failed: {e}", "warn")
             continue
-        if r.status_code == 429:
+        if r.status_code in BLOCKED_STATUSES:
             blocked += 1
-            ctx.log("linkedin", f"rate limited by LinkedIn, backing off {BACKOFF_SECONDS}s", "warn")
+            ctx.log("linkedin", f"rate limited by LinkedIn (HTTP {r.status_code}), backing off {BACKOFF_SECONDS}s", "warn")
             if blocked >= MAX_429:
                 ctx.log("linkedin", "stopping LinkedIn early (rate limited)", "warn")
                 break
@@ -130,8 +135,7 @@ async def collect(ctx: Ctx) -> list[RawJob]:
                               location=card["location"], posted_at=parse_date(card["posted"]),
                               source_detail=f"LinkedIn search: “{keywords}” in {location}", found_url=posting_url,
                               strict_titles=False, meta={"linkedin_id": card["id"]}))
-        await asyncio.sleep(1.0 + random.random() * 1.2)  # space the searches out so LinkedIn doesn't rate-limit us
         if i and i % 20 == 0:
             ctx.log("linkedin", f"{i}/{len(searches)} searches, {len(out)} unique postings so far")
-    ctx.log("linkedin", f"{len(searches)} searches found {len(out)} unique postings")
+    ctx.log("linkedin", f"{made} searches found {len(out)} unique postings")
     return out

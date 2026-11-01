@@ -1,10 +1,15 @@
 """Job feeds and public APIs, one collector function per source: Hacker News "Who is hiring?", The Muse, USAJobs, Reddit,
-Mastodon, remote job boards (Remotive, RemoteOK), the user's own RSS or Atom feeds, Bluesky, and two optional aggregators that
-need the user's own API key (Adzuna, and Google Jobs through SerpAPI).
+Mastodon, remote job boards (Remotive, RemoteOK, We Work Remotely), the user's own RSS or Atom feeds, Bluesky, and two
+optional aggregators that need the user's own API key (Adzuna, and Google Jobs through SerpAPI).
 
 Each function is a collector, `async fn(ctx) -> list[RawJob]`, listed in collectors/__init__.py. Search words come from
-search/plan.py. For early-career users (every level picked is internship or entry) most sources search intern and new-grad
-wording instead of the user's queries.
+search/plan.py. For early-career users (every level picked is internship, apprenticeship or entry level) most sources
+search wording for those levels instead of the user's queries.
+
+Adapting to the user's fields: search/plan.fields() names the work genres the user's targets point at, and the maps below
+turn them into The Muse's categories, extra subreddits, Mastodon hashtags and instances, and We Work Remotely feeds. Every
+community, hashtag, category and feed in them was checked to exist and carry job posts (October 2026); add only ones
+that do. Hacker News carries tech jobs, so it skips itself unless the user's targets are in tech (plan.in_tech).
 
 Social sources (Hacker News comments, Reddit, Mastodon, Bluesky) return posts, not postings: the title is the post's first
 line and strict_titles is False. A post is kept only when it matches the user's level or roles (_post_re) and also uses a
@@ -16,10 +21,122 @@ import time
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode
 
+from jobportal.core.genres import DEFAULT_GENRES
 from jobportal.core.levels import early_career, muse_levels, posting_regex
-from jobportal.core.textutil import CITY_STATE, NAME_TO_ABBR, STATES, clean, html_to_text, parse_date
+from jobportal.core.textutil import (
+    MAJOR_CITIES,
+    NAME_TO_ABBR,
+    REMOTE_RE,
+    STATES,
+    LocationMatcher,
+    clean,
+    html_to_text,
+    parse_date,
+    unique,
+)
 from jobportal.search import plan
 from jobportal.search.collectors.base import NATIONWIDE, Ctx, RawJob
+
+TECH_GENRES = [g["id"] for g in DEFAULT_GENRES if g["group"] == "tech"]
+
+
+def _for(genres: list[str], values: list[str]) -> dict[str, list[str]]:
+    """The same values for several genres, for building the maps below."""
+    return {genre: values for genre in genres}
+
+
+# The Muse's job categories for each genre (the names its API filters on; a wrong name returns nothing).
+MUSE_CATEGORIES = {
+    **_for(["swe", "frontend_mobile", "ml_ai", "systems_test"], ["Software Engineering"]), "data": ["Data and Analytics"],
+    **_for(["cloud_devops", "cyber", "it_support"], ["Computer and IT", "Software Engineering"]),
+    **_for(["embedded_hw", "robotics", "engineering", "research"], ["Science and Engineering"]),
+    "product_design": ["Design and UX", "Product Management"], "solutions": ["Sales", "Account Management"],
+    **_for(["nursing", "allied_health", "physicians", "health_admin"], ["Healthcare"]),
+    "behavioral_health": ["Healthcare", "Social Services"], "caregiving": ["Healthcare", "Personal Care and Services"],
+    **_for(["teaching", "early_childhood", "student_services"], ["Education"]), "library_museum": ["Education", "Arts"],
+    "admin_office": ["Administration and Office"], "customer_service": ["Customer Service"],
+    "sales": ["Sales", "Account Management"], "marketing": ["Advertising and Marketing", "Media, PR, and Communications"],
+    "finance_accounting": ["Accounting and Finance"], "hr": ["Human Resources and Recruitment"],
+    "management_ops": ["Business Operations", "Project Management", "Management"], "legal": ["Legal Services"],
+    "food_hospitality": ["Food and Hospitality Services", "Entertainment and Travel Services"], "retail": ["Retail"],
+    "personal_care": ["Personal Care and Services", "Sports, Fitness, and Recreation"],
+    "skilled_trades": ["Installation, Maintenance, and Repairs", "Construction"], "construction": ["Construction"],
+    "manufacturing": ["Manufacturing and Warehouse"], "maintenance_auto": ["Installation, Maintenance, and Repairs"],
+    "logistics": ["Transportation and Logistics", "Manufacturing and Warehouse"], "art_design": ["Design and UX", "Arts"],
+    "writing_media": ["Writing and Editing", "Media, PR, and Communications"], "performing_arts": ["Arts"],
+    "environment_ag": ["Farming and Outdoors", "Animal Care"], "nonprofit": ["Social Services"],
+    "public_safety": ["Protective Services"],
+}
+# Subreddits that carry job posts for a field, added to the general ones in Settings.
+REDDIT_FIELD_SUBS = {**_for(TECH_GENRES, ["techjobs"]), "art_design": ["DesignJobs", "HungryArtists", "gameDevClassifieds"],
+                     "product_design": ["DesignJobs"], "writing_media": ["writingopportunities"]}
+REDDIT_REMOTE_SUBS = ["RemoteJobs"]  # added when Remote is allowed
+# Mastodon hashtags that carry job posts for a field, and instances whose public hashtag timelines see that field's posts.
+MASTODON_FIELD_TAGS = {
+    **_for(TECH_GENRES, ["techjobs"]), "nursing": ["nursingjobs", "nursejobs", "healthcarejobs"],
+    **_for(["allied_health", "physicians", "behavioral_health", "health_admin", "caregiving"], ["healthcarejobs"]),
+    **_for(["teaching", "early_childhood"], ["teachingjobs", "teacherjobs"]), "student_services": ["academicjobs"],
+    "library_museum": ["libraryjobs", "museumjobs"], "research": ["sciencejobs", "academicjobs", "postdoc"],
+    "environment_ag": ["sciencejobs"], "art_design": ["designjobs", "artjobs"], "product_design": ["designjobs"],
+    "writing_media": ["journalismjobs", "journojobs", "writingjobs"], "performing_arts": ["artjobs"], "nonprofit": ["nonprofitjobs"],
+}
+MASTODON_FIELD_INSTANCES = {**_for(TECH_GENRES, ["hachyderm.io", "fosstodon.org"]), "writing_media": ["journa.host"],
+                            "library_museum": ["glammr.us"], "research": ["sciences.social"], "environment_ag": ["sciences.social"]}
+MASTODON_INTERNSHIP_TAGS = ["internship", "internships"]  # added for internship searches
+MASTODON_REMOTE_TAGS = ["remotejobs"]  # added when Remote is allowed
+# We Work Remotely's category feeds for each genre. Fields without their own category read "all other remote jobs", and a
+# user with no fields yet reads the feed of every category.
+WWR_FEED = "https://weworkremotely.com/categories/{}.rss"
+WWR_ALL = "https://weworkremotely.com/remote-jobs.rss"
+WWR_CATEGORIES = {
+    **_for(["swe", "frontend_mobile", "ml_ai", "data", "embedded_hw", "robotics", "systems_test"], ["remote-programming-jobs"]),
+    **_for(["cloud_devops", "cyber", "it_support"], ["remote-devops-sysadmin-jobs"]),
+    "product_design": ["remote-product-jobs", "remote-design-jobs"], "art_design": ["remote-design-jobs"],
+    "customer_service": ["remote-customer-support-jobs"],
+    **_for(["sales", "marketing", "solutions"], ["remote-sales-and-marketing-jobs"]),
+    **_for(["finance_accounting", "management_ops", "hr", "legal", "admin_office"], ["remote-management-and-finance-jobs"]),
+}
+WWR_OTHER = "all-other-remote-jobs"
+
+
+def _field_values(ctx: Ctx, table: dict[str, list[str]], top: int = 4) -> list[str]:
+    """The values `table` gives for the user's strongest fields (plan.fields), without repeats, in field order."""
+    out: list[str] = []
+    for genre in plan.fields(ctx.cfg, top=top):
+        out += [value for value in table.get(genre, []) if value not in out]
+    return out
+
+
+def _remote_allowed(ctx: Ctx) -> bool:
+    """True when the search area allows remote work, decided the way the location filter decides it
+    (textutil.LocationMatcher): "Anywhere in the US" covers every state but not remote jobs, so it doesn't count here.
+    Otherwise the remote boards would collect jobs the filter then drops, every one."""
+    return LocationMatcher(ctx.cfg["locations"]["allowed"]).allow_remote
+
+
+def _places(ctx: Ctx) -> list[str]:
+    """The allowed locations an aggregator's location search can take, sorted the way LocationMatcher sorts them: a
+    nationwide entry ("Anywhere in the US") becomes "United States", since a place search can't read the phrase, and the
+    remote entries are left out. Repeats are dropped."""
+    out: list[str] = []
+    for entry in ctx.cfg["locations"]["allowed"]:
+        if NATIONWIDE.fullmatch(entry.lower().strip()):
+            place = "United States"
+        elif REMOTE_RE.search(entry):
+            continue
+        else:
+            place = entry.strip()
+        if place and place not in out:
+            out.append(place)
+    return out
+
+
+def _level_words(ctx: Ctx) -> list[str]:
+    """Search words for the user's early-career levels: "intern", "apprentice", "entry level" and the like."""
+    picked = set(plan.levels(ctx.cfg))
+    words = {"internship": ["intern", "internship"], "apprenticeship": ["apprentice", "apprenticeship"],
+             "entry": ["entry level", "new grad", "junior"]}
+    return [w for level, ws in words.items() if level in picked for w in ws]
 
 # Besides matching the user's level or roles, a social post must use one of these words to count as a hiring post.
 HIRING_RE = re.compile(r"hiring|opening|apply|position|role|looking for|job", re.I)  # Mastodon and Bluesky
@@ -70,7 +187,11 @@ async def hackernews(ctx: Ctx) -> list[RawJob]:
     2. A search of every comment from the last HN_COMMENT_DAYS days for hiring wording at the user's level ("internship",
        "new grad hiring") or "hiring <query>", which catches offers posted outside the monthly threads.
 
-    Only comments that match _post_re are kept. Titles skip the level check (strict_titles=False)."""
+    Only comments that match _post_re are kept. Titles skip the level check (strict_titles=False). The threads are almost
+    all tech companies hiring tech roles, so this source skips itself unless the user's targets are in tech."""
+    if not plan.in_tech(ctx.cfg):
+        ctx.log("hackernews", "skipped: Hacker News hiring threads are almost all tech jobs, and your targets aren't in tech")
+        return []
     n_threads = int(ctx.cfg["sources"]["hackernews"].get("threads", 2))
     d = await ctx.get_json(f"{HN_API}/search_by_date?tags=story,author_whoishiring&hitsPerPage=12")
     threads = [h for h in d.get("hits", []) if "who is hiring" in h.get("title", "").lower()][:n_threads]
@@ -112,8 +233,8 @@ async def hackernews(ctx: Ctx) -> list[RawJob]:
 # ------------------------------------------------------------------ The Muse
 def _muse_locations(allowed: list[str]) -> list[str]:
     """Turn the allowed locations into values The Muse's location filter knows, which are "City, ST" names. A state becomes
-    up to six well-known cities in it (from core/textutil.CITY_STATE), DC becomes "Washington, DC", anything remote becomes
-    "Flexible / Remote" (The Muse's name for remote work), and anything else is passed as typed."""
+    its largest cities (core/textutil.MAJOR_CITIES), DC becomes "Washington, DC", anything remote becomes "Flexible /
+    Remote" (The Muse's name for remote work), and anything else is passed as typed."""
     out = []
     for a in allowed:
         low = a.lower().strip()
@@ -124,47 +245,51 @@ def _muse_locations(allowed: list[str]) -> list[str]:
         if re.search(r"\bd\.?c\.?\b", low):
             state = "DC"
         if state:
-            cities = [c for c, s in CITY_STATE.items() if s == state and c not in ("washington dc", "washington d.c.")][:6]
-            out += [f"{c.title()}, {state}" for c in cities] + (["Washington, DC"] if state == "DC" else [])
+            out += [f"{city}, {state}" for city in MAJOR_CITIES.get(state, [])]
         else:
             out.append(a)
     return out
 
 
 async def themuse(ctx: Ctx) -> list[RawJob]:
-    """The Muse's public jobs API (no key needed): newest first, filtered to the user's levels and, unless the search area is
+    """The Muse's public jobs API (no key needed): newest first, filtered to the user's levels, to the job categories of
+    their fields (MUSE_CATEGORIES; every category while their fields aren't known) and, unless the search area is
     nationwide, to its locations. Reads up to Settings' page count. Titles skip the level check (strict_titles=False)
     because the API's level filter already applied it."""
     pages = int(ctx.cfg["sources"]["themuse"].get("pages", 8))
     allowed = ctx.cfg["locations"]["allowed"]
     nationwide = any(NATIONWIDE.fullmatch(a.lower().strip()) for a in allowed)
     locations = [] if nationwide else _muse_locations(allowed)
-    # Repeated parameters mean "any of these": level=Internship&level=Entry Level&location=...
-    base = [("level", lv) for lv in muse_levels(plan.levels(ctx.cfg))] + [("descending", "true")] + [("location", loc) for loc in locations]
+    categories = _field_values(ctx, MUSE_CATEGORIES)
+    # Repeated parameters mean "any of these": level=Internship&level=Entry Level&category=Healthcare&location=...
+    base = ([("level", lv) for lv in muse_levels(plan.levels(ctx.cfg))] + [("category", c) for c in categories]
+            + [("descending", "true")] + [("location", loc) for loc in locations])
     out = []
     for page in range(pages):
         d = await ctx.get_json("https://www.themuse.com/api/public/jobs?" + urlencode(base + [("page", page)]))
         for j in d.get("results", []):
             job_locations = [loc.get("name", "") for loc in j.get("locations", [])]
             out.append(RawJob(source="themuse", title=j.get("name", ""), company=(j.get("company") or {}).get("name", ""),
-                              url=(j.get("refs") or {}).get("landing_page", ""), locations=job_locations, location=" | ".join(job_locations),
+                              url=(j.get("refs") or {}).get("landing_page", ""), locations=job_locations,
                               description=html_to_text(j.get("contents", ""))[:12000],
                               posted_at=parse_date(j.get("publication_date")), source_detail="The Muse", strict_titles=False))
         if page + 1 >= d.get("page_count", 0):  # pages are numbered from 0
             break
-    ctx.log("themuse", f"{len(out)} postings")
+    ctx.log("themuse", f"{len(out)} postings" + (f" in {', '.join(categories)}" if categories else ""))
     return out
 
 
 # ------------------------------------------------------------------ USAJobs
 async def usajobs(ctx: Ctx) -> list[RawJob]:
     """USAJobs, the federal government's job board, through its search API. It needs a free API key and the email address the
-    key was issued to (Settings, Sources); without them this source skips itself. The API wants that email as the
+    key was issued to (the Sources dialog); without them this source skips itself. The API wants that email as the
     User-Agent and the key in an Authorization-Key header.
 
-    Searches the first six queries. Early-career users also get the student and recent-graduate hiring paths (Pathways) and
-    intern searches. Each search asks for up to 500 postings (the API's maximum) from the last 60 days. Titles skip the level
-    check (strict_titles=False): federal titles rarely name a level."""
+    Searches the first six queries. Early-career users (every level picked is internship, apprenticeship or entry level)
+    who include internship or entry level also get the student and recent-graduate hiring paths (Pathways) and intern
+    searches, and any search with apprenticeship gets apprentice and trainee roles. Each search asks for up to 500
+    postings (the API's maximum) from the last 60 days. Titles skip the level check (strict_titles=False): federal titles
+    rarely name a level."""
     sc = ctx.cfg["sources"]["usajobs"]
     if not sc.get("api_key") or not sc.get("email"):
         ctx.log("usajobs", "skipped: add a free API key and email in Sources (developer.usajobs.gov/apirequest). "
@@ -172,7 +297,10 @@ async def usajobs(ctx: Ctx) -> list[RawJob]:
         return []
     headers = {"Host": "data.usajobs.gov", "User-Agent": sc["email"], "Authorization-Key": sc["api_key"]}
     searches = [{"Keyword": q} for q in _queries(ctx, 6)]
-    if _early(ctx):
+    picked = set(plan.levels(ctx.cfg))
+    if "apprenticeship" in picked:
+        searches = [{"Keyword": "apprentice"}, {"Keyword": "trainee"}] + searches
+    if picked & {"internship", "entry"} and _early(ctx):
         searches = [{"HiringPath": "student"}, {"HiringPath": "graduates"}, {"Keyword": "intern"}, {"Keyword": "student trainee"}] + searches
     out, seen = [], set()
     for search in searches:
@@ -194,7 +322,7 @@ async def usajobs(ctx: Ctx) -> list[RawJob]:
             out.append(RawJob(source="usajobs", title=m.get("PositionTitle", ""),
                               company=f"{m.get('OrganizationName', '')} ({m.get('DepartmentName', '')})",
                               url=m.get("PositionURI", ""), apply_url=(m.get("ApplyURI") or [None])[0],
-                              locations=locations, location=" | ".join(locations), description=description[:12000],
+                              locations=locations, description=description[:12000],
                               posted_at=parse_date(m.get("PublicationStartDate")),
                               deadline=parse_date(m.get("ApplicationCloseDate")), strict_titles=False,
                               source_detail="USAJobs" + (f" ({search.get('HiringPath')})" if search.get("HiringPath") else "")))
@@ -203,18 +331,27 @@ async def usajobs(ctx: Ctx) -> list[RawJob]:
 
 
 # ------------------------------------------------------------------ Reddit
+def _reddit_subreddits(ctx: Ctx) -> list[str]:
+    """The subreddits to search: the general hiring ones in Settings, then the ones for the user's fields
+    (REDDIT_FIELD_SUBS), then the remote ones when Remote is allowed. Repeats are dropped, ignoring case."""
+    subs = list(ctx.cfg["sources"].get("reddit", {}).get("subreddits") or ["forhire", "jobbit", "hiring"])
+    subs += _field_values(ctx, REDDIT_FIELD_SUBS) + (REDDIT_REMOTE_SUBS if _remote_allowed(ctx) else [])
+    return unique(subs, key=str.lower)
+
+
 async def reddit(ctx: Ctx) -> list[RawJob]:
-    """Reddit search, read through its RSS feeds (no account or key needed). Searches each configured subreddit for hiring
-    words (intern and new-grad words for early-career users), plus two site-wide "<query> hiring <place>" searches. Every
-    search covers the last month, newest first.
+    """Reddit search, read through its RSS feeds (no account or key needed). Searches each subreddit (_reddit_subreddits)
+    for hiring words (with the words of their levels for early-career users: intern, apprentice, new grad), plus two
+    site-wide "<query> hiring <place>" searches. Every search covers the last month, newest first.
 
     Reddit throttles anonymous feed readers hard: one request at a time, 4 to 7 seconds between searches, no retries, an 8
     second wait after a refusal, and after three refusals the rest are skipped (the AI hunt's social mission still covers
     Reddit). Only posts that read like hiring posts at the user's level are kept."""
     ctx.host_limit("www.reddit.com", 1)
-    subreddits = ctx.cfg["sources"].get("reddit", {}).get("subreddits") or ["forhire", "jobbit", "hiring"]
+    subreddits = _reddit_subreddits(ctx)
     if _early(ctx):
-        query = "(intern OR internship OR hiring OR \"new grad\" OR co-op)"
+        words = [f'"{w}"' if " " in w else w for w in _level_words(ctx)]
+        query = "(" + " OR ".join(words + ["hiring"]) + ")"
     else:
         query = "(hiring OR \"we're hiring\" OR \"now hiring\")"
     searches = [(sub, query) for sub in subreddits]
@@ -252,11 +389,25 @@ async def reddit(ctx: Ctx) -> list[RawJob]:
 
 
 # ------------------------------------------------------------------ Mastodon
+def _mastodon_plan(ctx: Ctx) -> tuple[list[str], list[str]]:
+    """(instances, hashtags) to read: the general ones in Settings, plus the instances and hashtags for the user's fields
+    (MASTODON_FIELD_INSTANCES and MASTODON_FIELD_TAGS), internship hashtags for an internship search, and remote ones when
+    Remote is allowed. Repeats are dropped, ignoring case."""
+    sc = ctx.cfg["sources"]["mastodon"]
+    instances = list(sc.get("instances", [])) + _field_values(ctx, MASTODON_FIELD_INSTANCES)
+    tags = list(sc.get("tags", [])) + _field_values(ctx, MASTODON_FIELD_TAGS)
+    if "internship" in plan.levels(ctx.cfg):
+        tags += MASTODON_INTERNSHIP_TAGS
+    if _remote_allowed(ctx):
+        tags += MASTODON_REMOTE_TAGS
+    return unique(instances, key=str.lower), unique(tags, key=str.lower)
+
+
 async def mastodon(ctx: Ctx) -> list[RawJob]:
     """Mastodon hashtag timelines, which are public: GET https://<instance>/api/v1/timelines/tag/<tag>?limit=40 returns a
-    tag's 40 newest posts (40 is the API's maximum). Every configured instance and tag pair is fetched at once. An
+    tag's 40 newest posts (40 is the API's maximum). Every instance and hashtag pair (_mastodon_plan) is fetched at once. An
     unreachable instance is skipped without retries. Only posts that read like hiring posts at the user's level are kept."""
-    sc = ctx.cfg["sources"]["mastodon"]
+    instances, tags = _mastodon_plan(ctx)
 
     async def tag_timeline(instance: str, tag: str) -> tuple[str, list]:
         """(tag, the tag's newest posts on one instance), with no posts when the instance can't be reached."""
@@ -265,7 +416,7 @@ async def mastodon(ctx: Ctx) -> list[RawJob]:
         except Exception:  # noqa: BLE001 (a slow or down instance just contributes nothing)
             return tag, []
 
-    timelines = await asyncio.gather(*(tag_timeline(i, t) for i in sc.get("instances", []) for t in sc.get("tags", [])))
+    timelines = await asyncio.gather(*(tag_timeline(i, t) for i in instances for t in tags))
     post_re = _post_re(ctx)
     out, seen = [], set()
     for tag, statuses in timelines:
@@ -283,14 +434,44 @@ async def mastodon(ctx: Ctx) -> list[RawJob]:
 
 
 # ------------------------------------------------------------------ Remote boards
-async def remote_boards(ctx: Ctx) -> list[RawJob]:
-    """Two remote-only job boards with free public APIs, used only when the search area allows remote work: Remotive,
-    searched once per term (up to 100 results each), and RemoteOK, whose whole feed comes in one request. The board's own
-    location note, such as "USA only", stays in the location so the location filter can judge it."""
-    if not any(re.search(r"remote|anywhere", a, re.I) for a in ctx.cfg["locations"]["allowed"]):
+def _wwr_feeds(ctx: Ctx) -> list[str]:
+    """The We Work Remotely feeds for the user's fields (WWR_CATEGORIES, with "all other remote jobs" for fields that
+    have no category of their own), or the feed of every category while their fields aren't known."""
+    genres = plan.fields(ctx.cfg, top=4)
+    if not genres:
+        return [WWR_ALL]
+    slugs: list[str] = []
+    for genre in genres:
+        slugs += [s for s in WWR_CATEGORIES.get(genre, [WWR_OTHER]) if s not in slugs]
+    return [WWR_FEED.format(slug) for slug in slugs]
+
+
+def _wwr_items(xml: str) -> list[dict]:
+    """We Work Remotely's RSS items: title ("Company: Role"), link, description, date, and the region the job is open to
+    ("USA Only", "Anywhere in the World"). Returns [] for anything that isn't valid XML."""
+    try:
+        root = ET.fromstring(xml.encode() if isinstance(xml, str) else xml)
+    except ET.ParseError:
         return []
     out = []
-    terms = ["intern", "junior", "entry level", "graduate"] if _early(ctx) else _queries(ctx, 4)
+    for item in root.iter("item"):
+        def text(name: str) -> str:
+            child = _child(item, name)
+            return (child.text or "") if child is not None else ""
+        out.append({"title": clean(html_to_text(text("title"))), "link": text("link").strip(), "region": clean(text("region")),
+                    "description": html_to_text(text("description")), "date": parse_date(text("pubDate") or None)})
+    return out
+
+
+async def remote_boards(ctx: Ctx) -> list[RawJob]:
+    """Three remote-only job boards, used only when the search area allows remote work: Remotive's free API, searched once
+    per term; RemoteOK, whose whole feed comes in one request; and We Work Remotely's RSS feeds for the user's fields
+    (_wwr_feeds), whose titles read "Company: Role". The board's own location note, such as "USA only", stays in the
+    location so the location filter can judge it."""
+    if not _remote_allowed(ctx):
+        return []
+    out = []
+    terms = (_level_words(ctx) or ["entry level"]) if _early(ctx) else _queries(ctx, 4)
     for term in terms:
         try:
             d = await ctx.get_json("https://remotive.com/api/remote-jobs?" + urlencode({"search": term, "limit": 100}))
@@ -311,6 +492,17 @@ async def remote_boards(ctx: Ctx) -> list[RawJob]:
                               posted_at=parse_date(j.get("date")), source_detail="RemoteOK"))
     except Exception as e:  # noqa: BLE001 (Remotive's results are still worth returning)
         ctx.log("remote", f"remoteok: {e}", "warn")
+    for feed in _wwr_feeds(ctx):
+        try:
+            items = _wwr_items(await ctx.get_text(feed))
+        except Exception as e:  # noqa: BLE001 (one unreachable feed shouldn't end the others)
+            ctx.log("remote", f"we work remotely: {e}", "warn")
+            continue
+        for item in items:
+            company, _, role = item["title"].partition(": ")
+            out.append(RawJob(source="remote", title=role or company, company=company if role else "", url=item["link"],
+                              location=f"Remote ({item['region']})" if item["region"] else "Remote",
+                              description=item["description"][:10000], posted_at=item["date"], source_detail="We Work Remotely"))
     ctx.log("remote", f"{len(out)} remote postings (pre-filter)")
     return out
 
@@ -350,9 +542,9 @@ def _parse_feed(xml: str) -> list[dict]:
 
 
 async def rss(ctx: Ctx) -> list[RawJob]:
-    """The user's own RSS or Atom feeds (Settings, Sources). Each feed is a plain URL or {"url", "name"}. Every item becomes a
-    job titled with the item's headline. Titles skip the level check (strict_titles=False) because headlines aren't
-    structured job titles."""
+    """The user's own RSS or Atom feeds (the Sources dialog). Each feed is a plain URL or {"url", "name"}. Every item
+    becomes a job titled with the item's headline. Titles skip the level check (strict_titles=False) because headlines
+    aren't structured job titles."""
     out = []
     for feed in ctx.cfg["sources"]["rss"].get("feeds", []):
         url = feed["url"] if isinstance(feed, dict) else feed
@@ -370,14 +562,15 @@ async def rss(ctx: Ctx) -> list[RawJob]:
 
 # ------------------------------------------------------------------ Optional aggregators (the user's own API key)
 async def adzuna(ctx: Ctx) -> list[RawJob]:
-    """Adzuna, a job aggregator with a free API key (Settings, Sources: app_id and app_key); skipped without one. Searches
-    the first four queries in every allowed place except remote ones (the whole United States when only remote is allowed):
-    the first page of Adzuna's US search, 50 results, posted within the last 45 days."""
+    """Adzuna, a job aggregator with a free API key (the Sources dialog: app_id and app_key); skipped without one. Searches
+    the first four queries in every allowed place (_places: remote entries left out, a nationwide one as the United
+    States, and the whole United States when only remote is allowed): the first page of Adzuna's US search, 50 results,
+    posted within the last 45 days."""
     sc = ctx.cfg["sources"]["adzuna"]
     if not (sc.get("app_id") and sc.get("app_key")):
         return []
     out = []
-    places = [a for a in ctx.cfg["locations"]["allowed"] if not re.search("remote", a, re.I)] or ["United States"]
+    places = _places(ctx) or ["United States"]
     for what in _queries(ctx, 4):
         for where in places:
             params = {"app_id": sc["app_id"], "app_key": sc["app_key"], "what": what, "where": where, "max_days_old": 45,
@@ -398,14 +591,14 @@ async def adzuna(ctx: Ctx) -> list[RawJob]:
 
 async def serpapi(ctx: Ctx) -> list[RawJob]:
     """Google Jobs results through SerpAPI, a paid service used with the user's own API key; skipped without one. Searches
-    "<query> <place>" for the first three queries in up to four allowed places, leaving remote places out (so a remote-only
-    search area searches nothing here). English results for the United States. The first apply link Google offers becomes
-    the posting URL."""
+    "<query> <place>" for the first three queries in up to four allowed places (_places: remote ones left out, so a
+    remote-only search area searches nothing here). English results for the United States. The first apply link Google
+    offers becomes the posting URL."""
     sc = ctx.cfg["sources"]["serpapi"]
     if not sc.get("api_key"):
         return []
     out = []
-    places = [a for a in ctx.cfg["locations"]["allowed"] if not re.search("remote", a, re.I)][:4]
+    places = _places(ctx)[:4]
     for q in _queries(ctx, 3):
         for where in places:
             params = {"engine": "google_jobs", "q": f"{q} {where}", "api_key": sc["api_key"], "hl": "en", "gl": "us"}
@@ -426,10 +619,16 @@ async def serpapi(ctx: Ctx) -> list[RawJob]:
 
 # ------------------------------------------------------------------ Bluesky (optional, needs a free app password)
 def _bsky_queries(ctx: Ctx) -> list[str]:
-    """Bluesky search phrases: intern and new-grad hiring phrases for early-career users ("we're hiring" for everyone else),
-    plus "hiring <query>" for the first five queries."""
+    """Bluesky search phrases: hiring phrases for each early-career level the user picked (interns, apprentices, new
+    grads), or "we're hiring" for everyone else, plus "hiring <query>" for the first five queries."""
     roles = _queries(ctx, 5)
-    base = ["hiring interns", "summer intern hiring", "hiring new grad", "co-op hiring"] if _early(ctx) else ["we're hiring"]
+    if _early(ctx):
+        picked = set(plan.levels(ctx.cfg))
+        phrases = {"internship": ["hiring interns", "summer intern hiring"], "apprenticeship": ["hiring apprentices"],
+                   "entry": ["hiring new grad", "entry level hiring"]}
+        base = [p for level, ps in phrases.items() if level in picked for p in ps]
+    else:
+        base = ["we're hiring"]
     return base + [f"hiring {r}" for r in roles]
 
 
