@@ -82,6 +82,7 @@ async function reloadOnboarding() {
     return;
   }
   S.documents = S.onboarding.documents || [];
+  if (S.onboarding.status) onProfileStatus(S.onboarding.status);  // it comes along, so the frame never lags behind
   renderUserButton();
   renderNextStep();
   if (S.route[0] === "home") homeDataChanged();

@@ -100,10 +100,11 @@ async function moveCardBack(id, status) {
 // Opens a lead's full details in a large dialog, on the given tab.
 function openLeadDialog(id, tab) {
   const dialog = openDialog(`<div class="lead-dialog"></div>`, { eyebrow: "LEAD DETAILS", wide: true, guard: true, onClose: () => {
-    closeLeadDetails();
+    if (S.leadView?.box === box) closeLeadDetails();  // unless another page has opened a lead meanwhile
     refreshTracker();
   } });
-  showLeadDetails($(".lead-dialog", dialog), id, { tab, header: true });
+  const box = $(".lead-dialog", dialog);
+  showLeadDetails(box, id, { tab, header: true });
 }
 
 // The "Add a job" dialog: a title and company are enough; a link or the posting lets JobPortal tailor it.

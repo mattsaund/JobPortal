@@ -8,6 +8,15 @@
    APIs: GET /api/stats, POST /api/run and /api/run/stop, POST /api/ai/signin and /api/ai/signout. */
 "use strict";
 
+// Puts html into el only when it changed. Live events redraw the frame often during a search; this way what you're
+// pointing at or typing in (a menu, a focused button) stays as it is.
+function setHtml(el, html) {
+  if (el && el.shownHtml !== html) {
+    el.innerHTML = html;
+    el.shownHtml = html;
+  }
+}
+
 // ---------------------------------------------------------------- the menu
 // The pages in the menu: [route, label, icon]. Settings sits at the bottom of the sidebar.
 const NAV = [["home", "Home", "home"], ["leads", "Leads", "briefcase"], ["tracker", "Tracker", "columns"], ["analysis", "Analysis", "chart"]];
@@ -19,13 +28,15 @@ function renderNav() {
     tracker: stats.followups_due ? `${plural(stats.followups_due, "follow-up")} due` : "" };
   const counts = { leads: stats.ready, tracker: stats.followups_due };
   const page = S.route[0];
-  const item = (key, label, name) => {
-    const on = page === key;
-    const badge = badges[key] ? `<span class="nav-badge" title="${badges[key]}">${counts[key]}<span class="sr-only"> ${badges[key]}</span></span>` : "";
-    return `<a class="nav-item${on ? " active" : ""}" href="#/${key}"${on ? ' aria-current="page"' : ""}>${icon(name)}${label}${badge}</a>`;
-  };
-  $("#navigation").innerHTML = NAV.map(([key, label, name]) => item(key, label, name)).join("");
-  $("#nav-settings").outerHTML = item("settings", "Settings", "settings").replace("<a ", '<a id="nav-settings" ');
+  const inside = (key, label, name) => icon(name) + label
+    + (badges[key] ? `<span class="nav-badge" title="${badges[key]}">${counts[key]}<span class="sr-only"> ${badges[key]}</span></span>` : "");
+  setHtml($("#navigation"), NAV.map(([key, label, name]) => `<a class="nav-item${page === key ? " active" : ""}" href="#/${key}"`
+    + `${page === key ? ' aria-current="page"' : ""}>${inside(key, label, name)}</a>`).join(""));
+  const settings = $("#nav-settings");
+  setHtml(settings, inside("settings", "Settings", "settings"));
+  settings.classList.toggle("active", page === "settings");
+  if (page === "settings") settings.setAttribute("aria-current", "page");
+  else settings.removeAttribute("aria-current");
 }
 
 // ---------------------------------------------------------------- the sidebar card
@@ -59,7 +70,7 @@ function renderNextStep() {
   const [eyebrow, title, text, button] = card;
   const more = agents.length > 5 ? `<li>and ${agents.length - 5} more</li>` : "";
   const working = agents.length ? `<ul class="agent-list">${agents.slice(0, 5).map((label) => `<li><span class="pulse"></span>${esc(label)}</li>`).join("")}${more}</ul>` : "";
-  el.innerHTML = `<span class="eyebrow">${eyebrow}</span><h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ""}${working}${button}`;
+  setHtml(el, `<span class="eyebrow">${eyebrow}</span><h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ""}${working}${button}`);
 }
 
 // ---------------------------------------------------------------- ChatGPT
@@ -75,8 +86,8 @@ function renderSidebarFoot() {
   if (!el) return;
   const tokens = +S.state.tokens || 0;
   const tip = tokens ? ` title="${fmtTokens(tokens)} AI tokens used this session"` : "";
-  el.innerHTML = `<span class="status-dot${aiReady() ? "" : " off"}"></span><span${tip}>${aiReady() ? "ChatGPT connected" : "Not signed in"}</span>`
-    + `<span>v${esc(S.meta?.version || "")}</span>`;
+  setHtml(el, `<span class="status-dot${aiReady() ? "" : " off"}"></span><span${tip}>${aiReady() ? "ChatGPT connected" : "Not signed in"}</span>`
+    + `<span>v${esc(S.meta?.version || "")}</span>`);
 }
 
 // The account button at the right of the top bar. It opens Settings.
@@ -84,8 +95,8 @@ function renderUserButton() {
   const el = $("#user-button");
   if (!el) return;
   const name = yourName();
-  el.innerHTML = `<span class="avatar">${esc(initials(name)) || icon("user")}</span>`
-    + `<span class="user-name"><strong>${esc(name || "Your account")}</strong><small>${aiReady() ? "ChatGPT connected" : "Not signed in"}</small></span>${icon("chevron")}`;
+  setHtml(el, `<span class="avatar">${esc(initials(name)) || icon("user")}</span>`
+    + `<span class="user-name"><strong>${esc(name || "Your account")}</strong><small>${aiReady() ? "ChatGPT connected" : "Not signed in"}</small></span>${icon("chevron")}`);
   el.setAttribute("aria-label", `${name || "Your account"}, settings`);
 }
 
@@ -149,14 +160,14 @@ function renderRunControl() {
   const el = $("#run-control");
   if (!el) return;
   if (S.state.running) {
-    el.innerHTML = `<span class="run-status" title="${esc(runCounts(S.state.counts))}">${spinner()}<span>${esc(runPhase(S.state.phase))}</span></span>`
-      + `<button class="button stop" type="button" data-act="stop">${icon("stop", "filled")}<span>Stop</span></button>`;
+    setHtml(el, `<span class="run-status">${spinner()}<span>${esc(runPhase(S.state.phase))}</span></span>`
+      + `<button class="button stop" type="button" data-act="stop">${icon("stop", "filled")}<span>Stop</span></button>`);
     return;
   }
   const modes = RUN_MODES.map(([mode, label]) => `<button type="button" role="menuitem" data-act="run" data-mode="${mode}">${label}</button>`).join("");
-  el.innerHTML = `<div class="split menu-wrap"><button class="button primary" type="button" data-act="run">${icon("play", "filled")}<span>Run search</span></button>`
+  setHtml(el, `<div class="split menu-wrap"><button class="button primary" type="button" data-act="run">${icon("play", "filled")}<span>Run search</span></button>`
     + `<button class="button primary split-more" type="button" data-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Other ways to run">${icon("chevron")}</button>`
-    + `<div class="menu" role="menu" hidden>${modes}</div></div>`;
+    + `<div class="menu" role="menu" hidden>${modes}</div></div>`);
 }
 
 // Everything in the frame that shows the sign-in, the run or the counts.
@@ -249,11 +260,12 @@ function route() {
   const next = parts.length ? parts : ["home"];
   if (next[0] !== S.route[0]) {
     $$("dialog[open]").forEach((dialog) => dialog.close());
+    if (S.leadView) closeLeadDetails();  // the lead that was open went with the page
     window.scrollTo(0, 0);
   }
   S.route = next;
   renderNav();
-  ROUTES[next[0]](...next.slice(1));
+  Promise.resolve(ROUTES[next[0]](...next.slice(1))).catch((err) => toast("Couldn't show this page", err.message, "error"));
 }
 window.addEventListener("hashchange", route);
 
