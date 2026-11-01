@@ -137,6 +137,17 @@ _Coming soon._
 - **OpenAI's Responses API** through Sign in with ChatGPT
 - **pywebview** for the app window and **PyInstaller** for the release apps
 
+## How it fits together
+
+Our UML architecture diagram from Unit 3. The dashboard talks to a local server on your own computer, and the server's
+packages do the work. The only traffic that leaves your computer is the sign-in and AI requests to OpenAI and the visits
+to job sites.
+
+![UML component diagram of JobPortal](documentation/school/2026-10-31%20UML%20architecture%20diagram.png)
+
+There's a [PDF](documentation/school/2026-10-31%20UML%20architecture%20diagram.pdf) and an
+[SVG](documentation/school/2026-10-31%20UML%20architecture%20diagram.svg) of it too.
+
 ## Your data
 
 Everything stays on your computer, in one folder:
