@@ -166,7 +166,9 @@ function renderListControls(d) {
   $("#lead-count").innerHTML = `<span>${plural(d.leads.length, "lead")} shown</span>${search}${rescore}`;
 }
 
-// A live update for one lead: redraw its card, add it at the top (highlighted), or take it away if it left the filter.
+// A live update for one lead: redraw its card, add it at the top (highlighted), or take it away if it left the filter,
+// the industry picked or the Dream list. With words in the search box, a new lead isn't added here: the refresh that
+// follows every lead event (refreshSoon in live.js) asks the server, which searches more than a card shows.
 function upsertLead(lead) {
   const list = $("#lead-list");
   if (!list) return;
@@ -178,11 +180,14 @@ function upsertLead(lead) {
     refreshOpenCard(card, fresh.content.firstElementChild);
     return;
   }
-  if (!inFilter(lead, S.leadsTab)) {
+  const shown = inFilter(lead, S.leadsTab) && (!S.industry || lead.industry === S.industry) && (!S.dreamOnly || !!lead.dream);
+  if (!shown) {
     card?.remove();
   } else if (card) {
+    const focus = focusKey(card);
     card.replaceWith(fresh.content);
-  } else {
+    refocus(list, focus);
+  } else if (!S.q) {
     $(".empty-state", list)?.remove();
     list.prepend(fresh.content);
   }
