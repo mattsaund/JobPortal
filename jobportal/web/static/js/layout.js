@@ -8,13 +8,16 @@
    APIs: GET /api/stats, POST /api/run and /api/run/stop, POST /api/ai/signin and /api/ai/signout. */
 "use strict";
 
-// Puts html into el only when it changed. Live events redraw the frame often during a search; this way what you're
-// pointing at or typing in (a menu, a focused button) stays as it is.
+// Puts html into el only when it changed. Live events redraw the frame (and parts of pages) often during a search; this
+// way what you're pointing at (a menu, a hovered button) stays as it is. When it does change, a focused button or link
+// inside gets the focus back in the new HTML (focusKey in core.js). Only use it on an element nothing else writes into:
+// it compares with the last HTML it put there, not with what's on screen.
 function setHtml(el, html) {
-  if (el && el.shownHtml !== html) {
-    el.innerHTML = html;
-    el.shownHtml = html;
-  }
+  if (!el || el.shownHtml === html) return;
+  const focus = focusKey(el);
+  el.innerHTML = html;
+  el.shownHtml = html;
+  refocus(el, focus);
 }
 
 // ---------------------------------------------------------------- the menu
@@ -155,19 +158,22 @@ async function refreshStats() {
 // The ways to run a search. The button runs everything; its menu offers the rest.
 const RUN_MODES = [["full", "Run everything"], ["boards", "Job boards only"], ["hunt", "AI hunt only"], ["backlog", "Only the waiting queue"]];
 
-// Run search (with its menu), or Stop while a search runs.
+// Run search (with its menu), or Stop while a search runs. Starting or stopping swaps the buttons; when one of them had
+// the focus, the button that replaces it gets it, so a keyboard user can stop the search they just started.
 function renderRunControl() {
   const el = $("#run-control");
   if (!el) return;
+  const hadFocus = el.contains(document.activeElement);
   if (S.state.running) {
     setHtml(el, `<span class="run-status">${spinner()}<span>${esc(runPhase(S.state.phase))}</span></span>`
       + `<button class="button stop" type="button" data-act="stop">${icon("stop", "filled")}<span>Stop</span></button>`);
-    return;
+  } else {
+    const modes = RUN_MODES.map(([mode, label]) => `<button type="button" role="menuitem" data-act="run" data-mode="${mode}">${label}</button>`).join("");
+    setHtml(el, `<div class="split menu-wrap"><button class="button primary" type="button" data-act="run">${icon("play", "filled")}<span>Run search</span></button>`
+      + `<button class="button primary split-more" type="button" data-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Other ways to run">${icon("chevron")}</button>`
+      + `<div class="menu" role="menu" hidden>${modes}</div></div>`);
   }
-  const modes = RUN_MODES.map(([mode, label]) => `<button type="button" role="menuitem" data-act="run" data-mode="${mode}">${label}</button>`).join("");
-  setHtml(el, `<div class="split menu-wrap"><button class="button primary" type="button" data-act="run">${icon("play", "filled")}<span>Run search</span></button>`
-    + `<button class="button primary split-more" type="button" data-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Other ways to run">${icon("chevron")}</button>`
-    + `<div class="menu" role="menu" hidden>${modes}</div></div>`);
+  if (hadFocus && !el.contains(document.activeElement)) $("button", el)?.focus();
 }
 
 // Everything in the frame that shows the sign-in, the run or the counts.

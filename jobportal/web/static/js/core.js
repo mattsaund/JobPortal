@@ -2,6 +2,8 @@
 
    - Helpers: $ and $$ find elements, esc() makes text safe inside HTML, safeUrl() keeps only web and mail links, api()
      calls the server, store reads and writes browser storage, plus small formatters.
+   - Focus: focusKey() and refocus() keep a keyboard user's place when a live update redraws a part of the page, and
+     typingIn() tells a redraw to leave a text box alone while you type in it.
    - md(): a small Markdown renderer for the text the AI writes.
    - icon(): the line icons of the design, drawn in the color of the text around them.
    - S: the app state that every page reads and writes.
@@ -109,6 +111,33 @@ function setPath(obj, path, value) {
 async function copy(text, label = "Copied") {
   await navigator.clipboard.writeText(text);
   toast(label, text.length > 90 ? text.slice(0, 90) + "…" : text);
+}
+
+// ---------------------------------------------------------------- focus
+// Live updates and saves redraw parts of a page while you may be using them, and replacing HTML drops the focus.
+// focusKey(root) describes the focused element inside root as a CSS selector made of its tag and its id, href, name and
+// data-* attributes ("button[data-act="track-open"][data-id="12"]"), or "" when the focus is elsewhere or the element
+// has none of them. After root is redrawn, refocus(root, key) focuses the element that matches, so a keyboard user keeps
+// their place. It does nothing when something still has the focus.
+const FOCUS_ATTRS = /^(id|href|name|data-[\w-]+)$/;
+function focusKey(root) {
+  const el = document.activeElement;
+  if (!el || el === document.body || !root.contains(el)) return "";
+  const attrs = [...el.attributes].filter((attr) => FOCUS_ATTRS.test(attr.name)).map((attr) => `[${attr.name}="${CSS.escape(attr.value)}"]`);
+  return attrs.length ? el.tagName.toLowerCase() + attrs.join("") : "";
+}
+function refocus(root, key) {
+  const now = document.activeElement;
+  if (!key || (now && now !== document.body && now.isConnected)) return;
+  $(key, root)?.focus({ preventScroll: true });
+}
+
+// True while you're typing in a text box (or text area) inside el. A live redraw keeps such a part as it is, so it never
+// eats what you're typing or moves your cursor. Checkboxes and menus don't count: redrawing those loses nothing.
+const TEXT_INPUT_TYPES = /^(text|search|email|url|tel|number|password|date)$/;
+function typingIn(el) {
+  const now = document.activeElement;
+  return !!(el && now && el.contains(now) && (now.tagName === "TEXTAREA" || (now.tagName === "INPUT" && TEXT_INPUT_TYPES.test(now.type))));
 }
 
 // ---------------------------------------------------------------- formatting
@@ -385,7 +414,10 @@ function toast(title, body = "", level = "", leadId = null, action = null) {
 // one opened from another sits on top of it. Clicks inside run data-act actions like anywhere else.
 // opts: eyebrow (the small heading), wide (a large dialog, for a lead's details), guard (it edits: closing it with
 // unsaved edits asks first, and closing it drops them), onClose (runs once it has closed, whatever closed it).
+// When it closes, the focus goes back to what opened it. The browser does that while the opener is still on the page;
+// when a live update redrew it meanwhile (a Tracker card, the search area card), its twin in the new HTML gets the focus.
 function openDialog(html, opts = {}) {
+  const openerKey = focusKey(document.body), page = main.dataset.page;
   const dialog = document.createElement("dialog");
   dialog.className = opts.wide ? "wide" : "";
   dialog.innerHTML = `<div class="dialog-body"><div class="dialog-top"><span class="eyebrow">${esc(opts.eyebrow || "")}</span>`
@@ -405,6 +437,7 @@ function openDialog(html, opts = {}) {
     }
     dialog.remove();
     if (dialog.jp.onClose) dialog.jp.onClose();
+    if (main.dataset.page === page) refocus(document.body, openerKey);  // not after a move to another page
   });
   document.body.appendChild(dialog);
   dialog.showModal();
