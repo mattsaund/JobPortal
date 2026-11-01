@@ -1,6 +1,8 @@
 /* live.js: the live connection to the server. The server pushes events over Server-Sent Events (GET /api/events, fed by
    core/bus.py): run progress, live feed lines, new and changed leads, profile changes, documents, the ChatGPT sign-in and
-   toasts. onEvent() stores what changed in S and redraws the parts of the frame and of the open page that show it. */
+   toasts. onEvent() stores what changed in S and redraws the parts of the frame and of the open page that show it.
+   Every redraw it starts leaves your unsaved edits alone, and a text box you're typing in (see typingIn in core.js).
+   APIs: GET /api/events, plus what the redraws load (GET /api/stats, the open page's list, GET /api/onboarding). */
 "use strict";
 
 // Opens the event stream. When it drops (the server restarted, the computer slept), it reconnects after 2.5 seconds,
@@ -48,7 +50,7 @@ function onEvent({ kind, data }) {
       break;
     case "lead":  // a lead was added or changed. data is its summary, or null when many leads changed at once.
       if (data && S.route[0] === "leads") upsertLead(data);
-      if (data && S.lead && S.lead.id === data.id) refreshLeadDetails(true);
+      if (data && S.lead && S.lead.id === data.id) refreshLeadDetails(data);
       refreshSoon();
       break;
     case "toast":

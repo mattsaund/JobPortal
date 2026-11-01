@@ -17,6 +17,7 @@ async function renderLeads(id, tab) {
   if (arriving) {
     main.dataset.page = "leads";
     S.expanded = null;
+    if (S.leadView) closeLeadDetails();  // drawn again from scratch (Try again): the old card's details are gone
     main.innerHTML = `<div class="page-heading"><div><p class="eyebrow">YOUR LEADS</p><h1>Leads</h1>
         <p>Every job JobPortal found for you, ranked by how well it fits. Open one to see its tailored resume, cover letter and more.</p></div>
         <div class="heading-actions"><button class="button outline" type="button" data-act="sources">${icon("signal")} Sources</button>
@@ -36,10 +37,10 @@ async function renderLeads(id, tab) {
     $("#live-log").innerHTML = S.logs.map(logLine).join("");
     $("#live-log").scrollTop = 1e9;  // start at the newest line
     await loadLeads();
-    if (S.openSources) {  // an old #/sources link
-      S.openSources = false;
-      openSources().catch((err) => toast("Couldn't open Sources", err.message, "error"));
-    }
+  }
+  if (S.openSources) {  // an old #/sources link, also when it was followed with Leads already open
+    S.openSources = false;
+    openSources().catch((err) => toast("Couldn't open Sources", err.message, "error"));
   }
   await expandLead(id ? +id : null, tab, arriving);
 }
@@ -99,29 +100,52 @@ function inFilter(lead, tab) {
 }
 
 // Loads the open filter's leads (GET /api/leads), then redraws the filters, the counts and the cards. silent = a live
-// refresh: cards that weren't there before get a highlight. The open card stays as it is, with its details and edits.
+// refresh: cards that weren't there before get a highlight.
+// - Only the newest load draws. Typing in the search box or clicking through the filters sends several requests, and
+//   an older answer that came back last would show the wrong list.
+// - The open card is never taken out of the page: the cards around it are replaced, and it moves to its place in the
+//   new order (or stays on top when it left this filter). Taking it out would drop the focus from its editor in the
+//   middle of typing and reload its preview, every few seconds during a search.
+// - A load that fails keeps the list on screen and says so, or, with no list yet, shows the error with Try again.
+let leadsLoad = 0;
 async function loadLeads(silent) {
+  const ticket = ++leadsLoad;
   const params = new URLSearchParams({ tab: S.leadsTab, q: S.q, sort: S.sort, industry: S.industry, dream: S.dreamOnly ? 1 : 0 });
-  const d = await api(`/api/leads?${params}`);
+  let d;
+  try {
+    d = await api(`/api/leads?${params}`);
+  } catch (err) {
+    const list = $("#lead-list");
+    if (!list || ticket !== leadsLoad) return;
+    if (!$(".job-card", list)) list.innerHTML = loadError(err);
+    else if (!silent) toast("Couldn't load your leads", err.message, "error");
+    return;
+  }
   const list = $("#lead-list");
-  if (!list) return;  // you left the page while the list was loading
+  if (!list || ticket !== leadsLoad) return;  // you left the page, or a newer load is on its way
   renderListControls(d);
   const known = new Set($$(".job-card", list).map((card) => +card.dataset.id));
   const openCard = S.expanded && $(`.job-card[data-id="${S.expanded}"]`, list);
   const empty = S.q || S.industry || S.dreamOnly ? "Nothing matches. Try clearing the search or a filter."
     : S.leadsTab === "ready" ? "Run a search. Leads show up here as each one's application is tailored." : "Nothing here right now.";
-  list.innerHTML = d.leads.map((l) => leadCard(l, silent && known.size > 0 && !known.has(l.id))).join("")
-    || `<div class="empty-state"><h3>No leads here</h3><p>${empty}</p></div>`;
-  if (openCard) {
-    const slot = $(`.job-card[data-id="${S.expanded}"]`, list);
+  const html = d.leads.map((l) => leadCard(l, silent && known.size > 0 && !known.has(l.id))).join("");
+  const focus = focusKey(list);
+  if (!openCard) {
+    list.innerHTML = html || `<div class="empty-state"><h3>No leads here</h3><p>${empty}</p></div>`;
+  } else {
+    const fresh = document.createElement("template");
+    fresh.innerHTML = html;
+    const nodes = [...fresh.content.childNodes], slot = $(`.job-card[data-id="${S.expanded}"]`, fresh.content);
+    [...list.childNodes].forEach((node) => node !== openCard && node.remove());
     if (slot) {
       refreshOpenCard(openCard, slot);
-      slot.replaceWith(openCard);
-    } else {  // it left this filter while open: it stays until you close it
-      $(".empty-state", list)?.remove();
-      list.prepend(openCard);
+      openCard.before(...nodes.slice(0, nodes.indexOf(slot)));
+      openCard.after(...nodes.slice(nodes.indexOf(slot) + 1));
+    } else {
+      openCard.after(...nodes);  // it left this filter while open: it stays on top until you close it
     }
   }
+  refocus(list, focus);
 }
 
 // The filter chips with their counts, the industry menu, the Dream list chip and the line that says what's shown.
@@ -142,7 +166,9 @@ function renderListControls(d) {
   $("#lead-count").innerHTML = `<span>${plural(d.leads.length, "lead")} shown</span>${search}${rescore}`;
 }
 
-// A live update for one lead: redraw its card, add it at the top (highlighted), or take it away if it left the filter.
+// A live update for one lead: redraw its card, add it at the top (highlighted), or take it away if it left the filter,
+// the industry picked or the Dream list. With words in the search box, a new lead isn't added here: the refresh that
+// follows every lead event (refreshSoon in live.js) asks the server, which searches more than a card shows.
 function upsertLead(lead) {
   const list = $("#lead-list");
   if (!list) return;
@@ -154,11 +180,14 @@ function upsertLead(lead) {
     refreshOpenCard(card, fresh.content.firstElementChild);
     return;
   }
-  if (!inFilter(lead, S.leadsTab)) {
+  const shown = inFilter(lead, S.leadsTab) && (!S.industry || lead.industry === S.industry) && (!S.dreamOnly || !!lead.dream);
+  if (!shown) {
     card?.remove();
   } else if (card) {
+    const focus = focusKey(card);
     card.replaceWith(fresh.content);
-  } else {
+    refocus(list, focus);
+  } else if (!S.q) {
     $(".empty-state", list)?.remove();
     list.prepend(fresh.content);
   }
@@ -205,11 +234,12 @@ async function expandLead(id, tab, scroll) {
   }
 }
 
-// Closes a card and drops its details. A lead that left the filter while it was open goes away now.
+// Closes a card and drops its details. A lead that left the filter while it was open goes away now. A card that's gone
+// already (deleted for good) still has its details forgotten, so live updates stop redrawing them off screen.
 function collapseLead(id) {
-  const card = $(`.job-card[data-id="${id}"]`);
+  const card = $(`.job-card[data-id="${id}"]`), box = S.leadView?.box;
+  if (box && (!box.isConnected || box.closest(".job-card") === card)) closeLeadDetails();
   if (!card) return;
-  if (S.leadView?.box.closest(".job-card") === card) closeLeadDetails();
   if (!inFilterCard(card)) {
     card.remove();
     return;
@@ -250,11 +280,13 @@ function leadCard(l, fresh) {
     <div class="job-details"${open ? "" : " hidden"}></div></article>`;
 }
 
-// The company's first letter in a tinted square. The tint comes from the name, so a company keeps its color.
+// The company's first letter in a tinted square (the classes tint-0 to tint-2 in style.css). The tint comes from the
+// name, so a company keeps its color. [...name] splits by characters, so a name that starts with an emoji or an accented
+// letter written in two code units keeps its whole first character.
 function companyLogo(company) {
-  const name = String(company || "?").trim() || "?";
-  const tint = [...name].reduce((sum, c) => sum + c.charCodeAt(0), 0) % 3;
-  return `<span class="company-logo tint-${tint}" aria-hidden="true">${esc(name[0].toUpperCase())}</span>`;
+  const letters = [...(String(company || "?").trim() || "?")];
+  const tint = letters.reduce((sum, c) => sum + c.charCodeAt(0), 0) % 3;
+  return `<span class="company-logo tint-${tint}" aria-hidden="true">${esc(letters[0].toUpperCase())}</span>`;
 }
 
 // The small tag after the company: what stage the lead is at, your status, or NEW for a lead found in the last two days.
@@ -272,7 +304,8 @@ function stageTag(l) {
 // Where and when: the location, when it was posted, the deadline and where it was found.
 function leadMeta(l) {
   const items = [`<span>${icon("pin")}${esc(l.location || "Location not given")}</span>`];
-  if (l.posted_at) items.push(`<span>${icon("clock")}Posted ${ago(l.posted_at)}</span>`);
+  const posted = ago(l.posted_at);  // "" when the posting gave a date that can't be read
+  if (posted) items.push(`<span>${icon("clock")}Posted ${posted}</span>`);
   const days = daysUntil(l.deadline);
   if (days != null) {
     const text = days < 0 ? "Deadline passed" : days === 0 ? "Due today" : days === 1 ? "Due tomorrow" : `Due in ${days} days`;
@@ -319,8 +352,9 @@ const FOUND_NAME = { github: "GitHub list", ats: "Company board", linkedin: "Lin
   mastodon: "Mastodon", bluesky: "Bluesky", themuse: "The Muse", usajobs: "USAJobs", remote: "Remote board", rss: "RSS feed",
   adzuna: "Adzuna", google: "Google Jobs", manual: "Your link" };
 
-// The places a lead was found that have a usable link.
-const foundList = (l) => (l.found || []).filter((f) => safeUrl(f.url));
+// The places a lead was found that have a usable link, each with its link as safeUrl() returns it (trimmed, and only
+// web or mail links), so every href built from these is safe.
+const foundList = (l) => (l.found || []).map((f) => ({ ...f, url: safeUrl(f.url) })).filter((f) => f.url);
 
 // A short name for one place. AI hunt finds are named by their site ("Reddit thread"), else by their host.
 function foundShort(f) {

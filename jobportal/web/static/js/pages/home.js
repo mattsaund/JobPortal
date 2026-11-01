@@ -7,7 +7,8 @@
      documents (components/documents.js) and where the search looks.
    APIs: GET /api/onboarding, PATCH /api/onboarding/answers (each answer saves on its own), GET /api/leads (the five best
    ready leads), GET /api/settings (the search area), POST /api/questions/answer and /dismiss, POST /api/profile/build.
-   Live events redraw the parts that changed (live.js). */
+   Live events redraw the parts that changed (live.js). A card you're answering stays as it is through them, and an
+   answer you've typed counts as an unsaved edit until it's saved, skipped or dismissed. */
 "use strict";
 
 // The optional standard questions Home asks after the required ones, in this order: the ones that most improve the
@@ -31,6 +32,7 @@ async function renderHome() {
     return;
   }
   followUpsDone = 0;
+  homeShowsRunning = S.state.running;  // drawn for the run state as it is now (see homeRunChanged)
   main.innerHTML = `<div class="page-heading"><div><p class="eyebrow">YOUR JOB SEARCH</p><h1 id="home-title"></h1><p id="home-sub"></p></div>
       <span class="semester" id="home-status"></span></div>
     <div class="dashboard-layout">
@@ -144,13 +146,14 @@ function renderHomeHeading() {
     : !ob.resume ? "Start with your resume. The rest takes a few minutes."
     : (ob.missing || []).length ? "A few questions and you're ready to search."
     : st.built ? "Here's where your search stands." : "Your profile is almost ready.";
-  // The pill on the right: whether the profile is up to date.
+  // The pill on the right: whether the profile is up to date. (setHtml: redrawn only when it changes, so its spinner
+  // doesn't restart on every status event.)
   let pill = `<span class="status-dot"></span>Profile up to date`;
   if (st.busy) pill = `${spinner()}Updating your profile`;
   else if (st.error) pill = `<span class="status-dot bad"></span>Profile update failed`;
   else if (!st.built) pill = `<span class="status-dot off"></span>Profile not built yet`;
   else if (st.unsynced) pill = `<span class="status-dot warn"></span>${plural(st.unsynced, "answer")} to add`;
-  $("#home-status").innerHTML = pill;
+  setHtml($("#home-status"), pill);
 }
 
 // The three stats. Each one opens where its number comes from.
@@ -160,18 +163,19 @@ function renderHomeStats() {
   const s = S.stats || {};
   const stat = (href, tab, value, label, note, name, tint) => `<a class="stat" href="${href}"${tab ? ` data-act="leads-tab" data-tab="${tab}"` : ""}>`
     + `<span class="stat-icon ${tint}">${icon(name)}</span><span><strong>${value ?? 0}</strong><b>${label}</b><small>${note}</small></span>${icon("arrow")}</a>`;
-  el.innerHTML = stat("#/leads", "ready", s.ready, "Leads ready", "Ranked and tailored for you", "briefcase", "")
+  setHtml(el, stat("#/leads", "ready", s.ready, "Leads ready", "Ranked and tailored for you", "briefcase", "")
     + stat("#/tracker", "", s.applied, "Applications sent", `${s.applied_week ?? 0} in the last 7 days`, "file", "blue")
-    + stat("#/tracker", "", s.interviewing, "Interviews", s.accepted ? `${s.accepted} accepted` : "Going on now", "people", "purple");
+    + stat("#/tracker", "", s.interviewing, "Interviews", s.accepted ? `${s.accepted} accepted` : "Going on now", "people", "purple"));
 }
 
 // ---------------------------------------------------------------- questions for you
 // The cards in the feed, in order: the drop zone (until there's a resume), the profile build (while it runs, when it
 // failed, or just after it's done), then the one thing to do next. Each card has a key; keep marks the ones with inputs,
-// which stay as they are (with whatever you typed) while their key stays the same.
+// which stay as they are (with whatever you typed) while their key stays the same. The resume card is kept too: its
+// file picker may be open, and a new card in its place would lose the files you pick.
 function feedCards() {
   const cards = [];
-  if (!S.onboarding?.resume) cards.push({ key: "resume", html: resumeCard() });
+  if (!S.onboarding?.resume) cards.push({ key: "resume", keep: true, html: resumeCard() });
   const build = buildCard();
   if (build) cards.push(build);
   const next = nextCard();
@@ -179,7 +183,9 @@ function feedCards() {
   return cards;
 }
 
-// Redraws the feed, keeping the cards whose key hasn't changed, so an answer being typed is never wiped.
+// Redraws the feed, keeping the cards whose key hasn't changed, so an answer being typed is never wiped. A card you've
+// typed in is marked data-edited (see the input listener at the bottom); S.dirty says whether one is still on screen,
+// so it clears itself when that card goes (saved, skipped, dismissed, or answered in another window).
 function renderFeed() {
   const box = $("#home-feed");
   if (!box) return;
@@ -195,6 +201,7 @@ function renderFeed() {
     if (card.progress) $(".feed-progress", el).textContent = card.progress;
     return el;
   }));
+  S.dirty = !!$("[data-edited]", box);
 }
 
 // The one thing to do next: check what was read from your resume, answer a standard question, answer a question asked
@@ -339,7 +346,8 @@ function skipQuestion(id) {
 }
 
 // ---------------------------------------------------------------- top leads and the right column
-// The five best ready leads, as job cards (leads.js). A click opens one on the Leads page.
+// The five best ready leads, as job cards (leads.js). A click opens one on the Leads page. Live refreshes during a
+// search redraw them only when they changed (setHtml).
 async function loadTopLeads() {
   let d;
   try {
@@ -351,7 +359,7 @@ async function loadTopLeads() {
   if (!box) return;  // you left Home while they loaded
   const empty = S.profileStatus?.built ? "Run a search, and your best matches show up here."
     : "Once your profile is built, run a search and your best matches show up here.";
-  box.innerHTML = d.leads.map((l) => leadCard(l)).join("") || `<div class="empty-state"><h3>No leads yet</h3><p>${empty}</p></div>`;
+  setHtml(box, d.leads.map((l) => leadCard(l)).join("") || `<div class="empty-state"><h3>No leads yet</h3><p>${empty}</p></div>`);
 }
 
 // Your profile: who you are, what you're after, and the setup checklist with its progress bar.
@@ -366,7 +374,7 @@ function renderProfilePanel() {
     ["Required questions answered", !!ob.resume && !(ob.missing || []).length], ["Profile built", !!st.built]];
   const done = checks.filter(([, ok]) => ok).length, percent = Math.round((done / checks.length) * 100);
   const tag = done === checks.length ? "COMPLETE" : st.busy ? "BUILDING" : "KEEP GOING";
-  el.innerHTML = `<div class="panel-heading"><h2>Your profile</h2><span class="small-tag">${tag}</span></div>
+  setHtml(el, `<div class="panel-heading"><h2>Your profile</h2><span class="small-tag">${tag}</span></div>
     <div class="profile-progress"><span class="avatar large">${esc(initials(name)) || icon("user")}</span>
       <div><strong>${esc(name || "Your name")}</strong><p>${esc(role || "Add the jobs you want")}</p>
         ${place ? `<span class="available"><span class="status-dot"></span>${esc(place)}</span>` : ""}</div></div>
@@ -374,7 +382,7 @@ function renderProfilePanel() {
     <progress value="${done}" max="${checks.length}" aria-label="Profile completion">${percent}%</progress>
     <ul class="checklist">${checks.map(([label, ok]) => `<li><span class="check-circle${ok ? " done" : ""}" aria-hidden="true">${ok ? icon("check") : ""}</span>`
       + `${label}${ok ? '<span class="sr-only">, done</span>' : ""}</li>`).join("")}</ul>
-    <a class="button light full" href="#/settings/profile">Edit your profile ${icon("arrow")}</a>`;
+    <a class="button light full" href="#/settings/profile">Edit your profile ${icon("arrow")}</a>`);
 }
 
 // Where the search looks, with Run search.
@@ -384,8 +392,8 @@ function renderAreaPanel() {
   const run = S.state.running
     ? `<a class="button outline full" href="#/leads">Watch the search ${icon("arrow")}</a>`
     : `<button class="button primary full" type="button" data-act="run">${icon("play", "filled")} Run search</button>`;
-  el.innerHTML = `<div class="panel-heading"><h2>Where to search</h2><a class="text-button" href="#/settings/search">Edit ${icon("arrow")}</a></div>
-    <div class="tags area-tags">${areaTags(S.searchArea)}</div>${run}`;
+  setHtml(el, `<div class="panel-heading"><h2>Where to search</h2><a class="text-button" href="#/settings/search">Edit ${icon("arrow")}</a></div>
+    <div class="tags area-tags">${areaTags(S.searchArea)}</div>${run}`);
 }
 
 // ---------------------------------------------------------------- live updates
@@ -394,8 +402,7 @@ function homeDataChanged() {
   renderHomeHeading();
   renderFeed();
   renderProfilePanel();
-  const docs = $("#home-docs");
-  if (docs && !docs.contains(document.activeElement)) docs.innerHTML = documentsPanel();
+  renderDocumentsPanel($("#home-docs"));
   renderAreaPanel();
 }
 
@@ -412,7 +419,9 @@ function homeStatusChanged() {
   renderProfilePanel();
 }
 
-// A search started or stopped: the buttons that run one change.
+// A search started or stopped: the buttons that run one change. "state" events come often during a search (every
+// phase and count), so this redraws only when running changed from what Home shows. renderHome sets homeShowsRunning,
+// because a search may have started or stopped while you were on another page.
 let homeShowsRunning = null;
 function homeRunChanged() {
   if (homeShowsRunning === S.state.running) return;
@@ -440,7 +449,12 @@ onAction("home-follow", async (el) => {
     return;
   }
   el.disabled = true;
-  const r = await api("/api/questions/answer", { method: "POST", body: { question: el.dataset.q, answer } });
+  let r;
+  try {
+    r = await api("/api/questions/answer", { method: "POST", body: { question: el.dataset.q, answer } });
+  } finally {
+    el.disabled = false;  // the card is replaced when it worked; when it failed, you can try again
+  }
   S.questions = r.questions;
   followUpsDone++;
   onProfileStatus(r.status);
@@ -462,4 +476,12 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || !e.target.matches("#home-feed input[data-qf]")) return;
   e.preventDefault();
   $("[data-act=home-answer]", e.target.closest(".feed-card"))?.click();
+});
+// Typing an answer (or ticking a choice) marks its card as edited: an unsaved edit, so moving away asks first. Picking
+// files in the resume card isn't an edit; they're added at once.
+document.addEventListener("input", (e) => {
+  const card = e.target.type !== "file" && e.target.closest?.("#home-feed > .feed-card");
+  if (!card) return;
+  card.dataset.edited = "1";
+  S.dirty = true;
 });

@@ -38,10 +38,12 @@ async function openSources() {
   drawSources();
 }
 
-// Draws the dialog from S.cfg as it is now, edits included.
+// Draws the dialog from S.cfg as it is now, edits included. A focused button or field gets the focus back: after
+// removing a company board, for one, the focus is on the next board's Remove button.
 function drawSources() {
   const box = $(".sources-dialog .sources-form");
   if (!box) return;
+  const focus = focusKey(box);
   const src = S.cfg.sources, options = sourceOptions(src);
   const sourceRow = ({ key, label }) => {
     const count = sourcesInfo.counts[COLLECTOR_SOURCE[key]];
@@ -62,6 +64,7 @@ function drawSources() {
     ${missionsBlock(src.ai_hunt)}
     <div class="dialog-actions sticky"><button class="button outline" type="button" data-act="close-dialog">Cancel</button>
       <button class="button primary" type="button" data-act="save-sources">Save sources</button></div>`;
+  refocus(box, focus);
 }
 
 // The options under each source that has some, by source key.
@@ -156,6 +159,9 @@ onAction("detect", async () => {  // finds the job board behind a careers page a
   }
   S.cfg.sources.ats_boards.boards.unshift({ ...r.board, name: r.board.name || $("#detect-name").value || r.board.slug || "New company" });
   markCfgEdit("sources.ats_boards.boards");
+  // Drawn before saving too: every board moved down one place, and a field edited during the save must reach its own
+  // board, not the one that used to sit there.
+  drawSources();
   await saveCfg();
   toast("Company added", `${plural(r.count, "job")} on its board (${r.board.ats}).`);
   drawSources();
@@ -181,5 +187,6 @@ onAction("reset-missions", async () => {
   const fresh = await api("/api/settings/reset", { method: "POST", body: { path: "sources.ai_hunt.missions" } });
   S.cfg.sources.ai_hunt.missions = fresh.sources.ai_hunt.missions;
   S.cfgEdits.delete("sources.ai_hunt.missions");
+  S.cfgDirty = S.cfgEdits.size > 0;  // the reset is saved: only other edits are left to save
   drawSources();
 });
