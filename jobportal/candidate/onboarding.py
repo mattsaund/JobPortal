@@ -420,9 +420,10 @@ def _apply_list_change(current: list[str], old: list[str], new: list[str]) -> li
 def apply_to_settings(a: dict, previous: dict | None = None) -> dict:
     """Point the search at the standard answers. Saves the settings and returns them.
 
-    `previous` is the answers as they were before this save. Each setting changes only when the answers it comes from
-    changed (or on the first save), so an edit made on another page (the search area on the Leads page, the Dream list,
-    the title filters in Settings) survives saving the answers again for an unrelated fix.
+    `previous` is the answers as they were last saved (see _last_saved), or None for the first save. Each setting changes
+    only when the answers it comes from changed, or on the first save, so an edit made on another page (the search area
+    on the Leads page, the Dream list, the title filters in Settings) survives saving the answers again for an unrelated
+    fix.
     - search.levels: the experience levels to search. They also set the job-title filters (core/levels.title_filters),
       and the target roles always pass those filters.
     - locations.allowed: the search area (see allowed_locations()).
@@ -468,7 +469,7 @@ def save_answers(raw: dict) -> dict:
     missing = missing_required(answers)
     if missing:
         raise ValueError("Please answer: " + "; ".join(missing))
-    previous = db.kv_get("profile.answers", {})
+    previous = _last_saved(profile_mod.standard_answers())
     answers["_saved_at"] = db.now()
     db.kv_set("profile.answers", answers)
     apply_to_profile(answers)
@@ -481,6 +482,15 @@ def save_answers(raw: dict) -> dict:
 def _plain(answers: dict) -> dict:
     """The answers without the "_" keys (notes like "_saved_at" that aren't answers)."""
     return {key: value for key, value in answers.items() if not key.startswith("_")}
+
+
+def _last_saved(stored: dict) -> dict | None:
+    """The stored answers as the settings last saw them, for apply_to_settings(), or None before the first save.
+
+    Answers can be stored before the answers count as saved: the resume fills in empty ones (_fill_from_resume), and Home
+    saves each one as it's answered (merge_answers). Those never reached the settings, so the first save must apply all
+    of them, not only the ones that differ from what was stored."""
+    return _plain(stored) if stored.get("_saved_at") else None
 
 
 def merge_answers(partial: dict) -> dict:
@@ -509,7 +519,7 @@ def merge_answers(partial: dict) -> dict:
     db.kv_set("profile.answers", {**answers, **meta})
     if complete or was_saved:
         apply_to_profile(answers)
-        apply_to_settings(answers, _plain(current))
+        apply_to_settings(answers, _last_saved(current))
         if was_saved:
             db.kv_set("profile.answers_changed_at", time.time())
         bus.publish("profile", {"ts": db.now(), "mode": "answers"})

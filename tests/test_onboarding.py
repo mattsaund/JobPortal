@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 import pytest
 from conftest import STANDARD_ANSWERS
@@ -139,3 +140,29 @@ def test_answers_saved_one_at_a_time():
     assert out["complete"] and not out["first_complete"] and out["missing"] == ["city"]
     from jobportal.core import db
     assert db.kv_get("profile.answers_changed_at")
+
+
+def test_finishing_setup_one_answer_at_a_time_points_the_search_at_every_answer():
+    # Home saves each answer as it comes. The answers given before the last required one never reached the settings, so
+    # finishing setup must apply them all, not only the last one.
+    onboarding.merge_answers({"name": "Jordan Rivera", "email": "jordan.rivera@example.com", "target_roles": ["Registered Nurse"],
+                              "levels": ["entry"], "locations": ["Columbus, OH"], "dream_companies": ["Example Health"]})
+    onboarding.merge_answers({"city": "Columbus"})
+    onboarding.merge_answers({"work_authorized": "yes"})
+    assert onboarding.merge_answers({"sponsorship": "no"})["first_complete"]
+    cfg = settings.get()
+    assert cfg["search"]["levels"] == ["entry"]
+    assert re.escape("registered nurse") in cfg["filters"]["title_include"]  # the target role always passes the title filter
+    assert cfg["locations"]["allowed"] == ["Columbus, OH", "Remote"]
+    assert cfg["dream_companies"] == ["Example Health"]
+
+
+def test_the_first_full_save_applies_answers_the_resume_filled_in(fake_ai, sample_resume):
+    fake_ai.responses["onboarding-prefill"] = {"state": "Ohio", "target_roles": ["Software Engineer"], "levels": ["internship", "entry"]}
+    asyncio.run(onboarding.import_resume("Jordan Rivera.md", data=sample_resume.encode()))
+    # The form comes back with the pre-filled answers unchanged.
+    onboarding.save_answers({**STANDARD_ANSWERS, "state": "Ohio", "locations": [], "work_modes": ["onsite"],
+                             "target_roles": ["Software Engineer"], "levels": ["internship", "entry"]})
+    cfg = settings.get()
+    assert cfg["locations"]["allowed"] == ["Ohio"]
+    assert cfg["search"]["levels"] == ["internship", "entry"] and cfg["filters"]["title_include"]
