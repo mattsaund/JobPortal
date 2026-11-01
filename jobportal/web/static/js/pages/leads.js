@@ -17,6 +17,7 @@ async function renderLeads(id, tab) {
   if (arriving) {
     main.dataset.page = "leads";
     S.expanded = null;
+    if (S.leadView) closeLeadDetails();  // drawn again from scratch (Try again): the old card's details are gone
     main.innerHTML = `<div class="page-heading"><div><p class="eyebrow">YOUR LEADS</p><h1>Leads</h1>
         <p>Every job JobPortal found for you, ranked by how well it fits. Open one to see its tailored resume, cover letter and more.</p></div>
         <div class="heading-actions"><button class="button outline" type="button" data-act="sources">${icon("signal")} Sources</button>
@@ -99,29 +100,52 @@ function inFilter(lead, tab) {
 }
 
 // Loads the open filter's leads (GET /api/leads), then redraws the filters, the counts and the cards. silent = a live
-// refresh: cards that weren't there before get a highlight. The open card stays as it is, with its details and edits.
+// refresh: cards that weren't there before get a highlight.
+// - Only the newest load draws. Typing in the search box or clicking through the filters sends several requests, and
+//   an older answer that came back last would show the wrong list.
+// - The open card is never taken out of the page: the cards around it are replaced, and it moves to its place in the
+//   new order (or stays on top when it left this filter). Taking it out would drop the focus from its editor in the
+//   middle of typing and reload its preview, every few seconds during a search.
+// - A load that fails keeps the list on screen and says so, or, with no list yet, shows the error with Try again.
+let leadsLoad = 0;
 async function loadLeads(silent) {
+  const ticket = ++leadsLoad;
   const params = new URLSearchParams({ tab: S.leadsTab, q: S.q, sort: S.sort, industry: S.industry, dream: S.dreamOnly ? 1 : 0 });
-  const d = await api(`/api/leads?${params}`);
+  let d;
+  try {
+    d = await api(`/api/leads?${params}`);
+  } catch (err) {
+    const list = $("#lead-list");
+    if (!list || ticket !== leadsLoad) return;
+    if (!$(".job-card", list)) list.innerHTML = loadError(err);
+    else if (!silent) toast("Couldn't load your leads", err.message, "error");
+    return;
+  }
   const list = $("#lead-list");
-  if (!list) return;  // you left the page while the list was loading
+  if (!list || ticket !== leadsLoad) return;  // you left the page, or a newer load is on its way
   renderListControls(d);
   const known = new Set($$(".job-card", list).map((card) => +card.dataset.id));
   const openCard = S.expanded && $(`.job-card[data-id="${S.expanded}"]`, list);
   const empty = S.q || S.industry || S.dreamOnly ? "Nothing matches. Try clearing the search or a filter."
     : S.leadsTab === "ready" ? "Run a search. Leads show up here as each one's application is tailored." : "Nothing here right now.";
-  list.innerHTML = d.leads.map((l) => leadCard(l, silent && known.size > 0 && !known.has(l.id))).join("")
-    || `<div class="empty-state"><h3>No leads here</h3><p>${empty}</p></div>`;
-  if (openCard) {
-    const slot = $(`.job-card[data-id="${S.expanded}"]`, list);
+  const html = d.leads.map((l) => leadCard(l, silent && known.size > 0 && !known.has(l.id))).join("");
+  const focus = focusKey(list);
+  if (!openCard) {
+    list.innerHTML = html || `<div class="empty-state"><h3>No leads here</h3><p>${empty}</p></div>`;
+  } else {
+    const fresh = document.createElement("template");
+    fresh.innerHTML = html;
+    const nodes = [...fresh.content.childNodes], slot = $(`.job-card[data-id="${S.expanded}"]`, fresh.content);
+    [...list.childNodes].forEach((node) => node !== openCard && node.remove());
     if (slot) {
       refreshOpenCard(openCard, slot);
-      slot.replaceWith(openCard);
-    } else {  // it left this filter while open: it stays until you close it
-      $(".empty-state", list)?.remove();
-      list.prepend(openCard);
+      openCard.before(...nodes.slice(0, nodes.indexOf(slot)));
+      openCard.after(...nodes.slice(nodes.indexOf(slot) + 1));
+    } else {
+      openCard.after(...nodes);  // it left this filter while open: it stays on top until you close it
     }
   }
+  refocus(list, focus);
 }
 
 // The filter chips with their counts, the industry menu, the Dream list chip and the line that says what's shown.
