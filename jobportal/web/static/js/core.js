@@ -13,7 +13,8 @@
 
    How clicks work: any element with data-act="name" runs the handler registered with onAction("name", fn), wherever it
    is: a page in <main>, a dialog, the sidebar or the top bar. Each file registers its own handlers at the bottom, and
-   main.js holds the one listener that calls them. */
+   main.js holds the one listener that calls them.
+   APIs: only POST /api/open-external (openUrl, in a browser app window). Everything else calls the server through api(). */
 "use strict";
 
 // ---------------------------------------------------------------- helpers
@@ -342,7 +343,7 @@ const S = {
   industries: null,       // the industry list from Settings, for the lead details' industry menu
   profileCache: null,     // GET /api/profile, kept for the Application kit and Settings, Profile (reset on "profile")
   route: [],              // the current hash split into parts: #/leads/12/emails is ["leads", "12", "emails"]
-  dirty: false,           // the open editor or form has unsaved edits
+  dirty: false,           // unsaved edits on screen: an editor, a form, a lead's notes, an answer typed on Home
   quit: false,            // you quit JobPortal from Settings: don't reconnect the live stream
   notify: store.get("notify") === "1",  // system notifications for toasts while JobPortal is in the background
   // Leads page (leads.js). The filter and the feed's open state are remembered.

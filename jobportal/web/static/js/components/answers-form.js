@@ -1,7 +1,8 @@
 /* answers-form.js: the standard questions. The full form (Settings, Profile, Standard answers) and the input for one
    question (Home asks them one at a time, and checks what it read from your resume). The questions come from the server
    (GET /api/onboarding returns them as sections of fields with an id, label, type, options, help, placeholder and
-   required), so adding a question needs no change here: see QUESTIONS in candidate/onboarding.py. */
+   required), so adding a question needs no change here: see QUESTIONS in candidate/onboarding.py.
+   No API calls of its own: home.js and profile.js load the questions and save the answers. */
 "use strict";
 
 // The input for one question, by its type: text, email, tel, url, select (pick one), multi (pick several), list (one
