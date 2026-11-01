@@ -50,7 +50,7 @@ def _norm(text: str) -> str:
 
 def _listed_skills(resume: dict) -> list[str]:
     """Every skill named in the resume's Skills sections. A line like "**Languages:** Python, SQL" loses its bold label, then
-    splits at commas, semicolons and middle dots."""
+    splits at commas, semicolons and middle dots, except inside parentheses: "Python (pandas, NumPy)" is one skill."""
     skills = []
     for section in resume["sections"]:
         if "skill" not in section["title"].lower() and "competenc" not in section["title"].lower():
@@ -58,20 +58,28 @@ def _listed_skills(resume: dict) -> list[str]:
         for entry in section["entries"]:
             for _, text in entry:
                 body = re.sub(r"\*\*", "", re.sub(r"^\*\*[^*]+\*\*:?\s*", "", text))
-                skills += [item.strip(" .") for item in re.split(r",|;|\u00b7", body) if item.strip(" .")]
+                skills += [item.strip(" .") for item in re.split(r"[,;\u00b7](?![^()]*\))", body) if item.strip(" .")]
     return skills
+
+
+def _has_words(text: str, words: str) -> bool:
+    """True when the normalized `words` appear in the normalized `text` as whole words ("react" in "react native", but
+    never "java" in "javascript" or "r" in "docker")."""
+    return f" {words} " in f" {text} "
 
 
 def _in_inventory(skill: str, inventory_names: list[str]) -> bool:
     """Whether a listed skill matches an inventory skill, loosely. Parentheses on the resume side are ignored ("Python
     (pandas)" is Python), an inventory name splits into its parts ("HTML/CSS" covers both), and a name longer than three
-    letters also matches as part of a longer one ("React" and "React Native")."""
+    letters also matches as whole words inside a longer one ("React" and "React Native"). Short names (R, C, Go, Git)
+    must match exactly: inside other words they would vouch for skills the profile never showed."""
     wanted = _norm(re.sub(r"\(.*?\)", "", skill))
     if not wanted:
         return True
     for name in inventory_names:
         parts = [_norm(p) for p in re.split(r"/|\(|\)|,| and ", name) if _norm(p)]
-        if wanted == _norm(name) or any(wanted == p or (len(wanted) > 3 and (wanted in p or p in wanted)) for p in parts):
+        if wanted == _norm(name) or any(wanted == p or (len(p) > 3 and _has_words(wanted, p))
+                                        or (len(wanted) > 3 and _has_words(p, wanted)) for p in parts):
             return True
     return False
 

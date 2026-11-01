@@ -60,6 +60,18 @@ def test_resume_check(sample_resume):
     assert "2 pages" in texts and "Non-standard heading" in texts and "first person" in texts
 
 
+def test_short_inventory_skills_only_vouch_for_themselves():
+    def unverified(skills_line: str, inventory: list[str]) -> list[str]:
+        md = f"# Jordan Rivera\njordan.rivera@example.com\n\n## Skills\n{skills_line}"
+        return resumecheck.check(md, inventory=[{"skill": s, "level": "strong"} for s in inventory])["unverified_skills"]
+
+    # Before: R vouched for Docker, Go for Django and Google Cloud, Java for JavaScript, Git for Digital Marketing.
+    assert unverified("Docker, Django, Google Cloud, JavaScript, Digital Marketing", ["R", "Go", "Java", "Git", "C"]) == [
+        "Docker", "Django", "Google Cloud", "JavaScript", "Digital Marketing"]
+    assert unverified("R, Go, React Native, Microsoft Excel, Python (pandas, NumPy)", ["R", "Go", "React", "Excel", "Python"]) == []
+    assert unverified("Excel", ["Microsoft Excel"]) == []  # a longer name still covers its last word
+
+
 def test_roman_numerals_are_not_first_person(sample_resume):
     courses = sample_resume.replace("Operating Systems", "Calculus I, Physics I and II, File I/O")
     assert not any("first person" in i["text"] for i in resumecheck.check(courses)["issues"])
