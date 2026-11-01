@@ -56,15 +56,25 @@ def _tidy(text: str) -> str:
 def pdf_text(data: bytes) -> str:
     """Text of every page. A PDF has no lines or paragraphs, only pieces of text placed at positions on the page. pypdf's
     layout mode rebuilds lines from those positions and keeps the columns of a two-column resume apart; the plain mode is
-    the fallback for files the stricter layout mode can't handle. A scanned PDF holds only images and yields no text."""
+    the fallback for files the stricter layout mode can't handle. A scanned PDF holds only images and yields no text.
+
+    Raises ExtractError for a protected PDF: one that needs a password, or one encrypted with AES, which pypdf can only
+    open with the optional cryptography package (not a JobPortal dependency)."""
     from pypdf import PdfReader
+    from pypdf.errors import DependencyError, FileNotDecryptedError
     pages = []
-    for page in PdfReader(io.BytesIO(data)).pages:
-        try:
-            text = page.extract_text(extraction_mode="layout")
-        except Exception:  # noqa: BLE001 (layout mode is stricter; plain mode reads anything)
-            text = page.extract_text()
-        pages.append(text or "")
+    try:
+        for page in PdfReader(io.BytesIO(data)).pages:
+            try:
+                text = page.extract_text(extraction_mode="layout")
+            except (DependencyError, FileNotDecryptedError):
+                raise
+            except Exception:  # noqa: BLE001 (layout mode is stricter; plain mode reads anything)
+                text = page.extract_text()
+            pages.append(text or "")
+    except (DependencyError, FileNotDecryptedError) as e:
+        raise ExtractError("that PDF is protected (it has a password or editing restrictions), so its text can't be read. "
+                           "Open it, save or print it as a new PDF, or export it as DOCX, and import that instead.") from e
     return "\n\n".join(pages)
 
 

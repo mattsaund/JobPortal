@@ -130,6 +130,17 @@ def test_rejects_empty_and_unknown_files():
         extract.extract_text("photo.png", b"\x89PNG" + b"0" * 200)
 
 
+def test_a_protected_pdf_gets_a_message_the_user_can_act_on():
+    from pypdf import PdfReader, PdfWriter
+    writer = PdfWriter()
+    writer.append(PdfReader(io.BytesIO(make_pdf(LINES))))
+    writer.encrypt(user_password="secret", algorithm="RC4-128")  # RC4 needs no extra packages to write
+    locked = io.BytesIO()
+    writer.write(locked)
+    with pytest.raises(extract.ExtractError, match="PDF is protected"):  # not "FileNotDecryptedError: ..."
+        extract.extract_text("resume.pdf", locked.getvalue())
+
+
 @pytest.mark.parametrize("exit_code, written", [
     # What LibreOffice writes for a damaged .doc it opens as plain text: the raw bytes, with control bytes shown as "#".
     (0, ("ÐÏ#à¡±#á" + "#" * 16 + ";###þ?\t" + "#" * 30).encode() * 20),
