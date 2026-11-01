@@ -507,6 +507,23 @@ function saveOnCtrlS(textarea, save) {
   });
 }
 
+// The Save of both editors: saves the text with o.save and says so in the toolbar (state). Returns false when it failed,
+// after a toast that says why: the editor's own buttons and Ctrl+S run outside the action registry, so nothing else
+// would show the error. Text typed while the save was on its way stays an unsaved edit.
+async function saveEditor(o, editor, state) {
+  const text = editor.value;
+  try {
+    await o.save(text);
+  } catch (err) {
+    state.textContent = "Not saved";
+    toast("Couldn't save it", err.message, "error");
+    return false;
+  }
+  S.dirty = editor.value !== text;
+  state.textContent = S.dirty ? "Not saved yet" : "Saved";
+  return true;
+}
+
 // "Revise with AI" in both editors: sends the text and your instruction (POST .../revise) and puts the AI's version in
 // the editor. Nothing is saved until you click Save.
 async function reviseWithAI(button, url, doc, instruction, textarea, afterRevise) {
@@ -537,24 +554,20 @@ function mountDocEditor(container, o) {
     <div class="editor"><textarea class="editor-text" spellcheck="true" aria-label="Text">${esc(o.text)}</textarea><div class="block prose editor-preview"></div></div>`;
   const editor = $(".editor-text", container), preview = $(".editor-preview", container), state = $("[data-state]", container);
   const draw = () => (preview.innerHTML = md(editor.value));
-  const save = async () => {
-    await o.save(editor.value);
-    S.dirty = false;
-    state.textContent = "Saved";
-  };
-  editor.addEventListener("input", debounce(() => {
-    S.dirty = true;
+  const drawSoon = debounce(draw, 150);
+  const save = () => saveEditor(o, editor, state);
+  editor.addEventListener("input", () => {
+    S.dirty = true;  // at once, not with the preview: leaving right after typing must still ask first
     state.textContent = "Not saved yet";
-    draw();
-  }, 150));
+    drawSoon();
+  });
   saveOnCtrlS(editor, save);
   container.onclick = async (e) => {
     const button = e.target.closest("[data-de]");
     if (!button) return;
     const what = button.dataset.de;
     if (what === "save") save();
-    if (what === "exp") {
-      if (S.dirty) await save();  // download what you see
+    if (what === "exp" && (!S.dirty || (await save()))) {  // download what you see
       openUrl(`/api/leads/${o.leadId}/export/${o.stem}.${button.dataset.fmt}`);
     }
     if (what === "revise") {
@@ -574,8 +587,9 @@ const PAGE_W = 816, PAGE_H = 1056;
 // the page exactly as its PDF will look on the right (POST /api/preview renders it on the server).
 // o: { doc ("resume" or "cover"), text, save(text), files (download names), leadId, theme, maxPages, original (the AI's
 //      version, for Revert), tools (more toolbar buttons), coverage (keyword tags), reviseUrl and fileHref (saved resumes) }
-// It adds o.refresh() (redraw the preview), o.saveNow() and o.text() (what's in the editor), and keeps o in S.editor
-// for the layout menu and Re-check.
+// It adds o.refresh() (redraw the preview), o.saveNow(), o.text() (what's in the editor) and o.setPages(n) (a new page
+// limit: the preview gets taller or shorter, and the text stays as it is), and keeps o in S.editor for the layout menu
+// and Re-check.
 function mountEditor(container, o) {
   container.innerHTML = `<div class="toolbar">
       <button class="button primary" type="button" data-ed="save">Save</button>
@@ -588,30 +602,49 @@ function mountEditor(container, o) {
     <div class="editor"><textarea class="editor-text" spellcheck="true" aria-label="${o.doc === "cover" ? "Cover letter" : "Resume"} text">${esc(o.text)}</textarea>
       <div class="preview"><div class="preview-page"><iframe sandbox="allow-same-origin" title="Preview"></iframe></div></div></div>`;
   const editor = $(".editor-text", container), frame = $("iframe", container), state = $("[data-state]", container);
-  const wrap = $(".preview", container), page = $(".preview-page", container);
-  const pages = Math.max(1, +o.maxPages || 1);
-  frame.style.height = `${PAGE_H * pages}px`;
+  const wrap = $(".preview", container), page = $(".preview-page", container), fitTag = $("[data-fit]", container);
+  let pages = Math.max(1, +o.maxPages || 1);
   // Shrink the full-size page to the width of the preview column.
   const scale = () => {
     const s = Math.min(1, (wrap.clientWidth - 28) / PAGE_W);
+    frame.style.height = `${PAGE_H * pages}px`;
     frame.style.transform = `scale(${s})`;
     page.style.width = `${PAGE_W * s}px`;
     page.style.height = `${PAGE_H * pages * s}px`;
   };
+  // Typing sends a preview request every pause, and they can come back out of order: only the newest one is shown. A
+  // failed one leaves the last good preview up and says so in the toolbar; the next edit tries again.
+  let newest = 0;
   const refresh = async () => {
-    frame.srcdoc = await api("/api/preview", { method: "POST", body: { doc: o.doc, md: editor.value, lead_id: o.leadId, theme: o.theme } });
-    frame.onload = () => showFit(frame, o.doc, pages, $("[data-fit]", container));
+    const ticket = ++newest;
+    let html;
+    try {
+      html = await api("/api/preview", { method: "POST", body: { doc: o.doc, md: editor.value, lead_id: o.leadId, theme: o.theme } });
+    } catch (_) {
+      if (ticket !== newest) return;
+      fitTag.hidden = false;
+      fitTag.className = "tag bad";
+      fitTag.textContent = "The preview didn't update";
+      return;
+    }
+    if (ticket !== newest) return;
+    frame.onload = () => showFit(frame, o.doc, pages, fitTag);
+    frame.srcdoc = html;
   };
   const later = debounce(refresh, 350);
   const save = async () => {
-    await o.save(editor.value);
-    S.dirty = false;
-    state.textContent = "Saved";
-    if (o.doc === "resume" && o.leadId) recheckResume(o.leadId);
+    const saved = await saveEditor(o, editor, state);
+    if (saved && o.doc === "resume" && o.leadId) recheckResume(o.leadId);
+    return saved;
   };
   o.refresh = refresh;
   o.saveNow = save;
   o.text = () => editor.value;
+  o.setPages = (n) => {
+    pages = Math.max(1, +n || 1);
+    scale();
+    refresh();
+  };
   S.editor = o;
   editor.addEventListener("input", () => {
     S.dirty = true;
@@ -624,8 +657,7 @@ function mountEditor(container, o) {
     if (!button) return;
     const what = button.dataset.ed;
     if (what === "save") save();
-    if (what === "file") {
-      if (S.dirty) await save();  // download what you see
+    if (what === "file" && (!S.dirty || (await save()))) {  // download what you see
       openUrl(o.fileHref ? o.fileHref(button.dataset.file) : `/api/leads/${o.leadId}/export/${button.dataset.file}`);
     }
     if (what === "revert" && confirm("Replace what's in the editor with the AI's original version?")) {
@@ -642,7 +674,9 @@ function mountEditor(container, o) {
       });
     }
   };
-  new ResizeObserver(scale).observe(wrap);
+  // Rescale when the column changes width. Once the editor is gone (another tab, a redraw), the observer lets go of it.
+  const resized = new ResizeObserver(() => (wrap.isConnected ? scale() : resized.disconnect()));
+  resized.observe(wrap);
   scale();
   refresh();
 }
