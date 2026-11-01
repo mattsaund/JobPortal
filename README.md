@@ -115,9 +115,10 @@ _Coming soon._
 
 ### Course deliverables (from the assignment PDFs)
 
-- [ ] Unit 3: system design spec with a UML architecture diagram, interface contracts (API endpoints, request and
-      response formats, errors; FastAPI serves them at http://127.0.0.1:8788/docs) and a 500-word design rationale. The
-      ARCHITECTURE.md we removed is in the git history and makes a good start.
+- [ ] Unit 3: system design spec. The UML architecture diagram is done: `documentation/school/2026-10-31 UML architecture
+      diagram` (PDF, PNG and SVG). Still to do: interface contracts (API endpoints, request and response formats, errors;
+      FastAPI serves them at http://127.0.0.1:8788/docs) and a 500-word design rationale. The ARCHITECTURE.md we removed is
+      in the git history and makes a good start.
 - [ ] Unit 5: everyone commits and reviews pull requests, each of us peer reviews one teammate's module, and each writes a
       250-word refinement report on technical debt
 - [ ] Unit 8: API docs, an installation guide and a user manual, CI/CD screenshots, a test coverage report, performance

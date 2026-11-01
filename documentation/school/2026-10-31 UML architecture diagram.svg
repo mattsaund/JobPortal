@@ -1,0 +1,253 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1660" height="1370" viewBox="0 0 1660 1370">
+<rect width="1660" height="1370" fill="#fff"/>
+<rect x="10" y="10" width="1640" height="1350" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="10,42 300,42 316,26 316,10" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="20" y="31" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start">cmp JobPortal architecture</text>
+<circle cx="165" cy="197" r="11" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<line x1="165" y1="208" x2="165" y2="241" stroke="#000" stroke-width="1.2"/>
+<line x1="143" y1="219" x2="187" y2="219" stroke="#000" stroke-width="1.2"/>
+<line x1="165" y1="241" x2="148" y2="268" stroke="#000" stroke-width="1.2"/>
+<line x1="165" y1="241" x2="182" y2="268" stroke="#000" stroke-width="1.2"/>
+<text x="165" y="286" font-family="Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle">Job seeker</text>
+<polygon points="340,95 356,79 1306,79 1290,95" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<polygon points="1290,95 1306,79 1306,1294 1290,1310" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="340" y="95" width="950" height="1215" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="354" y="115" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">«device»</text>
+<text x="354" y="132" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start">User's computer</text>
+<polygon points="380,170 390,160 1260,160 1250,170" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<polygon points="1250,170 1260,160 1260,300 1250,310" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="380" y="170" width="870" height="140" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="394" y="190" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">«executionEnvironment»</text>
+<text x="394" y="207" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start">App window</text>
+<text x="394" y="224" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">{native window, app mode or browser tab}</text>
+<rect x="700" y="190" width="360" height="96" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1035" y="198" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1030" y="202" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1030" y="210" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="880.0" y="210" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«component»</text>
+<text x="880.0" y="228" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">Dashboard</text>
+<line x1="700" y1="240" x2="1060" y2="240" stroke="#000" stroke-width="1.2"/>
+<text x="710" y="258" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">index.html, style.css, js/</text>
+<text x="710" y="274" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">pages: Home, Leads, Tracker, Analysis, Settings</text>
+<line x1="187" y1="240" x2="700" y2="240" stroke="#000" stroke-width="1.2"/>
+<text x="265" y="233" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">uses</text>
+<polygon points="380,395 390,385 1260,385 1250,395" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<polygon points="1250,395 1260,385 1260,1135 1250,1145" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="380" y="395" width="870" height="750" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="394" y="415" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">«executionEnvironment»</text>
+<text x="394" y="432" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start">JobPortal server</text>
+<text x="394" y="449" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">{Python, FastAPI, 127.0.0.1:8788}</text>
+<rect x="410" y="460" width="230" height="80" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="615" y="468" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="610" y="472" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="610" y="480" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="525.0" y="480" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«component»</text>
+<text x="525.0" y="498" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">app</text>
+<line x1="410" y1="510" x2="640" y2="510" stroke="#000" stroke-width="1.2"/>
+<text x="420" y="528" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">cli.py, desktop.py, doctor.py</text>
+<rect x="700" y="460" width="320" height="80" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="995" y="468" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="990" y="472" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="990" y="480" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="860.0" y="480" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«component»</text>
+<text x="860.0" y="498" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">web</text>
+<line x1="700" y1="510" x2="1020" y2="510" stroke="#000" stroke-width="1.2"/>
+<text x="710" y="528" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">server.py, common.py, routes/</text>
+<line x1="780" y1="286" x2="780" y2="337" stroke="#000" stroke-width="1.2"/>
+<path d="M 767,350 A 13 13 0 0 1 793,350" fill="none" stroke="#000" stroke-width="1.2"/>
+<circle cx="780" cy="350" r="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<line x1="780" y1="358" x2="780" y2="460" stroke="#000" stroke-width="1.2"/>
+<text x="802" y="347" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="bold" text-anchor="start">REST API</text>
+<text x="802" y="363" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">(JSON, /api/*)</text>
+<line x1="940" y1="286" x2="940" y2="337" stroke="#000" stroke-width="1.2"/>
+<path d="M 927,350 A 13 13 0 0 1 953,350" fill="none" stroke="#000" stroke-width="1.2"/>
+<circle cx="940" cy="350" r="8" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<line x1="940" y1="358" x2="940" y2="460" stroke="#000" stroke-width="1.2"/>
+<text x="962" y="347" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="bold" text-anchor="start">Event stream</text>
+<text x="962" y="363" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">(SSE, /api/events)</text>
+<polyline points="640,505 700,505" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="700" y1="505" x2="689.4" y2="499.4" stroke="#000" stroke-width="1.2"/>
+<line x1="700" y1="505" x2="689.4" y2="510.6" stroke="#000" stroke-width="1.2"/>
+<text x="670" y="498" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">starts</text>
+<polyline points="610,460 610,310" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="610" y1="310" x2="604.4" y2="320.6" stroke="#000" stroke-width="1.2"/>
+<line x1="610" y1="310" x2="615.6" y2="320.6" stroke="#000" stroke-width="1.2"/>
+<text x="602" y="350" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="end">opens</text>
+<rect x="410" y="594" width="170" height="24" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="410" y="618" width="620" height="320" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="420" y="611" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start">domain</text>
+<rect x="430" y="650" width="260" height="96" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="665" y="658" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="660" y="662" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="660" y="670" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="560.0" y="670" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«component»</text>
+<text x="560.0" y="688" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">search</text>
+<line x1="430" y1="700" x2="690" y2="700" stroke="#000" stroke-width="1.2"/>
+<text x="440" y="718" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">pipeline.py, plan.py, packages.py,</text>
+<text x="440" y="734" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">sources.py, collectors/</text>
+<rect x="750" y="650" width="260" height="80" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="985" y="658" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="980" y="662" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="980" y="670" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="880.0" y="670" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«component»</text>
+<text x="880.0" y="688" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">insights</text>
+<line x1="750" y1="700" x2="1010" y2="700" stroke="#000" stroke-width="1.2"/>
+<text x="760" y="718" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">analysis.py</text>
+<rect x="430" y="805" width="260" height="112" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="665" y="813" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="660" y="817" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="660" y="825" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="560.0" y="825" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«component»</text>
+<text x="560.0" y="843" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">documents</text>
+<line x1="430" y1="855" x2="690" y2="855" stroke="#000" stroke-width="1.2"/>
+<text x="440" y="873" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">extract.py, render.py,</text>
+<text x="440" y="889" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">resumecheck.py, exports.py,</text>
+<text x="440" y="905" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">revise.py</text>
+<rect x="750" y="805" width="260" height="96" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="985" y="813" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="980" y="817" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="980" y="825" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="880.0" y="825" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«component»</text>
+<text x="880.0" y="843" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">candidate</text>
+<line x1="750" y1="855" x2="1010" y2="855" stroke="#000" stroke-width="1.2"/>
+<text x="760" y="873" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">onboarding.py, profile.py,</text>
+<text x="760" y="889" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">documents.py, library.py</text>
+<polyline points="560,746 560,805" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="560" y1="805" x2="565.6" y2="794.4" stroke="#000" stroke-width="1.2"/>
+<line x1="560" y1="805" x2="554.4" y2="794.4" stroke="#000" stroke-width="1.2"/>
+<polyline points="880,730 880,805" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="880" y1="805" x2="885.6" y2="794.4" stroke="#000" stroke-width="1.2"/>
+<line x1="880" y1="805" x2="874.4" y2="794.4" stroke="#000" stroke-width="1.2"/>
+<polyline points="690,735 765,805" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="765" y1="805" x2="761.1" y2="793.7" stroke="#000" stroke-width="1.2"/>
+<line x1="765" y1="805" x2="753.4" y2="801.9" stroke="#000" stroke-width="1.2"/>
+<polyline points="750,860 690,860" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="690" y1="860" x2="700.6" y2="865.6" stroke="#000" stroke-width="1.2"/>
+<line x1="690" y1="860" x2="700.6" y2="854.4" stroke="#000" stroke-width="1.2"/>
+<polyline points="860,552 860,618" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="860" y1="618" x2="865.6" y2="607.4" stroke="#000" stroke-width="1.2"/>
+<line x1="860" y1="618" x2="854.4" y2="607.4" stroke="#000" stroke-width="1.2"/>
+<rect x="1075" y="730" width="165" height="96" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1215" y="738" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1210" y="742" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1210" y="750" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="1157.5" y="750" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«component»</text>
+<text x="1157.5" y="768" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">ai</text>
+<line x1="1075" y1="780" x2="1240" y2="780" stroke="#000" stroke-width="1.2"/>
+<text x="1085" y="798" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">client.py, signin.py,</text>
+<text x="1085" y="814" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">prompts.py</text>
+<polyline points="1030,775 1075,775" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="1075" y1="775" x2="1064.4" y2="769.4" stroke="#000" stroke-width="1.2"/>
+<line x1="1075" y1="775" x2="1064.4" y2="780.6" stroke="#000" stroke-width="1.2"/>
+<polyline points="1020,505 1157,505 1157,730" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="1157" y1="730" x2="1162.6" y2="719.4" stroke="#000" stroke-width="1.2"/>
+<line x1="1157" y1="730" x2="1151.4" y2="719.4" stroke="#000" stroke-width="1.2"/>
+<text x="1165" y="620" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">sign-in</text>
+<rect x="690" y="990" width="340" height="112" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1005" y="998" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1000" y="1002" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1000" y="1010" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="860.0" y="1010" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«component»</text>
+<text x="860.0" y="1028" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">core</text>
+<line x1="690" y1="1040" x2="1030" y2="1040" stroke="#000" stroke-width="1.2"/>
+<text x="700" y="1058" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">config.py, settings.py, db.py, bus.py,</text>
+<text x="700" y="1074" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">background.py, osutil.py, textutil.py,</text>
+<text x="700" y="1090" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">levels.py, genres.py</text>
+<polyline points="860,938 860,990" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="860" y1="990" x2="865.6" y2="979.4" stroke="#000" stroke-width="1.2"/>
+<line x1="860" y1="990" x2="854.4" y2="979.4" stroke="#000" stroke-width="1.2"/>
+<polyline points="1157,826 1157,1046 1030,1046" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="1030" y1="1046" x2="1040.6" y2="1051.6" stroke="#000" stroke-width="1.2"/>
+<line x1="1030" y1="1046" x2="1040.6" y2="1040.4" stroke="#000" stroke-width="1.2"/>
+<rect x="410" y="1185" width="250" height="96" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<polyline points="636,1193 646,1193 651,1198 651,1212 636,1212 636,1193" fill="none" stroke="#000" stroke-width="1.2"/>
+<polyline points="646,1193 646,1198 651,1198" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="535.0" y="1205" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«executable»</text>
+<text x="535.0" y="1223" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">Chrome Headless Shell</text>
+<line x1="410" y1="1235" x2="660" y2="1235" stroke="#000" stroke-width="1.2"/>
+<text x="420" y="1253" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">renders resumes and cover</text>
+<text x="420" y="1269" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">letters to PDF</text>
+<rect x="690" y="1185" width="340" height="96" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1005" y="1193" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1000" y="1197" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1000" y="1205" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="860.0" y="1205" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«database»</text>
+<text x="860.0" y="1223" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">jobportal.db</text>
+<line x1="690" y1="1235" x2="1030" y2="1235" stroke="#000" stroke-width="1.2"/>
+<text x="700" y="1253" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">SQLite: kv, leads, events, runs, run_log,</text>
+<text x="700" y="1269" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">candidates, ai_calls, resume_library</text>
+<polyline points="470,917 470,1185" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="470" y1="1185" x2="475.6" y2="1174.4" stroke="#000" stroke-width="1.2"/>
+<line x1="470" y1="1185" x2="464.4" y2="1174.4" stroke="#000" stroke-width="1.2"/>
+<text x="478" y="1125" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">HTML to PDF</text>
+<polyline points="860,1102 860,1185" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="860" y1="1185" x2="865.6" y2="1174.4" stroke="#000" stroke-width="1.2"/>
+<line x1="860" y1="1185" x2="854.4" y2="1174.4" stroke="#000" stroke-width="1.2"/>
+<text x="868" y="1160" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">SQL</text>
+<polygon points="1060,1185 1246,1185 1260,1199 1260,1267 1060,1267" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<polyline points="1246,1185 1246,1199 1260,1199" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="1070" y="1205" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">Every package uses core:</text>
+<text x="1070" y="1221" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">settings, the database,</text>
+<text x="1070" y="1237" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">the event bus and</text>
+<text x="1070" y="1253" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">background work.</text>
+<line x1="1060" y1="1200" x2="1030" y2="1095" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<rect x="40" y="480" width="260" height="96" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="275" y="488" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="270" y="492" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="270" y="500" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="170.0" y="500" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«external system»</text>
+<text x="170.0" y="518" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">Social and community feeds</text>
+<line x1="40" y1="530" x2="300" y2="530" stroke="#000" stroke-width="1.2"/>
+<text x="50" y="548" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">Reddit, Mastodon, Bluesky,</text>
+<text x="50" y="564" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">Hacker News, RSS feeds</text>
+<rect x="40" y="780" width="260" height="112" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="275" y="788" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="270" y="792" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="270" y="800" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="170.0" y="800" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«external system»</text>
+<text x="170.0" y="818" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">Job boards and job APIs</text>
+<line x1="40" y1="830" x2="300" y2="830" stroke="#000" stroke-width="1.2"/>
+<text x="50" y="848" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">LinkedIn, company job boards,</text>
+<text x="50" y="864" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">USAJobs, The Muse, Adzuna,</text>
+<text x="50" y="880" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">Google Jobs, remote job boards</text>
+<polyline points="430,675 170,675 170,576" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="170" y1="576" x2="164.4" y2="586.6" stroke="#000" stroke-width="1.2"/>
+<line x1="170" y1="576" x2="175.6" y2="586.6" stroke="#000" stroke-width="1.2"/>
+<text x="330" y="668" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">HTTPS</text>
+<polyline points="430,722 200,722 200,780" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="200" y1="780" x2="205.6" y2="769.4" stroke="#000" stroke-width="1.2"/>
+<line x1="200" y1="780" x2="194.4" y2="769.4" stroke="#000" stroke-width="1.2"/>
+<text x="330" y="715" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">HTTPS</text>
+<rect x="1380" y="730" width="250" height="112" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1605" y="738" width="16" height="20" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1600" y="742" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<rect x="1600" y="750" width="10" height="4" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<text x="1505.0" y="750" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">«external system»</text>
+<text x="1505.0" y="768" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle">OpenAI</text>
+<line x1="1380" y1="780" x2="1630" y2="780" stroke="#000" stroke-width="1.2"/>
+<text x="1390" y="798" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">Sign in with ChatGPT</text>
+<text x="1390" y="814" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">(OAuth 2.0 with PKCE),</text>
+<text x="1390" y="830" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">Responses API (JSON schemas)</text>
+<polyline points="1240,775 1380,775" fill="none" stroke="#000" stroke-width="1.2" stroke-dasharray="7,5"/>
+<line x1="1380" y1="775" x2="1369.4" y2="769.4" stroke="#000" stroke-width="1.2"/>
+<line x1="1380" y1="775" x2="1369.4" y2="780.6" stroke="#000" stroke-width="1.2"/>
+<text x="1345" y="767" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle">HTTPS</text>
+<polygon points="1330,920 1616,920 1630,934 1630,1196 1330,1196" fill="#fff" stroke="#000" stroke-width="1.2"/>
+<polyline points="1616,920 1616,934 1630,934" fill="none" stroke="#000" stroke-width="1.2"/>
+<text x="1340" y="940" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="bold" text-anchor="start">Data flow</text>
+<text x="1340" y="958" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">1. Setup: the Dashboard sends the resume,</text>
+<text x="1340" y="974" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">documents and answers to web. candidate</text>
+<text x="1340" y="990" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">reads them (documents extracts the text)</text>
+<text x="1340" y="1006" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">and ai turns them into the profile, which</text>
+<text x="1340" y="1022" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">core saves in jobportal.db.</text>
+<text x="1340" y="1038" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">2. Search: search collects postings from</text>
+<text x="1340" y="1054" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">the job sources, filters them by the</text>
+<text x="1340" y="1070" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">user's targets, asks ai to score the rest</text>
+<text x="1340" y="1086" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">and write application packages, and</text>
+<text x="1340" y="1102" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">saves the leads.</text>
+<text x="1340" y="1118" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">3. Live updates: core's event bus streams</text>
+<text x="1340" y="1134" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">progress and new leads to the Dashboard</text>
+<text x="1340" y="1150" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">over the event stream.</text>
+<text x="1340" y="1166" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">4. Tracking: status changes go back</text>
+<text x="1340" y="1182" font-family="Arial, Helvetica, sans-serif" font-size="12" text-anchor="start">through the REST API to jobportal.db.</text>
+</svg>
