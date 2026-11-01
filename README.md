@@ -82,6 +82,9 @@ _Coming soon._
 - [x] Tailored resumes, cover letters and full application packages
 - [x] Sign in with ChatGPT
 - [x] One-click apps for Windows, macOS and Linux
+- [x] Works for any job, field and school level, with tech fully supported
+- [x] Certificates, licenses, cover letters and awards read into the profile next to the resume
+- [x] The team's new design: light and dark themes, a new logo, and five simple menus
 - [ ] User testing with classmates
 - [ ] Screenshots and a demo video
 - [ ] Final presentation
@@ -97,21 +100,23 @@ _Coming soon._
 - [x] Simplify the UI: fewer buttons and fewer words. Sleek, simple and easy to use.
 - [ ] Test Sign in with ChatGPT and a full search with a real ChatGPT plan, end to end. It hasn't been tried with a real
       account yet, and the alpha needs a working AI feature.
-- [ ] Finish extra documents in the dashboard: one drop zone in setup that takes your resume plus other resumes,
-      certificates, cover letters and awards at once, with the best resume picked as the main one and a button to pick a
-      different one, and a list on the Profile page. The server side is done (`/api/profile/documents`).
+- [x] Finish extra documents in the dashboard: drop your resume with other resumes, certificates, licenses, cover letters
+      and awards at once on Home. The best resume becomes the main one (with a button to pick a different one), and each
+      document's details (title, issuer, dates, skills) are read into the profile.
 - [ ] A continuous stream of leads: run searches on a schedule by default after setup
 - [ ] Reach everywhere: more social media and chat communities (X, Threads, LinkedIn posts, Discord, Slack, Telegram,
       Facebook groups) and more job boards (Indeed, Handshake, ZipRecruiter)
 - [ ] Make it ready for people outside the team: clearer first-run help, a plan for people without a ChatGPT plan (an API
       key option or a clear message), an Intel Mac build, and code signing so Windows and macOS stop warning (maybe)
-- [ ] Make it work for anyone, Any degree or school level. Program is currently tech oriented because it was a personal
-      program, still, Tech stays fully supported, and every other job type, genre and school level gets the same depth 
-      (high school, trades, college, graduate). It should adapt to each person the way the Analysis page does, with 
-      sources for every kind of job. Today the filters, keywords, default companies and some sources assume a tech job seeker.
-- [ ] Make job search type as broad as possible covering all types of jobs.
+- [x] Make it work for anyone, any degree or school level (high school, trades, college, graduate). Tech stays fully
+      supported. The filters, keywords, sources, prompts and the Analysis page adapt to each person's own fields.
+- [x] Make job search type as broad as possible covering all types of jobs.
 - [ ] Try the whole flow on a few classmates' resumes: ranked jobs in their areas, tailored resumes and cover letters,
       recruiter contacts and email templates for each match
+- [ ] Check desktop notifications on a real Windows PC and a real Mac. v0.3.0 changed how they're sent (a security fix),
+      and it was only tested with stand-ins.
+- [ ] Maybe: a small "Next moves" card on Home with the best rules from the old Equity mining page: applications with no
+      reply after 21 days, companies with several openings, and new openings at companies that turned you down before
 
 ### Course deliverables (from the assignment PDFs)
 
