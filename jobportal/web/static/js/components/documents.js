@@ -90,14 +90,33 @@ const renderDocumentLists = () => $$("[data-doc-list]").forEach((el) => {
   refocus(el, focus);
 });
 
+// Whether the server can read a file, by its extension: the types in S.onboarding.accept (".pdf,.docx,...", from
+// SUPPORTED in documents/extract.py). A name without one is read as text there, so it passes too.
+function readable(file) {
+  const dot = file.name.lastIndexOf(".");
+  const ext = dot > 0 ? file.name.slice(dot).toLowerCase() : "";
+  const types = (S.onboarding?.accept || "").toLowerCase().split(",").map((type) => type.trim()).filter(Boolean);
+  return !ext || !types.length || types.includes(ext);
+}
+
+// "a.pdf, b.pdf, c.pdf and 4 more": the start of a long list of names, for a toast.
+const someNames = (names) => names.slice(0, 3).join(", ") + (names.length > 3 ? ` and ${names.length - 3} more` : "");
+
 // Sends the files one at a time. Then, with no main resume yet, the server makes the best resume among the documents the
-// main one, and its answers fill in your questions. A summary toast says what happened.
+// main one, and its answers fill in your questions. Summary toasts say what happened. Files the server can't read (a
+// folder's photos, a spreadsheet) are skipped before they're sent, and the ones that fail are grouped by why, so a big
+// folder makes a few short toasts instead of one per file.
 async function addDocuments(files) {
   if (docUpload) {
     toast("Still adding the last ones", "Drop these again in a moment.");
     return;
   }
-  const added = [], same = [], failed = [];
+  const skipped = files.filter((file) => !readable(file)).map((file) => file.name);
+  files = files.filter(readable);
+  if (skipped.length) toast(`Skipped ${plural(skipped.length, "file")}`, `JobPortal reads PDF, Word, ODT, RTF and text files. Skipped: ${someNames(skipped)}.`);
+  if (!files.length) return;
+  const added = [], same = [], failed = new Map();  // failed: the server's message, then the names it was for
+  const fail = (message, name) => failed.set(message, [...(failed.get(message) || []), name]);
   for (const [i, file] of files.entries()) {
     docUpload = { done: i, total: files.length, name: file.name };
     showUploadNote();
@@ -105,7 +124,7 @@ async function addDocuments(files) {
       const reply = await uploadFile(`/api/profile/documents?filename=${encodeURIComponent(file.name)}`, file);
       (reply.duplicate ? same : added).push(reply);
     } catch (err) {
-      failed.push(`${file.name}: ${err.message}`);
+      fail(err.message, file.name);
     }
   }
   let picked = null;
@@ -115,7 +134,7 @@ async function addDocuments(files) {
     try {
       picked = (await api("/api/profile/documents/auto-main", { method: "POST" })).picked;
     } catch (err) {
-      failed.push(`Your resume: ${err.message}`);
+      fail(err.message, "Your resume");
     }
   }
   docUpload = null;
@@ -127,7 +146,10 @@ async function addDocuments(files) {
   if (!S.onboarding?.resume && !picked && (added.length || same.length)) {
     toast("Which one is your resume?", "None of these looks like a resume. Pick one with Use as main resume, or paste the text.");
   }
-  if (failed.length) toast(`Couldn't read ${plural(failed.length, "file")}`, failed.join(" "), "error");
+  if (failed.size) {
+    const count = [...failed.values()].reduce((sum, names) => sum + names.length, 0);
+    toast(`Couldn't add ${plural(count, "file")}`, [...failed].map(([message, names]) => `${someNames(names)}: ${message}`).join(" "), "error");
+  }
 }
 
 // Replaces the main resume with one file. Before your answers are saved, it fills in the empty ones again; after, your
