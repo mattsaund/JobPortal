@@ -40,6 +40,18 @@ def test_docx_links_and_numbered_lines(tmp_path):
     assert links[1].runs[0].bold
 
 
+def test_control_characters_never_break_a_word_file(tmp_path):
+    from docx import Document
+    # \x0b is the line break text pasted from Word carries; python-docx used to refuse the whole file over it.
+    render.resume_docx("# Jordan Rivera\njordan.rivera@example.com\n\n## Experience\n- Line one\x0bline two\x01", tmp_path / "r.docx")
+    assert any("Line one line two" in p.text for p in Document(str(tmp_path / "r.docx")).paragraphs)
+    render.cover_docx("Dear team,\x0b\n\nThank you.", {"name": "Jordan\x0bRivera", "links": {"site": "example.com\x02"}},
+                      "Example\x0c Co", "", tmp_path / "c.docx")
+    render.markdown_docx("## Prep\x07\n- Ask about the team\x0b", tmp_path / "p.docx", "Interview prep\x0b", "Example\x1f Co")
+    assert all((tmp_path / name).stat().st_size > 1000 for name in ("r.docx", "c.docx", "p.docx"))
+    assert b"Subject: Following up on the Data Intern role" in render.eml("hr@example.com", "Following up\non the Data Intern role", "Hi")
+
+
 def test_long_date_is_portable():
     assert render.long_date(date(2026, 3, 5)) == "March 5, 2026"
 

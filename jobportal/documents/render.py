@@ -391,7 +391,23 @@ async def cover_pdf(md: str, facts: dict, company: str, location: str, out: Path
 
 # ---------------------------------------------------------------- DOCX building blocks
 
+# Characters XML (and so a Word file) can't hold. python-docx refuses a whole document over one of them, and they do turn
+# up: text pasted from Word carries \x0b for a manual line break, and PDF text can carry stray control codes.
+_NOT_XML_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _xml_safe(value):
+    """`value` with characters Word can't store turned into spaces, so one stray control character can't make every Word
+    download fail. Strings inside a dict (the facts, and their links) are cleaned too; anything else comes back as it is."""
+    if isinstance(value, str):
+        return _NOT_XML_RE.sub(" ", value)
+    if isinstance(value, dict):
+        return {key: _xml_safe(item) for key, item in value.items()}
+    return value
+
+
 def _save(doc, out: Path) -> None:
+    """Save a python-docx document at out, making its folder first."""
     out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(out)
 
@@ -495,7 +511,7 @@ def resume_docx(md: str, out: Path, scale: float = 1.0, theme: str = "classic") 
     from docx.shared import Inches, Pt
     style = {**_DOCX_BASE, **_DOCX_THEMES.get(theme, {})}
     links = {"link_color": style["link_color"], "underline_links": style["link_underline"]}
-    resume = parse_resume(md)
+    resume = parse_resume(_xml_safe(md))
     top, side = _resume_margins(scale)
     doc = _new_docx(top, side, RESUME_BOTTOM_MARGIN, style["body"] * scale, style["font"])
     align = WD_ALIGN_PARAGRAPH.LEFT if style["align"] == "left" else WD_ALIGN_PARAGRAPH.CENTER
@@ -547,6 +563,7 @@ def cover_docx(md: str, facts: dict, company: str, location: str, out: Path) -> 
     """Write a cover letter as a Word file at out, laid out like cover_html: name, contact line over a rule, date,
     recipient, then the paragraphs with their line breaks kept."""
     from docx.shared import Pt
+    md, facts, company, location = _xml_safe(md), _xml_safe(facts), _xml_safe(company), _xml_safe(location)
     doc = _new_docx(top=0.9, side=1.0, bottom=0.9, font_pt=11)
     run = doc.add_paragraph().add_run(facts.get("name", ""))
     run.bold, run.font.size = True, Pt(18)
@@ -644,6 +661,7 @@ def markdown_docx(md: str, out: Path, title: str = "", subtitle: str = "") -> No
     """Write a generic document as a Word file at out, laid out like markdown_doc_html (same margins, heading sizes and
     lists). Heading text drops its ** markers and is set in bold."""
     from docx.shared import Pt
+    md, title, subtitle = _xml_safe(md), _xml_safe(title), _xml_safe(subtitle)
     doc = _new_docx(top=0.75, side=0.85, bottom=0.75, font_pt=10.5)
     if title:
         run = doc.add_paragraph().add_run(title)
@@ -673,12 +691,16 @@ def markdown_docx(md: str, out: Path, title: str = "", subtitle: str = "") -> No
 
 def eml(to: str, subject: str, body: str, sender: str = "") -> bytes:
     """An outreach email as the bytes of an .eml file. The X-Unsent header makes Outlook, Thunderbird and Apple Mail open it
-    as an editable draft instead of a received message."""
+    as an editable draft instead of a received message. Header values are made one line (the AI writes the subject, and
+    a line break in a header makes the email library refuse the whole message)."""
+    def one_line(value: str) -> str:
+        return " ".join((value or "").split())
+
     msg = EmailMessage()
     if sender:
-        msg["From"] = sender
-    msg["To"] = to or ""
-    msg["Subject"] = subject or ""
+        msg["From"] = one_line(sender)
+    msg["To"] = one_line(to)
+    msg["Subject"] = one_line(subject)
     msg["X-Unsent"] = "1"
     msg.set_content(body or "")
     return bytes(msg)
