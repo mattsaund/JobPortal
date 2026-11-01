@@ -120,15 +120,35 @@ def test_a_refused_refresh(monkeypatch, reply, ends_sign_in):
     assert signin._load()["client_id"] == "oaiapp_test"  # the registration is kept for the next sign-in
 
 
+def offline(request: httpx.Request) -> httpx.Response:
+    """A mock_http handler for a computer with no connection."""
+    raise httpx.ConnectError("offline", request=request)
+
+
 def test_sign_out_forgets_the_tokens_even_when_offline(monkeypatch):
     sign_in(monkeypatch)
-
-    def offline(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("offline", request=request)
     mock_http(monkeypatch, offline)
     out = asyncio.run(signin.sign_out())
     assert not out["signed_in"] and "Couldn't reach OpenAI" in out["note"]
     assert "refresh_token" not in signin._load()
+
+
+def test_a_sign_in_without_a_connection_is_a_clear_error(monkeypatch):
+    params = query(signin.start(8788))
+    mock_http(monkeypatch, offline)
+    # An AuthError, not a raw network error: the sign-in page shows its message instead of an Internal Server Error.
+    with pytest.raises(signin.AuthError, match="Couldn't reach OpenAI's sign-in server"):
+        asyncio.run(signin.finish({"code": "abc", "state": params["state"], "client_id": "oaiapp_test"}))
+
+
+def test_the_model_list_without_a_connection_is_an_ai_error(monkeypatch):
+    async def token():
+        return "test-token"
+
+    monkeypatch.setattr(signin, "access_token", token)
+    mock_http(monkeypatch, offline)
+    with pytest.raises(ai.AIError, match="network problem"):  # the Settings route turns it into a 502, not a 500
+        asyncio.run(ai.models(force=True))
 
 
 def test_not_signed_in_is_a_clear_error():
