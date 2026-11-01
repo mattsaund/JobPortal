@@ -251,12 +251,28 @@ async function libUseDialog(itemId) {
       <button class="button outline" type="button" data-act="lib-apply" data-tailor="0" disabled>Use it as it is</button>
       <button class="button primary" type="button" data-act="lib-apply" data-tailor="1" disabled title="The AI angles it toward the job, then it gets the usual check and review">${icon("sparkle")}Tailor it to the job</button></div>`,
     { eyebrow: "YOUR RESUMES" });
-  dialog.jp.pick = { item: itemId, lead: null, choosing: "lead" };
-  // Without a search, your Ready leads; with one, matches from all your leads.
+  const pick = dialog.jp.pick = { item: itemId, lead: null, choosing: "lead" };
+  // Without a search, your Ready leads; with one, matches from all your leads. Only the newest search draws (typing
+  // sends several). The lead you picked stays picked when the new list has it; when it doesn't, it's unpicked, so the
+  // buttons never use the resume on a lead you can't see.
+  let newest = 0;
   const load = async (search) => {
-    const d = await api(`/api/leads?tab=${search ? "all" : "ready"}&q=${encodeURIComponent(search || "")}&limit=60`);
-    $("#pick-list", dialog).innerHTML = d.leads.filter((l) => l.app_status !== "trashed").map((l) => `<label class="pick-row"><input type="radio" name="pick" value="${l.id}">
-        <span class="pick-score">${l.score ?? "-"}</span><span class="pick-text"><b>${esc(l.company)}</b> ${esc(l.title)}</span>
+    const ticket = ++newest, list = $("#pick-list", dialog);
+    let d;
+    try {
+      d = await api(`/api/leads?tab=${search ? "all" : "ready"}&q=${encodeURIComponent(search || "")}&limit=60`);
+    } catch (err) {
+      if (ticket === newest) list.innerHTML = `<p class="muted-note">Couldn't load your leads: ${esc(err.message)}</p>`;
+      return;
+    }
+    if (ticket !== newest) return;
+    const leads = d.leads.filter((l) => l.app_status !== "trashed");
+    if (pick.lead && !leads.some((l) => l.id === pick.lead)) {
+      pick.lead = null;
+      $$("[data-act=lib-apply]", dialog).forEach((button) => (button.disabled = true));
+    }
+    list.innerHTML = leads.map((l) => `<label class="pick-row"><input type="radio" name="pick" value="${l.id}"${l.id === pick.lead ? " checked" : ""}>
+        <span class="pick-score">${esc(l.score ?? "-")}</span><span class="pick-text"><b>${esc(l.company)}</b> ${esc(l.title)}</span>
         <small>${l.has_resume ? "Has a resume" : "No resume yet"}</small></label>`).join("")
       || `<p class="muted-note">No matching leads${search ? "" : " under Ready. Search to find any lead"}.</p>`;
   };
@@ -319,15 +335,19 @@ onAction("lib-del", async (el) => {
   location.hash = "#/settings/resumes";
 });
 onAction("lib-apply", async (el) => {  // Use it as it is, or Tailor it, in either dialog
-  const dialog = el.closest("dialog"), pick = dialog.jp.pick, tailor = el.dataset.tailor === "1";
+  const dialog = el.closest("dialog"), pick = dialog.jp.pick, tailor = el.dataset.tailor === "1", label = el.innerHTML;
   if (!pick.item || !pick.lead) return;
+  // Used on the lead on screen, its new resume replaces the editor: unsaved edits there would be lost, so ask first.
+  const onScreen = S.leadView?.id === pick.lead;
+  if (onScreen && S.dirty && !confirm("Discard your unsaved edits?")) return;
   el.disabled = true;
   el.innerHTML = `${spinner()} ${tailor ? "Tailoring" : "Applying"}`;
   try {
     const r = await api(`/api/library/${pick.item}/apply/${pick.lead}`, { method: "POST", body: { tailor, backup: !!$("#pick-backup", dialog)?.checked } });
     closeDialog(dialog);
     toast(tailor ? "Tailored and applied" : "Resume applied", `Resume check: ${r.check ?? "-"}${r.change_summary ? `. ${r.change_summary.slice(0, 140)}` : ""}`, "", pick.lead);
-    if (S.leadView?.id === pick.lead) {  // used from the lead itself: show its new resume
+    if (onScreen && S.leadView?.id === pick.lead) {  // used from the lead itself: show its new resume
+      S.dirty = false;
       S.leadView.tab = "resume";
       refreshLeadDetails();
     } else {
@@ -335,7 +355,7 @@ onAction("lib-apply", async (el) => {  // Use it as it is, or Tailor it, in eith
     }
   } catch (err) {
     el.disabled = false;
-    el.innerHTML = tailor ? `${icon("sparkle")}Tailor it to the job` : "Use it as it is";
+    el.innerHTML = label;
     throw err;
   }
 });
