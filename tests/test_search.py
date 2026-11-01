@@ -764,6 +764,13 @@ def test_detect_company_boards_from_links():
     assert ats.detect("https://[x") is None  # a broken address, which used to raise
 
 
+def test_a_lever_posting_keeps_its_closing_section():
+    posting = {"descriptionPlain": "Help patients.", "lists": [{"text": "Requirements", "content": "<ul><li>CPR</li></ul>"}],
+               "additionalPlain": "Pay: $22 an hour"}
+    text = ats.lever_description(posting)  # a single posting's fetch (details.py) used to drop the pay and benefits part
+    assert text.startswith("Help patients.") and "Requirements:" in text and text.endswith("Pay: $22 an hour")
+
+
 def test_posting_details_from_odd_pages():
     from jobportal.search.collectors import details
     # A JobPosting may name its place as plain text, or give an address as plain text.

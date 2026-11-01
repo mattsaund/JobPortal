@@ -65,9 +65,10 @@ async def greenhouse(ctx: Ctx, b: dict) -> list[RawJob]:
 
 def lever_description(posting: dict) -> str:
     """A Lever posting's text. Lever splits it into a plain-text body, titled lists (responsibilities, requirements and so
-    on, in HTML) and an optional closing section."""
-    lists = "\n".join(f"{part.get('text', '')}:\n{html_to_text(part.get('content', ''))}" for part in posting.get("lists", []))
-    return (posting.get("descriptionPlain") or "") + "\n" + lists
+    on, in HTML) and an optional closing section (additionalPlain, often the pay range and benefits). details.py uses it
+    for a single posting, and lever() for a whole board."""
+    lists = "\n".join(f"{part.get('text', '')}:\n{html_to_text(part.get('content', ''))}" for part in posting.get("lists") or [])
+    return "\n".join([posting.get("descriptionPlain") or "", lists, posting.get("additionalPlain") or ""]).strip()
 
 
 async def lever(ctx: Ctx, b: dict) -> list[RawJob]:
@@ -76,7 +77,7 @@ async def lever(ctx: Ctx, b: dict) -> list[RawJob]:
     out = []
     for j in d if isinstance(d, list) else []:
         categories = j.get("categories") or {}
-        description = lever_description(j) + "\n" + (j.get("additionalPlain") or "")
+        description = lever_description(j)
         locations = categories.get("allLocations") or ([categories.get("location")] if categories.get("location") else [])
         out.append(RawJob(source="ats", title=j.get("text", ""), company=b["name"], url=j.get("hostedUrl", ""),
                           apply_url=j.get("applyUrl"), locations=locations,
