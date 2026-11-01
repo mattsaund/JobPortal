@@ -362,11 +362,19 @@ function renderContactsTab(box, l, pkg) {
       <input type="url" placeholder="LinkedIn link" data-nc="linkedin" aria-label="LinkedIn link"><input type="text" placeholder="Why them, or notes" data-nc="why" aria-label="Why them">
       <button class="button outline" type="button" data-act="add-contact">${icon("plus")}Add contact</button></div>`,
     exportButtons(l.id, "contacts", ["csv"]));
-  box.addEventListener("change", async (e) => {  // an edited contact field: save that one field
+  // An edited contact field saves that one field when you leave it. The value also goes into the lead on screen (S.lead,
+  // which a live update may have read again since this tab was drawn), so the tab shows it when it's drawn again.
+  box.addEventListener("change", async (e) => {
     const el = e.target;
     if (!el.dataset.cf) return;
-    await api(`/api/leads/${l.id}/contacts/${el.dataset.i}`, { method: "POST", body: { [el.dataset.cf]: el.value } });
-    pkg.contacts[+el.dataset.i][el.dataset.cf] = el.value;
+    try {
+      await api(`/api/leads/${l.id}/contacts/${el.dataset.i}`, { method: "POST", body: { [el.dataset.cf]: el.value } });
+    } catch (err) {
+      toast("Couldn't save the contact", err.message, "error");
+      return;
+    }
+    const contact = S.lead?.id === l.id && S.lead.package?.contacts?.[+el.dataset.i];
+    if (contact) contact[el.dataset.cf] = el.value;
   });
 }
 
@@ -394,10 +402,14 @@ function renderNotesTab(box, l, pkg, tab) {
 }
 
 // Application kit: the files to download, the tailored answers to this application's questions (editable), and your
-// standard answers ready to copy. Reads GET /api/profile once for the standard answers.
+// standard answers ready to copy. Reads GET /api/profile once for the standard answers; when that fails, the kit is
+// drawn without them (with a note) instead of staying blank.
 async function renderKitTab(box, l, pkg) {
-  if (!S.profileCache) S.profileCache = await api("/api/profile");
-  const qa = S.profileCache.qa || [];
+  let qa = null;
+  try {
+    if (!S.profileCache) S.profileCache = await api("/api/profile");
+    qa = S.profileCache.qa || [];
+  } catch (_) {}
   const copyRow = (q, a) => `<div class="copy-row"><span class="copy-q">${esc(q)}</span><span class="copy-a">${esc(a)}</span>`
     + `<button class="text-button" type="button" data-act="copytext" data-text="${esc(a)}">${icon("copy")}Copy</button></div>`;
   const apply = safeUrl(l.apply_url) || safeUrl(l.url);
@@ -406,7 +418,8 @@ async function renderKitTab(box, l, pkg) {
         <button class="button outline small" type="button" data-act="copy-answer" data-i="${i}">${icon("copy")}Copy</button>
         <button class="icon-button" type="button" data-act="rm-answer" data-i="${i}" aria-label="Remove this question">${icon("trash")}</button></div>
       <textarea data-aa="${i}" rows="5" aria-label="Answer">${esc(x.answer)}</textarea></div>`;
-  const standard = qa.filter((x) => !x.eeo), selfId = qa.filter((x) => x.eeo);  // eeo = voluntary self-identification
+  const standard = (qa || []).filter((x) => !x.eeo), selfId = (qa || []).filter((x) => x.eeo);  // eeo = voluntary self-identification
+  const noStandard = qa ? "Answer the standard questions to fill these in." : "Your standard answers didn't load. Open this tab again to see them.";
   const selfIdBlock = selfId.length ? block("Voluntary self-identification", `<p class="block-note">Shown here only so you can copy it.
       It's never sent to the AI.</p>${selfId.map((x) => copyRow(x.q, x.a)).join("")}`) : "";
   box.innerHTML = `<div class="two-col"><div class="stack">
@@ -420,7 +433,7 @@ async function renderKitTab(box, l, pkg) {
         <span class="muted-note" data-answers-state></span><button class="button primary" type="button" data-act="save-answers">Save answers</button></div>`,
       exportButtons(l.id, "answers", ["docx", "pdf", "md"]))}
   </div><div class="stack">${block("Your standard answers", `<p class="block-note">From your answers in <a href="#/settings/profile/answers">Settings, Profile</a>.
-      Change them there.</p>${standard.map((x) => copyRow(x.q, x.a)).join("") || `<p class="muted-note">Answer the standard questions to fill these in.</p>`}`)}
+      Change them there.</p>${standard.map((x) => copyRow(x.q, x.a)).join("") || `<p class="muted-note">${noStandard}</p>`}`)}
     ${selfIdBlock}</div></div>`;
   box.addEventListener("input", (e) => {
     if (e.target.dataset.aq == null && e.target.dataset.aa == null) return;
@@ -843,11 +856,14 @@ async function saveEmails() {
   S.dirty = false;
 }
 
-// After answering, dismissing or adding questions: reload them (for Home and the sidebar) and redraw the lead.
+// After answering, dismissing or adding questions: reload them (for Home and the sidebar) and redraw the lead. When the
+// list doesn't load, the lead is still redrawn; the sidebar catches up with the next "questions" event.
 async function refreshLeadQuestions() {
-  S.questions = await api("/api/questions");
-  renderNextStep();
-  refreshLeadDetails();
+  try {
+    S.questions = await api("/api/questions");
+    renderNextStep();
+  } catch (_) {}
+  await refreshLeadDetails();
 }
 
 // ---------------------------------------------------------------- actions
@@ -985,6 +1001,10 @@ onAction("lead-gapq", async (el) => {
     toast("Couldn't find questions", err.message, "error");
   }
   await refreshLeadQuestions();
+  if (el.isConnected) {  // not drawn again (the lead didn't load, or you're editing this tab): usable again
+    el.disabled = false;
+    el.innerHTML = `${icon("sparkle")}Ask me about gaps`;
+  }
 });
 onAction("lead-answer", async (el) => {
   const input = $("[data-lead-answer]", el.closest(".question-row"));
@@ -998,29 +1018,52 @@ onAction("lead-dismiss", async (el) => {
   await refreshLeadQuestions();
 });
 onAction("lead-apply-answers", async (el) => {
-  await api(`/api/leads/${S.lead.id}/apply-answers`, { method: "POST" });
-  el.disabled = true;
+  el.disabled = true;  // before the request, not after it: a second click mustn't start a second rework
   el.innerHTML = `${spinner()} Adding your answers and reworking the resume`;
+  try {
+    await api(`/api/leads/${S.lead.id}/apply-answers`, { method: "POST" });
+  } catch (err) {
+    el.disabled = false;
+    el.innerHTML = `${icon("sparkle")}Update this resume with my answers`;
+    throw err;
+  }
   toast("Updating the resume", "Adding your answers to your profile, then rewriting this resume with them. A minute or two.");
 });
+// The menus and checkboxes in a lead's details save as soon as they change. When a save fails, the control goes back to
+// what's saved (and the error shows in a toast), so the screen never shows a status or a layout the lead doesn't have.
 onChange(async (el) => {
   if (!S.leadView || !S.leadView.box.contains(el)) return false;
   if (el.matches("[data-lead-status]")) {
-    await setStatus(S.lead.id, el.value);
+    await setStatus(S.lead.id, el.value).catch((err) => {
+      el.value = S.lead.app_status;
+      throw err;
+    });
   } else if (el.matches("[data-lead-industry]")) {
-    leadChanged(await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { industry: el.value } }));
+    const summary = await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { industry: el.value } }).catch((err) => {
+      el.value = S.lead.industry || "";
+      throw err;
+    });
+    leadChanged(summary);
     toast("Industry changed", el.value || "Not set");
   } else if (el.matches("[data-plan]")) {  // an action plan step done or not
-    const pkg = S.lead.package;
-    const done = new Set(pkg.plan_done || []);
+    const pkg = S.lead.package, before = pkg.plan_done || [];
+    const done = new Set(before);
     if (el.checked) done.add(+el.dataset.plan);
     else done.delete(+el.dataset.plan);
     pkg.plan_done = [...done];
     el.nextElementSibling.classList.toggle("done", el.checked);
-    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { plan_done: pkg.plan_done } } });
+    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { plan_done: pkg.plan_done } } }).catch((err) => {
+      pkg.plan_done = before;
+      el.checked = !el.checked;
+      el.nextElementSibling.classList.toggle("done", el.checked);
+      throw err;
+    });
   } else if (el.matches("[data-resume-theme]")) {  // the Layout menu on the strategy block
     const style = { ...(S.lead.package.resume_style || { max_pages: 1 }), theme: el.value };
-    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { resume_style: style } } });
+    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { resume_style: style } } }).catch((err) => {
+      el.value = S.lead.package.resume_style?.theme || "classic";
+      throw err;
+    });
     S.lead.package.resume_style = style;
     if (S.editor) {
       S.editor.theme = el.value;
