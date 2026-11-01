@@ -14,12 +14,17 @@ import asyncio
 import re
 from urllib.parse import quote_plus, urlparse
 
+import httpx
+
 from jobportal.core.levels import ats_search_terms
 from jobportal.core.textutil import clean, html_to_text, parse_date
 from jobportal.search import plan
 from jobportal.search.collectors.base import Ctx, RawJob
 
 BOARDS_AT_ONCE = 8  # boards read in parallel; Ctx still sends at most 4 requests at a time to one host (Greenhouse's API)
+# The most one board may take. collect() hands back every board's postings only at the end, and the search run gives the
+# whole source 15 minutes, so one stuck board must not use them up and lose every other board's postings.
+BOARD_TIMEOUT = 240
 LOCALE_SEGMENT = re.compile(r"[a-z]{2}-[A-Z]{2}")  # Workday URLs may carry a language part such as /en-US/
 WORKDAY_PAGE = 20  # Workday returns at most 20 postings per request
 WORKDAY_MAX = 100  # postings read per search term on one Workday board
@@ -74,7 +79,7 @@ async def lever(ctx: Ctx, b: dict) -> list[RawJob]:
         description = lever_description(j) + "\n" + (j.get("additionalPlain") or "")
         locations = categories.get("allLocations") or ([categories.get("location")] if categories.get("location") else [])
         out.append(RawJob(source="ats", title=j.get("text", ""), company=b["name"], url=j.get("hostedUrl", ""),
-                          apply_url=j.get("applyUrl"), locations=locations, location=" | ".join(locations),
+                          apply_url=j.get("applyUrl"), locations=locations,
                           description=description.strip(), posted_at=parse_date(j.get("createdAt")),
                           category_hint=categories.get("commitment", ""), dream=bool(b.get("dream")),
                           source_detail=f"Lever: {b['name']}", found_url=f"https://jobs.lever.co/{b['slug']}", meta={"ats": "lever"}))
@@ -92,7 +97,7 @@ async def ashby(ctx: Ctx, b: dict) -> list[RawJob]:
             locations.append("Remote")
         locations = [loc for loc in locations if loc]
         out.append(RawJob(source="ats", title=j.get("title", ""), company=b["name"], url=j.get("jobUrl", ""),
-                          apply_url=j.get("applyUrl"), locations=locations, location=" | ".join(locations),
+                          apply_url=j.get("applyUrl"), locations=locations,
                           description=j.get("descriptionPlain") or html_to_text(j.get("descriptionHtml")),
                           posted_at=parse_date(j.get("publishedAt")), category_hint=j.get("employmentType", ""),
                           dream=bool(b.get("dream")), source_detail=f"Ashby: {b['name']}", found_url=f"https://jobs.ashbyhq.com/{b['slug']}",
@@ -100,21 +105,47 @@ async def ashby(ctx: Ctx, b: dict) -> list[RawJob]:
     return out
 
 
+class _Terms:
+    """Bookkeeping for the boards searched once per term (Workday, iCIMS), so one failing term costs only that term.
+
+    A term the site refuses (an error status, a page it can't build) is logged and the next term is tried. A site that
+    can't be reached at all ends the board instead: every other term would wait out the same retries again (about 50
+    seconds each), long enough to push the whole company-boards source past its time limit. When no term got an answer,
+    the board raises its last error, so the run log and the Sources dialog's check show it as failed instead of empty."""
+
+    def __init__(self, ctx: Ctx, board: dict):
+        self.ctx, self.board, self.answered, self.error = ctx, board, False, None
+
+    def failed(self, term: str, error: Exception) -> bool:
+        """Note one failed request for `term`. Returns True when the board should stop (the site can't be reached)."""
+        self.error = error
+        self.ctx.log("ats", f"{self.board['name']}: {self.board.get('ats')} '{term}' failed: {type(error).__name__}: {error}", "warn")
+        return isinstance(error, httpx.TransportError)
+
+    def done(self, out: list[RawJob]) -> list[RawJob]:
+        """The board's postings, or its last error raised when no term got an answer."""
+        if not self.answered and self.error:
+            raise self.error
+        return out
+
+
 async def workday(ctx: Ctx, b: dict) -> list[RawJob]:
     """Workday: the JSON API behind every Workday careers site (POST <site root>/wday/cxs/<tenant>/<site>/jobs). It needs a
     search word and pages 20 postings at a time, so each term reads up to 100. No descriptions: meta["api"] keeps each
-    posting's own API address for details.py."""
+    posting's own API address for details.py. Failed terms are handled by _Terms."""
     base, tenant, site = _wd_parts(b["url"])
     api = f"{base}/wday/cxs/{tenant}/{site}/jobs"
-    seen, out = set(), []
+    seen, out, terms = set(), [], _Terms(ctx, b)
     for term in search_terms(ctx.cfg):
         total = 0
         for offset in range(0, WORKDAY_MAX, WORKDAY_PAGE):
             try:
                 d = await ctx.post_json(api, {"appliedFacets": {}, "limit": WORKDAY_PAGE, "offset": offset, "searchText": term})
             except Exception as e:  # noqa: BLE001 (one failing term shouldn't sink the board)
-                ctx.log("ats", f"{b['name']}: workday '{term}' failed: {e}", "warn")
+                if terms.failed(term, e):
+                    return terms.done(out)
                 break
+            terms.answered = True
             posts = d.get("jobPostings", [])
             for j in posts:
                 path = j.get("externalPath")  # the posting's path on the careers site, unique per posting
@@ -129,7 +160,7 @@ async def workday(ctx: Ctx, b: dict) -> list[RawJob]:
             total = d.get("total") or total
             if len(posts) < WORKDAY_PAGE or offset + WORKDAY_PAGE >= total:
                 break
-    return out
+    return terms.done(out)
 
 
 # The search UKG's own job board page sends with nothing selected: the 100 newest openings, no keyword, no filters.
@@ -153,9 +184,9 @@ async def ukg(ctx: Ctx, b: dict) -> list[RawJob]:
         for place in j.get("Locations") or []:
             address = place.get("Address") or {}
             city_state = ", ".join(x for x in [address.get("City"), (address.get("State") or {}).get("Code")] if x)
-            locations.append(city_state or place.get("LocalizedName", ""))
+            locations.append(city_state or place.get("LocalizedName"))  # RawJob drops a place with neither
         out.append(RawJob(source="ats", title=j.get("Title", ""), company=b["name"],
-                          url=f"{base}/OpportunityDetail?opportunityId={j.get('Id')}", locations=locations, location=" | ".join(locations),
+                          url=f"{base}/OpportunityDetail?opportunityId={j.get('Id')}", locations=locations,
                           description=j.get("BriefDescription", ""), posted_at=parse_date(j.get("PostedDate")),
                           dream=bool(b.get("dream")), source_detail=f"UKG: {b['name']}", found_url=base, meta={"ats": "ukg"}))
     return out
@@ -164,12 +195,19 @@ async def ukg(ctx: Ctx, b: dict) -> list[RawJob]:
 async def icims(ctx: Ctx, b: dict) -> list[RawJob]:
     """iCIMS: there is no public JSON API, so this reads the careers site's search results page as HTML, once per term.
     in_iframe=1 asks for the bare results list, without the company's page around it. Each result is an
-    iCIMS_JobCardItem block holding the link, title, location, posted date and a short description."""
+    iCIMS_JobCardItem block holding the link, title, location, posted date and a short description. Failed terms are
+    handled by _Terms."""
     base = b["url"].rstrip("/")
     host = urlparse(base).netloc
-    out, seen = [], set()
+    out, seen, terms = [], set(), _Terms(ctx, b)
     for term in search_terms(ctx.cfg):
-        html = await ctx.get_text(f"{base}/jobs/search?ss=1&searchKeyword={quote_plus(term)}&in_iframe=1")
+        try:
+            html = await ctx.get_text(f"{base}/jobs/search?ss=1&searchKeyword={quote_plus(term)}&in_iframe=1")
+        except Exception as e:  # noqa: BLE001 (one failing term shouldn't sink the board)
+            if terms.failed(term, e):
+                break
+            continue
+        terms.answered = True
         for card in html.split('class="iCIMS_JobCardItem"')[1:]:
             link = re.search(rf'href="(https://{re.escape(host)}/jobs/(\d+)/[^"]+)"', card)  # group 2 is the job number
             if not link or link.group(2) in seen:
@@ -185,7 +223,7 @@ async def icims(ctx: Ctx, b: dict) -> list[RawJob]:
                               posted_at=parse_date((posted.group(1).split(" ")[0]) if posted else None),
                               dream=bool(b.get("dream")), source_detail=f"iCIMS: {b['name']}", found_url=f"{base}/jobs/search?ss=1",
                               meta={"ats": "icims"}))
-    return out
+    return terms.done(out)
 
 
 async def smartrecruiters(ctx: Ctx, b: dict) -> list[RawJob]:
@@ -209,8 +247,8 @@ HANDLERS = {"greenhouse": greenhouse, "lever": lever, "ashby": ashby, "workday":
 
 
 async def collect(ctx: Ctx) -> list[RawJob]:
-    """Read every enabled board, BOARDS_AT_ONCE at a time. A board that fails (wrong slug, site down, format changed) is
-    logged and skipped. A board naming an unknown system is skipped quietly."""
+    """Read every enabled board, BOARDS_AT_ONCE at a time. A board that fails (wrong slug, site down, format changed) or
+    takes longer than BOARD_TIMEOUT is logged and skipped. A board naming an unknown system is skipped quietly."""
     boards = [b for b in ctx.cfg["sources"]["ats_boards"]["boards"] if b.get("enabled", True)]
     slots = asyncio.Semaphore(BOARDS_AT_ONCE)
 
@@ -221,7 +259,10 @@ async def collect(ctx: Ctx) -> list[RawJob]:
             if not handler:
                 return []
             try:
-                return await handler(ctx, b)
+                return await asyncio.wait_for(handler(ctx, b), timeout=BOARD_TIMEOUT)
+            except TimeoutError:
+                ctx.log("ats", f"{b['name']} ({b.get('ats')}): no answer within {BOARD_TIMEOUT} seconds, skipped this run", "warn")
+                return []
             except Exception as e:  # noqa: BLE001 (one broken board shouldn't sink the rest)
                 ctx.log("ats", f"{b['name']} ({b.get('ats')}): {type(e).__name__}: {str(e)[:120]}", "warn")
                 return []

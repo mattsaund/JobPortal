@@ -241,7 +241,7 @@ async def themuse(ctx: Ctx) -> list[RawJob]:
         for j in d.get("results", []):
             job_locations = [loc.get("name", "") for loc in j.get("locations", [])]
             out.append(RawJob(source="themuse", title=j.get("name", ""), company=(j.get("company") or {}).get("name", ""),
-                              url=(j.get("refs") or {}).get("landing_page", ""), locations=job_locations, location=" | ".join(job_locations),
+                              url=(j.get("refs") or {}).get("landing_page", ""), locations=job_locations,
                               description=html_to_text(j.get("contents", ""))[:12000],
                               posted_at=parse_date(j.get("publication_date")), source_detail="The Muse", strict_titles=False))
         if page + 1 >= d.get("page_count", 0):  # pages are numbered from 0
@@ -292,7 +292,7 @@ async def usajobs(ctx: Ctx) -> list[RawJob]:
             out.append(RawJob(source="usajobs", title=m.get("PositionTitle", ""),
                               company=f"{m.get('OrganizationName', '')} ({m.get('DepartmentName', '')})",
                               url=m.get("PositionURI", ""), apply_url=(m.get("ApplyURI") or [None])[0],
-                              locations=locations, location=" | ".join(locations), description=description[:12000],
+                              locations=locations, description=description[:12000],
                               posted_at=parse_date(m.get("PublicationStartDate")),
                               deadline=parse_date(m.get("ApplicationCloseDate")), strict_titles=False,
                               source_detail="USAJobs" + (f" ({search.get('HiringPath')})" if search.get("HiringPath") else "")))

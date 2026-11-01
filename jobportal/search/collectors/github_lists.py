@@ -34,14 +34,13 @@ async def collect(ctx: Ctx) -> list[RawJob]:
         newgrad = bool(re.search(r"new-?grad", url, re.I))  # the repository name tells new-grad lists from internship lists
         count = 0
         for item in data if isinstance(data, list) else []:
-            if not item.get("active", True) or item.get("is_visible") is False:  # closed, or hidden by the list's maintainers
-                continue
+            if not isinstance(item, dict) or not item.get("active", True) or item.get("is_visible") is False:
+                continue  # not a listing, closed, or hidden by the list's maintainers
             terms = item.get("terms") or item.get("season") or ""  # such as "Summer 2027"; some files use a list
-            terms = ", ".join(terms) if isinstance(terms, list) else str(terms)
-            locations = item.get("locations") or []
+            terms = ", ".join(str(t) for t in terms if t) if isinstance(terms, list) else str(terms)
             out.append(RawJob(
                 source="github", title=item.get("title", ""), company=item.get("company_name", ""), url=item.get("url", ""),
-                locations=locations, location=" | ".join(locations),
+                locations=item.get("locations") or [],  # RawJob drops empty places, which some listings have
                 posted_at=parse_date(item.get("date_posted") or item.get("date_updated")),
                 category_hint="new-grad" if newgrad else "internship",
                 found_url=f"https://github.com/{repo}",

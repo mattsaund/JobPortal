@@ -76,7 +76,10 @@ class RawJob:
             value = getattr(self, name)
             if not isinstance(value, str):
                 setattr(self, name, "" if value is None else str(value))
-        self.locations = [str(place) for place in self.locations or [] if place]
+        places = [self.locations] if isinstance(self.locations, str) else self.locations or []  # one place sent as text
+        self.locations = [str(place) for place in places if place]
+        if not self.location and self.locations:
+            self.location = " | ".join(self.locations)  # collectors that have a list leave the display string to this
 
     def where_found(self) -> dict:
         """This job's entry for the lead's "found" list: {source, label, url}."""

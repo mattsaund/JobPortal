@@ -670,6 +670,52 @@ def test_hunt_rotates_missions_and_respects_levels():
     assert ids(hunt.pick_missions(cfg, all_missions=True)) == ["a", "b", "c"]
 
 
+def test_one_bad_term_or_item_costs_only_itself():
+    import httpx
+
+    from jobportal.search.collectors import github_lists
+    cfg = make_cfg(levels=["internship"])  # several search terms: intern, co-op, student
+    ctx = Ctx(cfg, lambda *a, **k: None)
+    board = {"name": "Example Health", "url": "https://careers-example.icims.com"}
+    calls = []
+
+    async def unreachable(url, payload, **kw):
+        calls.append(url)
+        raise httpx.ConnectError("no route to host")
+
+    ctx.post_json = unreachable
+    with pytest.raises(httpx.ConnectError):  # a dead site ends the board at once: no 50 second retries for every term
+        asyncio.run(ats.workday(ctx, {**board, "url": "https://example.wd5.myworkdayjobs.com/External"}))
+    assert len(calls) == 1
+
+    card = ('<div class="iCIMS_JobCardItem"><a href="https://careers-example.icims.com/jobs/{n}/nurse">'
+            '<h3>Nurse Intern {n}</h3></a></div>')
+
+    async def one_refused_term(url, **kw):
+        if "searchKeyword=co-op" in url:
+            raise httpx.HTTPStatusError("500", request=httpx.Request("GET", url), response=httpx.Response(500))
+        return card.format(n=len(url))
+
+    ctx.get_text = one_refused_term
+    assert len(asyncio.run(ats.icims(ctx, board))) >= 2  # the other terms' postings are kept
+
+    async def null_place(url, payload, **kw):
+        return {"opportunities": [{"Title": "Medical Assistant", "Id": "1", "Locations": [{"Address": {}, "LocalizedName": None}]}]}
+
+    ctx.post_json = null_place
+    assert asyncio.run(ats.ukg(ctx, {**board, "url": "https://recruiting.ultipro.com/EXA1000/JobBoard/0a1b"}))[0].locations == []
+
+    async def lists(url, **kw):
+        return ["not a listing", {"title": "Data Intern", "company_name": "Contoso", "url": "https://jobs.example.com/g",
+                                  "locations": [None, "Columbus, OH"], "terms": [None, "Summer 2027"]}]
+
+    _targets(["Software Engineer"])  # the lists only run for tech targets
+    ctx.get_json = lists
+    jobs = asyncio.run(github_lists.collect(ctx))
+    assert jobs and all(j.location == "Columbus, OH" for j in jobs)
+    asyncio.run(ctx.close())
+
+
 def test_detect_company_boards_from_links():
     assert ats.detect("https://job-boards.greenhouse.io/examplerobotics/jobs/123") == {"ats": "greenhouse", "slug": "examplerobotics"}
     assert ats.detect("https://boards.greenhouse.io/embed/job_board?for=example-robotics") == {"ats": "greenhouse", "slug": "example-robotics"}
