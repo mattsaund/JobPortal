@@ -501,8 +501,17 @@ def _docx_runs(paragraph, text: str, size_pt: float | None = None, link_color: s
             _add_run(paragraph, piece, **run_style)
 
 
+# The paragraph properties that come after <w:pBdr> inside <w:pPr>. WordprocessingML fixes their order (python-docx's
+# CT_PPr lists it), and Word may call a file with them out of order damaged.
+_AFTER_PBDR = ("w:shd", "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap", "w:overflowPunct", "w:topLinePunct",
+               "w:autoSpaceDE", "w:autoSpaceDN", "w:bidi", "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind",
+               "w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap", "w:jc", "w:textDirection", "w:textAlignment",
+               "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange")
+
+
 def _bottom_border(paragraph) -> None:
-    """Rule a thin line under a paragraph, Word's version of the CSS border-bottom under headings."""
+    """Rule a thin line under a paragraph, Word's version of the CSS border-bottom under headings. The border goes in its
+    place among the paragraph's properties, ahead of any spacing already set (a resume heading sets its spacing first)."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     border = OxmlElement("w:bottom")
@@ -510,7 +519,7 @@ def _bottom_border(paragraph) -> None:
         border.set(qn(key), value)
     borders = OxmlElement("w:pBdr")
     borders.append(border)
-    paragraph._p.get_or_add_pPr().append(borders)
+    paragraph._p.get_or_add_pPr().insert_element_before(borders, *_AFTER_PBDR)
 
 
 # ---------------------------------------------------------------- resume DOCX

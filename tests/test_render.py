@@ -40,6 +40,15 @@ def test_docx_links_and_numbered_lines(tmp_path):
     assert links[1].runs[0].bold
 
 
+def test_a_heading_rule_comes_before_its_spacing_in_the_word_file(tmp_path):
+    from docx import Document
+    from docx.oxml.ns import qn
+    render.resume_docx("# Jordan Rivera\njordan.rivera@example.com\n\n## Experience\n- Helped patients", tmp_path / "r.docx")
+    heading = next(p for p in Document(str(tmp_path / "r.docx")).paragraphs if p.text == "Experience")
+    tags = [child.tag for child in heading._p.pPr]
+    assert tags.index(qn("w:pBdr")) < tags.index(qn("w:spacing"))  # the border comes first, as WordprocessingML requires
+
+
 def test_control_characters_never_break_a_word_file(tmp_path):
     from docx import Document
     # \x0b is the line break text pasted from Word carries; python-docx used to refuse the whole file over it.
