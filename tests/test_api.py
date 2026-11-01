@@ -327,3 +327,12 @@ def test_skipping_application_sent_still_records_the_date(client, fake_ai):
     assert moved["applied_at"] and not moved.get("follow_up_at")  # applied, but not waiting on a reply anymore
     quick = client.post("/api/leads/manual", json={"title": "Line Cook", "company": "Example Diner", "app_status": "accepted"}).json()
     assert quick["applied_at"]
+
+
+def test_a_lead_never_gets_an_empty_status_or_an_unknown_kind(client):
+    lead = client.post("/api/leads/manual", json={"title": "Barista", "company": "Example Cafe", "app_status": "ready"}).json()
+    for empty in (None, ""):  # a lead with no status would be on no tab and no Tracker column
+        assert client.patch(f"/api/leads/{lead['id']}", json={"app_status": empty}).status_code == 400
+    assert client.get(f"/api/leads/{lead['id']}").json()["app_status"] == "ready"
+    assert client.post("/api/leads/manual", json={"title": "Chef", "company": "Example Bistro", "kind": "gig"}).status_code == 400
+    assert client.post("/api/leads/manual", json={"title": "Chef", "company": "Example Bistro", "kind": "event"}).json()["kind"] == "event"

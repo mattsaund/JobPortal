@@ -1,6 +1,5 @@
 """Leads: the Leads list and a lead's details, editing a lead, adding or deleting one by hand, re-scoring, and the Tracker
 board with its contacts. Downloads and AI edits of a lead's documents are in documents.py."""
-import json
 import shutil
 from datetime import date, timedelta
 
@@ -36,6 +35,7 @@ SORTS = {
 EDITABLE = {"app_status", "notes", "follow_up_at", "resume_md", "cover_md", "title", "company", "location", "deadline", "apply_url",
             "industry", "dream"}
 CONTACT_FIELDS = ("name", "title", "org", "email", "linkedin", "source_url", "why")
+LEAD_KINDS = ("posting", "program", "event", "intel")  # what a job added by hand can be (see RawJob.kind)
 
 
 @router.get("/api/leads")
@@ -99,9 +99,10 @@ def patch_lead(lead_id: int, body: dict):
         fields["dream"] = 1 if fields["dream"] else 0
         fields["dream_manual"] = fields["dream"]  # remembered, so re-checking the Dream list never overrides the user
     status = fields.get("app_status")
+    # Checked whenever it's sent: an empty or null status would leave the lead in no tab and on no Tracker column.
+    if "app_status" in fields and status not in APP_STATUSES:
+        raise HTTPException(400, "bad status")
     if status and status != current["app_status"]:
-        if status not in APP_STATUSES:
-            raise HTTPException(400, "bad status")
         db.add_event(lead_id, "status", f"{current['app_status']} → {status}")
         if status in APPLIED_STATUSES and not current.get("applied_at"):
             fields["applied_at"] = date.today().isoformat()
@@ -172,15 +173,17 @@ async def add_manual_lead(body: dict):
     url, text = (body.get("url") or "").strip(), (body.get("text") or "").strip()
     title, company = (body.get("title") or "").strip(), (body.get("company") or "").strip()
     location = (body.get("location") or "").strip()
-    status = body.get("app_status") or "new"
+    status, kind = body.get("app_status") or "new", body.get("kind") or "posting"
     if not url and not text and not (title and company):
         raise HTTPException(400, "paste a link or the job text, or give a job title and company")
     if status not in APP_STATUSES or status == "trashed":
         raise HTTPException(400, "bad status")
+    if kind not in LEAD_KINDS:
+        raise HTTPException(400, "bad kind")
     existing = packages.saved_manual_lead(url, text, title, company, location)
     if existing:
         return {**packages.lead_summary(existing), "existing": True}
-    lead_id = packages.add_manual_lead(url, text, title, company, location, body.get("kind", "posting"), app_status=status)
+    lead_id = packages.add_manual_lead(url, text, title, company, location, kind, app_status=status)
     if url or text:
         background.spawn(packages.build_package(lead_id), error_title="Package failed", lead_id=lead_id)
     summary = packages.lead_summary(lead_id)
@@ -245,7 +248,8 @@ def contacts():
     Contacts view."""
     out = []
     for row in db.q("SELECT id, title, company, app_status, package FROM leads WHERE app_status!='trashed' AND package!='{}'"):
-        for i, contact in enumerate(json.loads(row["package"] or "{}").get("contacts") or []):
+        package = db.lead_row(row)["package"] or {}  # lead_row: one damaged package can't break the whole list
+        for i, contact in enumerate(package.get("contacts") or []):
             out.append({**contact, "idx": i, "lead_id": row["id"], "lead_title": row["title"], "lead_company": row["company"],
                         "lead_status": row["app_status"]})
     return out
