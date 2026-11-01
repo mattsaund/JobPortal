@@ -285,10 +285,11 @@ async def usajobs(ctx: Ctx) -> list[RawJob]:
     key was issued to (the Sources dialog); without them this source skips itself. The API wants that email as the
     User-Agent and the key in an Authorization-Key header.
 
-    Searches the first six queries. Users searching at internship or entry level also get the student and recent-graduate
-    hiring paths (Pathways) and intern searches, and apprenticeship searches get apprentice and trainee roles. Each search
-    asks for up to 500 postings (the API's maximum) from the last 60 days. Titles skip the level check
-    (strict_titles=False): federal titles rarely name a level."""
+    Searches the first six queries. Early-career users (every level picked is internship, apprenticeship or entry level)
+    who include internship or entry level also get the student and recent-graduate hiring paths (Pathways) and intern
+    searches, and any search with apprenticeship gets apprentice and trainee roles. Each search asks for up to 500
+    postings (the API's maximum) from the last 60 days. Titles skip the level check (strict_titles=False): federal titles
+    rarely name a level."""
     sc = ctx.cfg["sources"]["usajobs"]
     if not sc.get("api_key") or not sc.get("email"):
         ctx.log("usajobs", "skipped: add a free API key and email in Sources (developer.usajobs.gov/apirequest). "
