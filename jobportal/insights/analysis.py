@@ -12,9 +12,13 @@ It works in two layers:
    suggests concrete moves: projects, certifications, things to add to the profile, and search changes. The result is
    stored as "analysis.latest", and a short history of fit scores ("analysis.history") lets the page show how fit changed.
 
-Genres live in settings (analysis.genres; the defaults are in core/genres.py). The profile runs run_ai() after every build or
-update (unless settings profile.auto_analyze is off), and the page has a Re-analyze button. Nothing here changes the profile.
-Called by web/routes/insights.py for web/static/js/pages/analysis.js."""
+Genres live in settings (analysis.genres; the defaults are in core/genres.py) and cover every field, so the page doesn't
+show them all: focus_genres() picks the ones that matter for this user, from what their targets point at (search/plan.py)
+and where their own search found and qualified jobs, filled up with the rest of the same field groups. A nurse sees nursing,
+allied health and the other healthcare genres; a developer sees the tech ones. The AI assesses only those.
+
+The profile runs run_ai() after every build or update (unless settings profile.auto_analyze is off), and the page has a
+Re-analyze button. Nothing here changes the profile. Called by web/routes/insights.py for web/static/js/pages/analysis.js."""
 import asyncio
 import json
 from collections import Counter, defaultdict
@@ -23,10 +27,12 @@ from statistics import mean
 from jobportal.ai import client as ai, prompts
 from jobportal.candidate import profile as profile_mod
 from jobportal.core import bus, db, settings as settings_mod
-from jobportal.core.genres import classify
+from jobportal.core.genres import GROUPS, classify, group_of
+from jobportal.search import plan
 
 # Lead stages that mean triage said yes: qualified, and every stage after it (packaging, ready, a failed package, a closed posting).
 QUALIFIED = ("qualified", "packaging", "ready", "closed", "error")
+FOCUS_MIN, FOCUS_MAX = 6, 12  # how many genres the page shows: enough for a readable radar, few enough to read
 _lock = asyncio.Lock()  # one AI assessment at a time
 
 
@@ -120,9 +126,36 @@ def _quality(leads: list[dict], column: str, missing: str) -> list[dict]:
     return sorted(rows, key=lambda row: -row["qualified"])
 
 
+def focus_genres(cfg: dict, genres: list[dict], demand: Counter, qualified: Counter) -> list[dict]:
+    """The genres that matter for this user, between FOCUS_MIN and FOCUS_MAX of them, grouped by field group in GROUPS order.
+
+    Each genre earns points from the user's targets (10 per point of plan.field_weights: target roles, role families, queries
+    and dream jobs), from its share of the postings their searches found (up to 20) and from their qualified leads (3 each).
+    The best FOCUS_MAX with at least one point are picked (a genre with a sliver of the market and nothing else doesn't
+    count). Fewer than FOCUS_MIN are filled up with the other genres of the same field groups, so a nurse also sees the rest
+    of healthcare. With nothing to go on at all (a new user), one genre from each field group is shown, so no field is
+    favored."""
+    weights = plan.field_weights(cfg)
+    total = sum(demand.values()) or 1
+    points = Counter()
+    for genre in genres:
+        gid = genre["id"]
+        points[gid] = 10 * weights[gid] + 20 * demand[gid] / total + 3 * qualified[gid]
+    picked = [g for g in sorted(genres, key=lambda g: -points[g["id"]]) if points[g["id"]] >= 1][:FOCUS_MAX]
+    for group in dict.fromkeys(group_of(g) for g in picked):  # the field groups already shown, strongest first
+        picked += [g for g in genres if group_of(g) == group and g not in picked][:max(0, FOCUS_MIN - len(picked))]
+    if not picked:
+        picked = [next(g for g in genres if group_of(g) == group) for group in GROUPS if any(group_of(g) == group for g in genres)]
+        picked = picked or genres[:FOCUS_MIN]
+    order = {group: i for i, group in enumerate(GROUPS)}
+    index = {g["id"]: i for i, g in enumerate(genres)}
+    return sorted(picked, key=lambda g: (order.get(group_of(g), len(order)), index[g["id"]]))
+
+
 def market(cfg: dict | None = None) -> dict:
     """The numbers behind the Analysis page, counted from the user's own leads and search runs (no AI call). See the module
-    docstring for what each part means."""
+    docstring for what each part means. "genres" holds only the genres that matter for this user (focus_genres), each with
+    its field group; "genres_total" says how many there are in all."""
     cfg = cfg or settings_mod.get()
     genres = cfg["analysis"]["genres"]
     leads = db.q("SELECT id, title, description, score, stage, app_status, source, triage, package, applied_at, industry, "
@@ -135,7 +168,7 @@ def market(cfg: dict | None = None) -> dict:
     else:
         demand = Counter(g for ids in genres_of.values() for g in ids)
         demand_source = "triaged leads (run a search to measure the full market)"
-    total, busiest = sum(demand.values()) or 1, max(demand.values(), default=0) or 1
+    total = sum(demand.values()) or 1
 
     qualified, scores = Counter(), defaultdict(list)
     for lead in leads:
@@ -144,14 +177,17 @@ def market(cfg: dict | None = None) -> dict:
                 qualified[genre] += 1
                 scores[genre].append(lead["score"] or 0)
     skills = _skill_coverage(leads, genres_of)
-    genre_rows = [{"id": g["id"], "label": g["label"], "demand_count": demand[g["id"]],
+    shown = focus_genres(cfg, genres, demand, qualified)
+    busiest = max((demand[g["id"]] for g in shown), default=0) or 1
+    genre_rows = [{"id": g["id"], "label": g["label"], "group": group_of(g), "demand_count": demand[g["id"]],
                    "demand_share": round(demand[g["id"]] / total, 4),
-                   "demand_index": round(100 * demand[g["id"]] / busiest),  # the busiest genre is 100
+                   "demand_index": round(100 * demand[g["id"]] / busiest),  # the busiest genre shown is 100
                    "qualified": qualified[g["id"]], "avg_score": _avg(scores[g["id"]]),
-                   "top_missing": [k for k, _ in skills["missed_by_genre"][g["id"]].most_common(5)]} for g in genres]
-    return {"genres": genre_rows, "industries": _quality(leads, "industry", "Other"), "demand_source": demand_source,
-            "demand_total": sum(demand.values()), "gaps": skills["gaps"], "strengths": skills["strengths"],
-            "packaged_leads": skills["packaged"], "funnel": _funnel(leads), "sources": _quality(leads, "source", "other")}
+                   "top_missing": [k for k, _ in skills["missed_by_genre"][g["id"]].most_common(5)]} for g in shown]
+    return {"genres": genre_rows, "genres_total": len(genres), "industries": _quality(leads, "industry", "Other"),
+            "demand_source": demand_source, "demand_total": sum(demand.values()), "gaps": skills["gaps"],
+            "strengths": skills["strengths"], "packaged_leads": skills["packaged"], "funnel": _funnel(leads),
+            "sources": _quality(leads, "source", "other")}
 
 
 def get() -> dict:
@@ -202,8 +238,9 @@ async def run_ai(reason: str = "manual") -> dict:
         bus.publish("analysis", {"running": True})
         try:
             cfg = settings_mod.get()
-            genres = cfg["analysis"]["genres"]
             numbers = market(cfg)
+            shown = {row["id"] for row in numbers["genres"]}
+            genres = [g for g in cfg["analysis"]["genres"] if g["id"] in shown]  # only the genres that matter for this user
             out = await ai.run(_prompt(genres, numbers), system=prompts.system("analysis", prompts.ANALYSIS_SYSTEM),
                                schema=prompts.ANALYSIS_SCHEMA, stage="analysis", purpose="analysis", label="analysis: fit radar",
                                timeout=1200)
