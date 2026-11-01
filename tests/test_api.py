@@ -175,6 +175,27 @@ def test_without_a_pdf_engine_downloads_say_what_to_install(client, monkeypatch)
         assert response.status_code == 503 and "needs Google Chrome" in response.json()["detail"]  # not a bare 500
 
 
+def test_imported_files_are_read_away_from_the_server_loop(client, monkeypatch, sample_resume):
+    import asyncio
+
+    from jobportal.documents import extract
+    real, where = extract.extract_text, []
+
+    def spy(*args, **kwargs):  # reading a .doc through LibreOffice can take seconds: the server must keep answering
+        try:
+            asyncio.get_running_loop()
+            where.append("event loop")
+        except RuntimeError:
+            where.append("worker thread")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(extract, "extract_text", spy)
+    assert client.put("/api/profile/documents?filename=cpr.txt", content=b"CPR certified by the American Heart Association, 2025").status_code == 200
+    assert client.put("/api/onboarding/resume?filename=resume.md&save_to_library=0&prefill=0", content=sample_resume.encode()).status_code == 200
+    assert client.put("/api/library/import?filename=resume.md", content=sample_resume.encode()).status_code == 200
+    assert where == ["worker thread"] * 3
+
+
 def test_manual_lead_needs_a_link_or_text(client, fake_ai):
     assert client.post("/api/leads/manual", json={}).status_code == 400
     lead = client.post("/api/leads/manual", json={"url": "https://jobs.example.com/9"}).json()

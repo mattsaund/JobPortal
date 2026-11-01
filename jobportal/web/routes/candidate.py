@@ -3,6 +3,8 @@ the questions JobPortal asks along the way.
 
 These are the only ways JobPortal learns about the user. Nothing else feeds the profile: not saved resumes, not leads, not
 anything found on the web."""
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Request
 
 from jobportal.ai import client as ai
@@ -107,7 +109,10 @@ async def add_document(request: Request, filename: str):
     after the user stops adding."""
     data = await read_upload(request)
     try:
-        return documents.add(filename, data)
+        # Read in a worker thread so a slow file doesn't hold up the server. add() itself stays on the event loop, where
+        # it can start the AI reading.
+        text = await asyncio.to_thread(documents.read_text, filename, data)
+        return documents.add(filename, data, text)
     except ValueError as e:  # extract.ExtractError (no readable text, unsupported type) or the document limit
         raise HTTPException(400, str(e))
 

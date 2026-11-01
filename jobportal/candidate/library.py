@@ -10,6 +10,7 @@ a style (theme and page limit), tags, notes, and where it came from (source, lea
 on demand into LIB_DIR/<id>/ by documents/exports.py and deleted whenever the item changes.
 
 Called by web/routes/library.py (the Resumes page) and web/routes/candidate.py (the copy of a newly imported resume)."""
+import asyncio
 import json
 import shutil
 from pathlib import Path
@@ -92,8 +93,10 @@ def delete(item_id: int) -> None:
 
 async def import_file(filename: str, data: bytes, name: str = "") -> dict:
     """Add a resume file to the library as editable markdown, wording kept exactly (see import_text()). Returns the new
-    item. Raises extract.ExtractError (a ValueError) when no text can be read from the file."""
-    return await import_text(extract.extract_text(filename, data), filename, name)
+    item. Raises extract.ExtractError (a ValueError) when no text can be read from the file. The file is read in a worker
+    thread, since a long PDF or a .doc (through LibreOffice) can take seconds and would otherwise hold up the server."""
+    text = await asyncio.to_thread(extract.extract_text, filename, data)
+    return await import_text(text, filename, name)
 
 
 async def import_text(text: str, filename: str = "resume.txt", name: str = "") -> dict:

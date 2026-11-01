@@ -16,6 +16,7 @@ Key ideas:
 - The voluntary self-identification section only fills in the Application kit, so the user can copy the answers into a
   form. It never reaches the AI.
 """
+import asyncio
 import hashlib
 import re
 import time
@@ -258,7 +259,8 @@ async def import_resume(filename: str, data: bytes | None = None, text: str | No
     {"resume": file details, "prefill": answers found}. Raises extract.ExtractError when no text can be read or pasted text
     is too short. It doesn't rebuild the profile; the caller decides when to."""
     if text is None:
-        text = extract.extract_text(filename, data or b"")
+        # In a worker thread: a long PDF or a .doc (through LibreOffice) can take seconds, and the server must keep answering.
+        text = await asyncio.to_thread(extract.extract_text, filename, data or b"")
     elif len(text.strip()) < extract.MIN_CHARS:
         raise extract.ExtractError("that's too short to be a resume. Paste the whole thing.")
     raw = data if data is not None else text.encode("utf-8")

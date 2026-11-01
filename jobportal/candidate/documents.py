@@ -404,11 +404,19 @@ def _save(docs: list[dict], changed: bool = True) -> None:
     _publish()
 
 
-def add(filename: str, data: bytes) -> dict:
+def read_text(filename: str, data: bytes) -> str:
+    """The text of a document file (documents/extract.py), allowing documents far shorter than a resume (MIN_CHARS). Raises
+    extract.ExtractError when no text can be read. It can take seconds (a long PDF, a .doc through LibreOffice), so async
+    callers run it in a worker thread."""
+    return extract.extract_text(filename, data, min_chars=MIN_CHARS).strip()
+
+
+def add(filename: str, data: bytes, text: str | None = None) -> dict:
     """Read one document and keep it, with its rules reading, and start its AI reading in the background when the user is
-    signed in with ChatGPT (_start_ai_reading). Returns its listing entry. The same file added again changes nothing and
-    comes back with "duplicate": True. Raises extract.ExtractError when no text can be read (a scanned image, an unsupported
-    type), and ValueError when MAX_DOCUMENTS are kept already."""
+    signed in with ChatGPT (_start_ai_reading). Returns its listing entry. `text` is the file's text when the caller already
+    read it with read_text() (the upload route does, in a worker thread); otherwise it's read here. The same file added
+    again changes nothing and comes back with "duplicate": True. Raises extract.ExtractError when no text can be read (a
+    scanned image, an unsupported type), and ValueError when MAX_DOCUMENTS are kept already."""
     with _lock:
         docs = all_documents()
         sha1 = hashlib.sha1(data).hexdigest()
@@ -417,7 +425,8 @@ def add(filename: str, data: bytes) -> dict:
             return {**_entry(same), "duplicate": True}
         if len(docs) >= MAX_DOCUMENTS:
             raise ValueError(f"You can keep up to {MAX_DOCUMENTS} documents. Remove one first.")
-        text = extract.extract_text(filename, data, min_chars=MIN_CHARS).strip()
+        if text is None:
+            text = read_text(filename, data)
         # A file name with no folder parts and no characters Windows forbids.
         name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", Path(filename or "document.txt").name).strip() or "document.txt"
         doc_id = uuid.uuid4().hex[:12]
@@ -605,7 +614,7 @@ async def make_main(doc_id: str) -> dict:
     remove(doc_id)
     if old and old_data.strip():
         try:
-            add(old["filename"], old_data)
+            add(old["filename"], old_data, await asyncio.to_thread(read_text, old["filename"], old_data))
         except ValueError:  # extract.ExtractError is a ValueError, and so is the document limit
             pass
     return profile.resume_info()
