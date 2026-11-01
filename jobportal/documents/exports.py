@@ -3,11 +3,14 @@
 
 A lead's documents are its resume, cover letter, interview prep, company brief, application answers, outreach emails,
 contacts and the original posting. Rendered resume and cover letter files are kept in the lead's folder in the data folder
-(leads/<id>/). Editing a document deletes its rendered files (routes/leads.py), so the next download shows the edit."""
+(leads/<id>/) and reused while they exist. Editing a document deletes its rendered files (routes/leads.py), so the next
+download shows the edit, and a cover letter rendered on an earlier day is rendered again, since it carries the date.
+Called by web/routes/documents.py and web/routes/library.py."""
 import csv
 import io
 import re
 import zipfile
+from datetime import date
 from pathlib import Path
 
 from jobportal.candidate import profile
@@ -32,7 +35,16 @@ def safe_filename(text: str) -> str:
     return re.sub(r"[^\w .&()-]+", "", text or "").strip()[:60]
 
 
+def _rendered_today(path: Path) -> bool:
+    """True when the file exists and was written today (by this computer's clock)."""
+    try:
+        return date.fromtimestamp(path.stat().st_mtime) == date.today()
+    except OSError:  # no such file
+        return False
+
+
 def _write_text(path: Path, text: str) -> Path:
+    """Write a text download (UTF-8), making its folder first, and return its path."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")  # UTF-8 on every system; Windows would otherwise pick a legacy code page
     return path
@@ -105,7 +117,7 @@ async def lead_file(lead: dict, name: str) -> tuple[Path, str]:
         out = await resume_file(md, folder, ext, style.get("theme", "classic"), style.get("max_pages", 1))
     elif doc == "cover_letter":
         out = folder / f"cover_letter.{ext}"
-        if not out.exists():
+        if not _rendered_today(out):  # the letter is dated, so one rendered on an earlier day (a package built last week) is stale
             folder.mkdir(parents=True, exist_ok=True)
             if ext == "pdf":
                 await render.cover_pdf(md, facts, lead["company"], lead["location"], out)

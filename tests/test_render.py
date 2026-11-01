@@ -52,6 +52,21 @@ def test_control_characters_never_break_a_word_file(tmp_path):
     assert b"Subject: Following up on the Data Intern role" in render.eml("hr@example.com", "Following up\non the Data Intern role", "Hi")
 
 
+def test_the_fit_loop_never_leaves_an_overflowing_try_in_place(tmp_path, monkeypatch):
+    out, tries = tmp_path / "resume.pdf", []
+
+    async def fake_print(html_text, path):
+        assert not out.exists()  # a download during the loop must not find a try that runs to two pages
+        path.write_bytes(b"%PDF-1.4 try")
+        tries.append(path)
+        return 2 if len(tries) < 3 else 1  # the third scale fits on one page
+
+    monkeypatch.setattr(render, "html_to_pdf", fake_print)
+    info = asyncio.run(render.resume_pdf("# Jordan Rivera", out))
+    assert info["pages"] == 1 and info["scale"] == render.FIT_SCALES[2] and render.fit_scale(out) == render.FIT_SCALES[2]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["resume.fit", "resume.pdf"]  # no drafts left behind
+
+
 def test_long_date_is_portable():
     assert render.long_date(date(2026, 3, 5)) == "March 5, 2026"
 

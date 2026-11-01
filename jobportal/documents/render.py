@@ -21,8 +21,10 @@ and mail links are kept (safe_href). python-docx is imported inside the DOCX fun
 import asyncio
 import html
 import json
+import os
 import re
 import tempfile
+import uuid
 from datetime import date
 from email.message import EmailMessage
 from itertools import groupby
@@ -361,19 +363,42 @@ async def html_to_pdf(html_text: str, out: Path) -> int:
     return pages
 
 
+async def _print_to_fit(make_html, scales: tuple[float, ...], max_pages: int, out: Path, before_publish=None) -> tuple[int, float]:
+    """The fit loop: print make_html(scale) at each scale in turn, stopping at the first that fits max_pages (the last one
+    is kept when none does), then move the result into place as out. Returns (pages, scale).
+
+    Every try goes to a draft file beside out, and the finished PDF replaces out in one step. Downloads reuse a rendered
+    file whenever it exists (documents/exports.py), so out must never hold a try that overflows, and two renders of the
+    same file must not delete each other's work. before_publish(pages, scale) runs just before the move (resume_pdf writes
+    the .fit file there, so a PDF never appears without the scale it was printed at)."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    draft = out.with_name(f".{out.stem}-{uuid.uuid4().hex[:8]}.draft{out.suffix}")
+    try:
+        for scale in scales:
+            pages = await html_to_pdf(make_html(scale), draft)
+            if pages <= max_pages:
+                break
+        if before_publish:
+            before_publish(pages, scale)
+        os.replace(draft, out)
+    finally:
+        draft.unlink(missing_ok=True)  # only still there when printing failed or was canceled
+    return pages, scale
+
+
 async def resume_pdf(md: str, out: Path, theme: str = "classic", max_pages: int = 1) -> dict:
     """Print a resume to the PDF file out, shrinking it until it fits max_pages (1, or 2 for federal resumes).
 
-    The fit loop prints at each scale in FIT_SCALES and stops at the first one that fits. When even 86% is too long, the
-    86% version is kept (resumecheck reports the overflow). Returns {"pages", "scale", "theme", "max_pages"} and saves the
-    same facts next to the PDF (resume.pdf gets resume.fit), so resume_docx can later use the same scale (fit_scale)."""
-    out.parent.mkdir(parents=True, exist_ok=True)
-    for scale in FIT_SCALES:
-        pages = await html_to_pdf(resume_html(md, scale, theme), out)
-        if pages <= max_pages:
-            break
-    info = {"pages": pages, "scale": scale, "theme": theme, "max_pages": max_pages}
-    out.with_suffix(".fit").write_text(json.dumps(info), encoding="utf-8")
+    The fit loop (_print_to_fit) prints at each scale in FIT_SCALES and stops at the first one that fits. When even 86% is
+    too long, the 86% version is kept (resumecheck reports the overflow). Returns {"pages", "scale", "theme", "max_pages"}
+    and saves the same facts next to the PDF (resume.pdf gets resume.fit), so resume_docx can later use the same scale
+    (fit_scale)."""
+    def save_fit(pages: int, scale: float) -> None:
+        info.update(pages=pages, scale=scale)
+        out.with_suffix(".fit").write_text(json.dumps(info), encoding="utf-8")
+
+    info = {"pages": 0, "scale": 1.0, "theme": theme, "max_pages": max_pages}
+    await _print_to_fit(lambda scale: resume_html(md, scale, theme), FIT_SCALES, max_pages, out, save_fit)
     return info
 
 
@@ -389,12 +414,9 @@ COVER_SCALES = (1.0, 0.95, 0.9)  # a cover letter shrinks less than a resume bef
 
 
 async def cover_pdf(md: str, facts: dict, company: str, location: str, out: Path) -> dict:
-    """Print a cover letter to the PDF file out, shrinking the text a little when it runs past one page. Returns {"pages"}."""
-    out.parent.mkdir(parents=True, exist_ok=True)
-    for scale in COVER_SCALES:
-        pages = await html_to_pdf(cover_html(md, facts, company, location, scale), out)
-        if pages <= 1:
-            break
+    """Print a cover letter to the PDF file out, shrinking the text a little when it runs past one page (the same fit loop
+    as a resume, _print_to_fit). Returns {"pages"}."""
+    pages, _ = await _print_to_fit(lambda scale: cover_html(md, facts, company, location, scale), COVER_SCALES, 1, out)
     return {"pages": pages}
 
 

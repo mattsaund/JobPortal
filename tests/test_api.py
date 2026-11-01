@@ -167,6 +167,26 @@ def test_lead_downloads(client):
     assert get("email-5.eml").status_code == 404 and get("cover_letter.md").status_code == 404 and get("resume.exe").status_code == 404
 
 
+def test_a_cover_letter_rendered_on_an_earlier_day_is_made_again(client):
+    import os
+    from datetime import date
+
+    from docx import Document
+
+    from jobportal.core import db
+    from jobportal.core.config import LEADS_DIR
+    from jobportal.documents import render
+    lead_id = _lead_with_documents()
+    db.update_lead(lead_id, cover_md="Dear Hiring Team,\n\nI'd like to help.\n\nSincerely,\nJordan Rivera")
+    assert client.get(f"/api/leads/{lead_id}/export/cover_letter.docx").status_code == 200
+    rendered = LEADS_DIR / str(lead_id) / "cover_letter.docx"
+    a_week_ago = rendered.stat().st_mtime - 7 * 86400
+    os.utime(rendered, (a_week_ago, a_week_ago))  # rendered when the package was built, last week
+    assert client.get(f"/api/leads/{lead_id}/export/cover_letter.docx").status_code == 200
+    assert date.fromtimestamp(rendered.stat().st_mtime) == date.today()
+    assert render.long_date() in [p.text for p in Document(str(rendered)).paragraphs]  # dated today, not last week
+
+
 def test_without_a_pdf_engine_downloads_say_what_to_install(client, monkeypatch):
     from jobportal.core import osutil
     monkeypatch.setattr(osutil, "find_pdf_engine", lambda: None)
