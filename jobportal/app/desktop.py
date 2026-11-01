@@ -115,7 +115,7 @@ class Bridge:
 
     def save_file(self, path: str) -> dict:
         """Download one of JobPortal's own exports (a /api/... path) and save it where the user picks in a Save dialog.
-        Returns {"ok": True, "path"}, {"ok": False, "cancelled": True} or {"ok": False, "error"}."""
+        Returns {"ok": True, "path"}, {"ok": False, "canceled": True} or {"ok": False, "error"}."""
         import webview
         if not (path or "").startswith("/api/"):
             return {"ok": False, "error": "not a JobPortal file"}
@@ -132,7 +132,7 @@ class Bridge:
         picked = self._window.create_file_dialog(webview.FileDialog.SAVE, directory=str(downloads if downloads.exists() else Path.home()),
                                                  save_filename=name)
         if not picked:
-            return {"ok": False, "cancelled": True}
+            return {"ok": False, "canceled": True}
         dest = Path(picked if isinstance(picked, str) else picked[0])  # some platforms return a list of one path
         dest.write_bytes(data)
         return {"ok": True, "path": str(dest)}

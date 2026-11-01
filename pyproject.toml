@@ -49,7 +49,7 @@ include = ["jobportal*"]
 
 [tool.setuptools.package-data]
 jobportal = ["resources/*"]
-"jobportal.web" = ["static/*", "static/fonts/*", "static/js/*", "static/js/components/*", "static/js/pages/*"]
+"jobportal.web" = ["static/*", "static/js/*", "static/js/components/*", "static/js/pages/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
