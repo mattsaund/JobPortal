@@ -368,16 +368,18 @@ def _entry(doc: dict) -> dict:
 
 def all_documents() -> list[dict]:
     """Every extra document, oldest first. Each one holds id, name, kind, text, chars, added_at, sha1, stored_as, parsed
-    and parsed_by. A document added before readings existed gets its rules reading here, once (saved quietly: nothing
-    about the document changed, so the profile isn't rebuilt)."""
+    and parsed_by. A document added before readings existed gets its rules reading here, once, and its kind is guessed
+    again with today's finer kinds (a license is no longer just a certificate). It's saved quietly: the document itself
+    didn't change, so the profile isn't rebuilt."""
     with _lock:
         docs = db.kv_get("profile.documents") or []
         unread = [doc for doc in docs if not doc.get("parsed")]
         if unread:
             owners = owner_names()
             for doc in unread:
-                doc["parsed"] = parse_rules(doc["name"], doc.get("text", ""), doc.get("kind"), owners)
+                doc["parsed"] = parse_rules(doc["name"], doc.get("text", ""), None, owners)
                 doc["parsed_by"] = "rules"
+                doc["kind"] = doc["parsed"]["kind"]
             db.kv_set("profile.documents", docs)
         return docs
 
@@ -399,14 +401,6 @@ def _save(docs: list[dict], changed: bool = True) -> None:
     if changed:
         db.kv_set("profile.documents_changed_at", time.time())
     _publish()
-
-
-def entry(doc_id: str) -> dict:
-    """The listing entry of one document. Raises KeyError for an unknown id."""
-    doc = next((d for d in all_documents() if d["id"] == doc_id), None)
-    if not doc:
-        raise KeyError(doc_id)
-    return _entry(doc)
 
 
 def add(filename: str, data: bytes) -> dict:
