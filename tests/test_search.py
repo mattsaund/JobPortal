@@ -725,6 +725,25 @@ def test_detect_company_boards_from_links():
     assert ats.detect("https://jobs.lever.co/example/abc") == {"ats": "lever", "slug": "example"}
     assert ats.detect("https://careers-example.icims.com/jobs/1/intern") == {"ats": "icims", "url": "https://careers-example.icims.com"}
     assert ats.detect("https://example.com/careers") is None
+    # The systems' own websites aren't boards, and a board id may be written in capitals.
+    for site in ("https://www.greenhouse.io/privacy-policy", "https://www.lever.co/careers", "https://www.ashbyhq.com/careers"):
+        assert ats.detect(site) is None, site
+    guid = "0A1B2C3D-4E5F-6789-ABCD-EF0123456789"
+    assert ats.detect(f"https://recruiting.ultipro.com/EXA1000EXMP/JobBoard/{guid}/?q=nurse") == {
+        "ats": "ukg", "url": f"https://recruiting.ultipro.com/EXA1000EXMP/JobBoard/{guid}"}
+    assert ats.detect("https://[x") is None  # a broken address, which used to raise
+
+
+def test_a_careers_page_is_searched_past_links_that_are_no_board(monkeypatch):
+    from jobportal.search import sources
+    page = ('<link rel="preconnect" href="https://boards.greenhouse.io"><a href="https://www.greenhouse.io/privacy">Privacy</a>'
+            '<script src="https://boards.greenhouse.io/embed/job_board/js?for=example-health"></script>')
+
+    async def careers_page(self, url, **kw):
+        return page
+
+    monkeypatch.setattr(Ctx, "get_text", careers_page)
+    assert asyncio.run(sources._board_linked_from("https://example.com/careers")) == {"ats": "greenhouse", "slug": "example-health"}
 
 
 def test_feeds_read_rss_and_atom():

@@ -273,30 +273,41 @@ async def collect(ctx: Ctx) -> list[RawJob]:
     return out
 
 
+# The hosts of the job boards found by slug, where the company's slug comes first in the path. Only these count: a link to
+# the systems' own websites (www.greenhouse.io/privacy-policy, www.lever.co/careers) isn't a board, and boards on hosts
+# the readers above don't call (jobs.eu.lever.co) would only fail later.
+SLUG_HOSTS = {"greenhouse": ("boards.greenhouse.io", "job-boards.greenhouse.io"), "lever": ("jobs.lever.co",),
+              "ashby": ("jobs.ashbyhq.com",), "smartrecruiters": ("jobs.smartrecruiters.com", "careers.smartrecruiters.com")}
+
+
 def detect(url: str) -> dict | None:
     """Turn a careers page or posting URL into a board entry ({"ats": ..., plus "slug" or "url"}), or None when it isn't a
-    supported system. For example jobs.lever.co/example-robotics/123 gives {"ats": "lever", "slug": "example-robotics"}."""
-    u = urlparse(url.strip())
-    host, path = u.netloc.lower(), u.path
+    supported board (or isn't a valid address). For example jobs.lever.co/example-robotics/123 gives {"ats": "lever",
+    "slug": "example-robotics"}."""
+    try:
+        u = urlparse(url.strip())
+        host = (u.hostname or "").lower()
+    except ValueError:  # such as "https://[x", whose host can't be read
+        return None
+    path = u.path
     segments = [s for s in path.split("/") if s]
-    if "greenhouse.io" in host:
+    if host in SLUG_HOSTS["greenhouse"]:
         embed = re.search(r"for=([\w-]+)", u.query)  # embedded boards: boards.greenhouse.io/embed/job_board?for=<slug>
         if embed:
             return {"ats": "greenhouse", "slug": embed.group(1)}
         if segments and segments[0] not in ("embed", "v1"):  # job-boards.greenhouse.io/<slug>/jobs/<id>
             return {"ats": "greenhouse", "slug": segments[0]}
-    if "lever.co" in host and segments:
-        return {"ats": "lever", "slug": segments[0]}
-    if "ashbyhq.com" in host and segments:
-        return {"ats": "ashby", "slug": segments[0]}
-    if "myworkdayjobs.com" in host:
+        return None
+    for system in ("lever", "ashby", "smartrecruiters"):
+        if host in SLUG_HOSTS[system] and segments:
+            return {"ats": system, "slug": segments[0]}
+    if host.endswith(".myworkdayjobs.com"):  # <tenant>.wd5.myworkdayjobs.com
         site = [s for s in segments if not LOCALE_SEGMENT.fullmatch(s)]
         return {"ats": "workday", "url": f"https://{host}/{site[0] if site else 'External'}"}
-    if "ultipro.com" in host and "JobBoard" in path:
-        board = re.search(r"(.*/JobBoard/[0-9a-f-]+)", f"https://{host}{path}")  # everything up to the board's id
+    if host.endswith("ultipro.com") and "/jobboard/" in path.lower():
+        # Everything up to the board's id, a GUID written in either case.
+        board = re.search(r"(.*/JobBoard/[0-9a-f-]+)", f"https://{host}{path}", re.I)
         return {"ats": "ukg", "url": board.group(1)} if board else None
     if host.endswith(".icims.com"):
         return {"ats": "icims", "url": f"https://{host}"}
-    if "smartrecruiters.com" in host and segments:
-        return {"ats": "smartrecruiters", "slug": segments[0]}
     return None
