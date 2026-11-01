@@ -446,21 +446,23 @@ DOCUMENT_SCHEMA = {"type": "object", "properties": {
 
 # ---------------------------------------------------------------- insights
 
-# The fit radar on the Analysis page: how well the candidate fits each work genre, and what would raise the fit.
-# insights/analysis.py sends the profile, the genres and market data from the user's own search results.
+# The role radar on the Analysis page: how well the candidate fits each role (a job title), what would raise the fit, and
+# which other roles they could go for. insights/analysis.py sends the roles it picked from the user's own data (each with an
+# id and where it came from), the titles the user removed, market data from their own search results and the full profile.
 ANALYSIS_SYSTEM = """You are a career analyst for one candidate, who may work in any field (healthcare, the trades, education, the arts,
-service, business, government, tech and more). You get their full profile, the work-type GENRES that matter for them (picked from
-their targets and their own search data), and real market data from their own job search (share of matching postings per genre in
-their locations and levels, qualified-lead counts and scores, and the skills employers asked for that their tailored resumes were
-missing).
+service, business, government, tech and more). You get their full profile, the ROLES to assess (job titles picked from their target
+roles, their search plan, their own work history, your earlier suggestions, their own search results and titles they added), and real
+market data from their own job search (postings per role in their locations and levels, qualified-lead counts and scores, and the
+skills employers asked for that their tailored resumes were missing).
 
-For EVERY genre, assess:
+For EVERY role, assess (using its id):
 - fit (0-100): how competitive their current evidence (jobs, licenses, certifications, training, coursework, projects, portfolio)
-  makes them for roles at their level in that genre. Calibrate: 80+ strong direct evidence; 60-79 solid related evidence; 40-59
+  makes them for that job title at their level. Calibrate: 80+ strong direct evidence; 60-79 solid related evidence; 40-59
   adjacent or transferable; under 40 little evidence.
-- interest (0-100): how well the genre matches their stated goals and target roles.
+- interest (0-100): how well the role matches their stated goals and target roles.
 - confidence: how much evidence you had ("low" | "medium" | "high").
-- evidence: 1-4 concrete items from the profile behind the fit score. gaps: what employers in this genre want that they can't show yet.
+- evidence: 1-4 concrete items from the profile behind the fit score. gaps: what employers hiring for this title want that they
+  can't show yet.
 - moves: 1-3 concrete actions that would raise fit, each typed:
   "project" (a scoped piece of work that builds on what they've done and proves a skill: a portfolio piece, a volunteer project, a
   small program or event they run, a code project; a one-line spec and what it proves),
@@ -468,31 +470,44 @@ For EVERY genre, assess:
   college), "profile" (something they have probably done but that isn't in their profile yet; they can add it by answering a
   question in JobPortal), or "search" (a way to steer the search).
   effort: "hours" | "days" | "weeks". impact: "low" | "medium" | "high".
-Then: summary (3-5 sentences, direct), top_priorities (3-6 moves with the best payoff = demand x interest x reachable gap, ranked),
-profile_suggestions (things worth adding to their profile), and search_steering (genres to emphasize or de-emphasize, search
-queries and companies to add). Be specific to THEIR work and experience; no generic advice. Use only the information given."""
+Then:
+- summary: 3-5 sentences, direct.
+- top_priorities: 3-6 moves with the best payoff = demand x interest x reachable gap, ranked. role: the id of the role it helps most.
+- profile_suggestions: things worth adding to their profile.
+- search_steering: role ids to emphasize or de-emphasize, search queries and companies to add.
+- suggested_roles: 2-4 other job titles this person could realistically go for, given their resume, documents and answers: roles
+  their experience, credentials and training already point to, named the way employers in that field post them (for example
+  "Nurse Educator" or "Case Manager" for an experienced nurse, "Estimator" for a carpenter, "Instructional Designer" for a teacher).
+  Keep an earlier suggestion that still fits (its line in ROLES says "your earlier suggestion"). Never suggest another title that's
+  already in ROLES, or one the candidate removed. For each: title, why (one sentence naming their evidence), and fit and interest on
+  the scales above.
+Be specific to THEIR work and experience; no generic advice. Use only the information given."""
 
-# One entry per genre, plus the summary, the top priorities, profile suggestions and search steering.
+# One entry per role, the suggested roles, the summary, the top priorities, profile suggestions and search steering.
+_ANALYSIS_MOVE = {"type": "object", "properties": {
+    "type": {"type": "string", "enum": ["project", "cert", "course", "profile", "search"]},
+    "title": {"type": "string"}, "detail": {"type": "string"},
+    "effort": {"type": "string", "enum": ["hours", "days", "weeks"]},
+    "impact": {"type": "string", "enum": ["low", "medium", "high"]},
+}, "required": ["type", "title", "detail", "effort", "impact"]}
 ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
-        "genres": {"type": "array", "items": {"type": "object", "properties": {
+        "roles": {"type": "array", "items": {"type": "object", "properties": {
             "id": {"type": "string"}, "fit": {"type": "integer"}, "interest": {"type": "integer"},
             "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
             "evidence": {"type": "array", "items": {"type": "string"}},
             "gaps": {"type": "array", "items": {"type": "string"}},
-            "moves": {"type": "array", "items": {"type": "object", "properties": {
-                "type": {"type": "string", "enum": ["project", "cert", "course", "profile", "search"]},
-                "title": {"type": "string"}, "detail": {"type": "string"},
-                "effort": {"type": "string", "enum": ["hours", "days", "weeks"]},
-                "impact": {"type": "string", "enum": ["low", "medium", "high"]},
-            }, "required": ["type", "title", "detail", "effort", "impact"]}},
+            "moves": {"type": "array", "items": _ANALYSIS_MOVE},
         }, "required": ["id", "fit", "interest", "confidence", "evidence", "gaps", "moves"]}},
+        "suggested_roles": {"type": "array", "items": {"type": "object", "properties": {
+            "title": {"type": "string"}, "why": {"type": "string"}, "fit": {"type": "integer"}, "interest": {"type": "integer"},
+        }, "required": ["title", "why", "fit", "interest"]}},
         "summary": {"type": "string"},
         "top_priorities": {"type": "array", "items": {"type": "object", "properties": {
-            "title": {"type": "string"}, "why": {"type": "string"}, "genre": {"type": "string"},
+            "title": {"type": "string"}, "why": {"type": "string"}, "role": {"type": "string"},
             "type": {"type": "string"}, "detail": {"type": "string"},
-        }, "required": ["title", "why", "genre", "type", "detail"]}},
+        }, "required": ["title", "why", "role", "type", "detail"]}},
         "profile_suggestions": {"type": "array", "items": {"type": "object", "properties": {
             "title": {"type": "string"}, "detail": {"type": "string"}}, "required": ["title", "detail"]}},
         "search_steering": {"type": "object", "properties": {
@@ -503,7 +518,7 @@ ANALYSIS_SCHEMA = {
             "notes": {"type": "string"},
         }, "required": ["emphasize", "deemphasize", "add_queries", "add_companies", "notes"]},
     },
-    "required": ["genres", "summary", "top_priorities", "profile_suggestions", "search_steering"],
+    "required": ["roles", "suggested_roles", "summary", "top_priorities", "profile_suggestions", "search_steering"],
 }
 
 

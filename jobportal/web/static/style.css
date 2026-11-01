@@ -683,7 +683,7 @@ progress::-moz-progress-bar { background: var(--green); }
 
 /* ---------------------------------------------------------------- Analysis */
 .analysis-top { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 16px; }
-main[data-page=analysis] > .panel, main[data-page=analysis] > .two-col { margin-bottom: 16px; }
+main[data-page=analysis] > .panel, main[data-page=analysis] > .two-col, main[data-page=analysis] > .banner { margin-bottom: 16px; }
 .radar { display: block; width: 100%; max-height: 560px; height: auto; stroke: none; }  /* each mark sets its own stroke */
 .radar .grid { fill: none; stroke: var(--border); stroke-width: 1; }
 .radar .spoke.on { stroke: var(--muted); }
@@ -715,13 +715,27 @@ main[data-page=analysis] > .panel, main[data-page=analysis] > .two-col { margin-
 .bar-track { height: 12px; }
 .bar-track i { display: block; height: 100%; min-width: 3px; border-radius: 0 4px 4px 0; background: var(--viz-fit); }
 .bar-value { color: var(--muted); font-variant-numeric: tabular-nums; }
-.genre-row { cursor: pointer; }
-.genre-row td:first-child { display: flex; align-items: center; gap: 6px; }
-.genre-row td:first-child svg { width: 14px; height: 14px; color: var(--muted); }
-.genre-row[aria-expanded=true] td:first-child svg { transform: rotate(180deg); }
-.genre-row:hover td { background: var(--page); }
-.genre-details td { background: var(--page); }
-.genre-details h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 12px; }
+/* the roles table: a role's name with its remove button at the end of the cell (so it stays in view on a phone, where the
+   table scrolls sideways), where the role came from, its numbers, and a details row under it */
+.role-row { cursor: pointer; }
+.role-row td { vertical-align: middle; }
+.role-name { display: flex; align-items: center; gap: 6px; min-width: 220px; }
+.role-name > svg { width: 14px; height: 14px; color: var(--muted); }
+.role-row[aria-expanded=true] .role-name > svg { transform: rotate(180deg); }
+.role-row:hover td { background: var(--page); }
+.role-remove { width: 26px; height: 26px; margin: -4px -4px -4px auto; }
+.role-remove svg { width: 14px; height: 14px; }
+.role-remove:hover { background: var(--bad-bg); color: var(--bad-text); }
+.roles-table .tag { white-space: nowrap; }
+.role-details td { background: var(--page); }
+.role-details h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 12px; }
+.role-origin, .role-why { margin: 0 0 12px; font-size: 12px; }
+.role-why { color: var(--text); }
+/* "Add a role" and the roles you removed, under the table */
+.role-controls { display: grid; gap: 12px; margin-top: 14px; padding-top: 16px; border-top: 1px solid var(--border); }
+.role-controls .inline-form { max-width: 560px; margin: 0; }
+.role-controls input { min-width: 230px; }  /* on a phone the button wraps under the box, so the placeholder shows whole */
+.role-removed { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
 .table td.change svg { width: 14px; height: 14px; }
 .table td.wrap { min-width: 160px; }
 .move-list { display: grid; margin: 10px 0 0; padding: 0; list-style: none; }
