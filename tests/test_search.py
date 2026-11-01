@@ -327,6 +327,20 @@ def test_retriage_tells_the_ai_when_a_dream_lead_may_be_anywhere(fake_ai):
     assert db.one("SELECT stage FROM leads WHERE id=?", (plain,))["stage"] == "filtered"
 
 
+def test_retriage_leaves_alone_a_lead_packaged_while_the_ai_worked(fake_ai):
+    settings.save(make_cfg(allowed=["Ohio"]))
+    lead_id = packages.insert_lead({"fingerprint": "p", "title": "Data Intern", "company": "Contoso", "location": "Columbus, OH",
+                                    "kind": "posting", "source": "ats", "stage": "qualified", "score": 70})
+
+    def answer(prompt: str) -> dict:
+        db.update_lead(lead_id, stage="ready", resume_md="# Jordan Rivera")  # the run's package worker finishes it meanwhile
+        return triage_answer(lambda item: 20)(prompt)
+
+    fake_ai.responses["retriage"] = answer
+    assert asyncio.run(pipeline.retriage_leads(reason="test"))["checked"] == 0
+    assert db.one("SELECT stage, score FROM leads WHERE id=?", (lead_id,)) == {"stage": "ready", "score": 70}
+
+
 def test_retag_industries_saves_only_valid_answers_for_leads_it_sent(fake_ai):
     first = packages.insert_lead({"fingerprint": "r1", "title": "Data Intern", "company": "Contoso", "industry": "Other"})
     second = packages.insert_lead({"fingerprint": "r2", "title": "Tutor", "company": "Example Academy", "industry": "Other"})

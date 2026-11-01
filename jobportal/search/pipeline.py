@@ -748,7 +748,8 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
     package. A new answer (a skill, a project, a certification) can turn an earlier "no" into a match, or the other way.
 
     Only leads without a resume and not in the trash are checked, RETRIAGE_BATCH per AI request (stage "triage"). Each lead's
-    score, verdict, triage notes and stage are updated; a stage change is recorded in its history and shown live. Returns
+    score, verdict, triage notes and stage are updated, unless its stage changed or it got a resume while the AI was
+    working (a package build during a search). A stage change is recorded in its history and shown live. Returns
     {ok, checked, promoted, demoted}, or ok False when a re-evaluation is already running. Toasts tell the user how it went;
     an AI failure stops it early with an error toast instead of raising."""
     if _retriage_lock.locked():
@@ -780,6 +781,11 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
             for k, lead in enumerate(batch):
                 result = results.get(str(k))
                 if not result:
+                    continue
+                # The AI takes a while, and this often runs during a search (a profile update at its start spawns it). A
+                # package worker may have built this lead meanwhile, or the user moved it: then the old stage is stale.
+                now = db.one("SELECT stage, resume_md FROM leads WHERE id=?", (lead["id"],))
+                if not now or now["stage"] != lead["stage"] or now["resume_md"] is not None:
                     continue
                 checked += 1
                 qualifies = _qualifies(result, min_score)
