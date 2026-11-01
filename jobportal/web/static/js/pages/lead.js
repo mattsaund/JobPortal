@@ -323,6 +323,7 @@ function renderEmailsTab(box, l, pkg) {
       <div class="block-actions end"><span class="muted-note">Download all emails:</span>${exportButtons(l.id, "emails", ["md", "docx", "pdf"])}
         <button class="button primary" type="button" data-act="save-emails">Save edits</button></div></div>`;
   box.addEventListener("input", (e) => {
+    if (e.target.dataset.erev != null) return;  // a "how to change it" instruction isn't an edit to save
     S.dirty = true;
     if (e.target.matches("[data-note]")) lv("[data-note-count]").textContent = `${e.target.value.length}/300`;  // LinkedIn allows 300 characters
   });
@@ -787,6 +788,7 @@ function resumeCheckBlock(check) {
 }
 
 // Runs the resume check again (POST /api/leads/{id}/resume-check) and swaps in the new block. The block dims meanwhile.
+// Check again keeps the focus when it was the button you pressed.
 async function recheckResume(id) {
   const shown = S.leadView && lv(".resume-check");
   if (shown) shown.style.opacity = 0.5;
@@ -794,7 +796,11 @@ async function recheckResume(id) {
     const check = await api(`/api/leads/${id}/resume-check`, { method: "POST" });
     if (S.lead?.id === id && S.lead.package) S.lead.package.resume_check = check;
     const current = S.leadView && lv(".resume-check");
-    if (current) current.outerHTML = resumeCheckBlock(check);
+    if (current) {
+      const parent = current.parentElement, focus = focusKey(current);
+      current.outerHTML = resumeCheckBlock(check);
+      refocus(parent, focus);
+    }
   } catch (e) {
     if (shown) shown.style.opacity = "";
     toast("The check didn't run", e.message, "error");
@@ -883,8 +889,11 @@ onAction("apply", (el) => {
 });
 onAction("detail-track", () => setStatus(S.lead.id, "ready"));
 onAction("detail-delete", async () => {
+  // Ask about unsaved edits now: once it's deleted, closing its card or dialog must not ask again (and get a no).
+  if (S.dirty && !confirm("Discard your unsaved edits?")) return;
   const { id, title, app_status: before } = S.lead;
   const summary = await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: "trashed" } });
+  S.dirty = false;
   toast("Deleted", title, "", null, { label: "Undo", run: async () => leadChanged(await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: before } })) });
   if (S.leadView.hashBase) location.hash = "#/leads";  // close its card
   else closeDialog(S.leadView.box.closest("dialog"));
@@ -910,7 +919,7 @@ onAction("resume-recheck", async () => {
   else recheckResume(S.lead.id);
 });
 onAction("lead-lib-save", async () => {
-  const name = prompt("Name this resume:", `${S.lead.company}: ${S.lead.title}`.slice(0, 90));
+  const name = prompt("Name this resume:", [S.lead.company, S.lead.title].filter(Boolean).join(": ").slice(0, 90));
   if (name === null) return;
   const item = await api("/api/library", { method: "POST", body: { lead_id: S.lead.id, name, md: S.editor?.text() || S.lead.resume_md, style: S.lead.package?.resume_style } });
   toast("Saved to your resumes", item.name);
@@ -944,8 +953,11 @@ onAction("copy-note", () => copy(lv("[data-note]").value, "LinkedIn note copied"
 // Contacts tab
 onAction("add-contact", async () => {
   const contact = {};
-  $$("[data-nc]", S.leadView.box).forEach((input) => (contact[input.dataset.nc] = input.value));
-  if (!contact.name) return;
+  $$("[data-nc]", S.leadView.box).forEach((input) => (contact[input.dataset.nc] = input.value.trim()));
+  if (!contact.name) {
+    toast("Add a name first", "A contact needs at least a name.", "error");
+    return;
+  }
   const r = await api(`/api/leads/${S.lead.id}/contacts/-1`, { method: "POST", body: contact });  // index -1 adds a contact
   S.lead.package.contacts = r.contacts;
   drawLeadTab();
