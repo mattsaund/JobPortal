@@ -30,29 +30,6 @@ def test_equity_mining_is_gone(client):
     assert client.get("/api/dreams").status_code == 200  # the Dream list stays
 
 
-def test_analysis_shows_the_genres_of_the_users_own_fields(client, fake_ai):
-    import asyncio
-
-    from jobportal.core import db
-    from jobportal.insights import analysis
-    market = client.get("/api/analysis").json()["market"]
-    groups = [row["group"] for row in market["genres"]]
-    assert len(groups) == len(set(groups)) >= 6  # a new user: one genre from each field group, so no field is favored
-    assert market["genres_total"] == len(client.get("/api/analysis").json()["genres"])
-    db.kv_set("profile.answers", {"target_roles": ["Registered Nurse", "Home Health Aide"]})
-    rows = client.get("/api/analysis").json()["market"]["genres"]
-    assert {"nursing", "caregiving"} <= {r["id"] for r in rows} and {r["group"] for r in rows} == {"healthcare"}
-    fake_ai.responses["analysis"] = {"genres": [{"id": "nursing", "fit": 140, "interest": 80, "confidence": "high", "evidence": [],
-                                                 "gaps": [], "moves": []}, {"id": "swe", "fit": 50, "interest": 10, "confidence": "low",
-                                                                            "evidence": [], "gaps": [], "moves": []}],
-                                     "summary": "", "top_priorities": [], "profile_suggestions": [],
-                                     "search_steering": {"emphasize": [], "deemphasize": [], "add_queries": [], "add_companies": [], "notes": ""}}
-    result = asyncio.run(analysis.run_ai("test"))["result"]
-    prompt = next(c for c in fake_ai.calls if c["purpose"] == "analysis")["prompt"]
-    assert "- nursing: Nursing" in prompt and "- swe:" not in prompt  # only the user's genres are assessed
-    assert result["genres"] == [{**fake_ai.responses["analysis"]["genres"][0], "fit": 100}]  # unknown ids dropped, scores held
-
-
 def test_refuses_foreign_host_headers(client):
     assert client.get("/api/meta", headers={"host": "evil.example:8788"}).status_code == 403
     assert client.get("/api/meta", headers={"host": "localhost:8788"}).status_code == 200

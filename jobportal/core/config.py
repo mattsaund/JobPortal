@@ -128,8 +128,15 @@ DEFAULT_SETTINGS = {
         "auto_analyze": True,  # re-run the Analysis after every profile update
         "retriage_on_change": True,  # re-score queued and filtered leads after the profile changes
     },
-    # Work-type genres: the spokes of the Analysis radar, also tagged on every lead. No page edits them (genres.py).
-    "analysis": {"genres": DEFAULT_GENRES},
+    "analysis": {
+        # Work-type genres: triage tags every lead with them, and the search mixes kinds of work by them. No page edits
+        # them (genres.py). The Analysis radar's axes are job titles instead (insights/analysis.py).
+        "genres": DEFAULT_GENRES,
+        # The Analysis page's role controls: job titles the user removed from the radar (they stay off it, whatever
+        # suggests them again) and job titles they added themselves (they always show).
+        "hidden_roles": [],
+        "pinned_roles": [],
+    },
     "industries": DEFAULT_INDUSTRIES,  # Settings page, "Industries": the list every lead is tagged from (genres.py)
     # The Dream list page. Leads that match get the dream flag, which never changes their score.
     "dream_companies": [],  # companies the user added (saving the standard answers sets it to their dream companies)
