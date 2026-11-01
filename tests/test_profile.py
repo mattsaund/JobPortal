@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import time
 
 from conftest import PROFILE_OUT, STANDARD_ANSWERS
 
@@ -52,6 +53,23 @@ def test_answers_update_only_what_changes(fake_ai, sample_resume):
     q = profile.questions()[0]
     assert q["status"] == "answered" and q["synced"]
     assert "300 students" in profile.full_context()
+
+
+def test_a_failed_sync_waits_before_trying_again(fake_ai, sample_resume, monkeypatch):
+    _setup(fake_ai, sample_resume)
+    asyncio.run(profile.build("test"))
+    db.kv_set("profile.documents_changed_at", time.time() - 120)  # a document added two minutes ago
+    del fake_ai.responses["profile-build"]  # and now every build fails, as when the ChatGPT sign-in has ended
+    options = {"sync_delay_sec": 60}
+    assert asyncio.run(profile.sync_once(options)) == "failed"
+    assert asyncio.run(profile.sync_once(options)) == "waiting"  # not one failing AI call (and error toast) per tick
+    assert sum(c["purpose"] == "profile-build" for c in fake_ai.calls) == 2  # the first build, then one failed try
+    db.kv_set("profile.documents_changed_at", time.time() - 90)  # another document: worth a new try right away
+    assert asyncio.run(profile.sync_once(options)) == "failed"
+    fake_ai.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
+    monkeypatch.setattr(profile, "RETRY_AFTER_FAILURE_SEC", 0)  # the wait is over
+    assert asyncio.run(profile.sync_once(options)) == "done"
+    assert asyncio.run(profile.sync_once(options)) == ""  # the documents are in the profile now
 
 
 def test_answers_given_during_an_update_wait_for_the_next_one(fake_ai, sample_resume):

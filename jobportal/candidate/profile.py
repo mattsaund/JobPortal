@@ -696,36 +696,63 @@ def overview() -> dict:
 
 # ---------------------------------------------------------------- background sync of answers
 
+WATCH_EVERY_SEC = 15  # how often answers_watcher() looks for work
+# After a sync fails (signed out of ChatGPT, the plan's usage cap, no connection), the same sync waits this long before it
+# is tried again, so the user gets one error toast instead of one every WATCH_EVERY_SEC.
+RETRY_AFTER_FAILURE_SEC = 600
+_last_failure: dict = {}  # the sync that failed last: {"key": what it was for, "at": when}
+
+
 async def answers_watcher(settings_get):
-    """A loop the server starts at launch. Every 15 seconds it checks three things, and acts once the user has paused for
-    sync_delay_sec (60 by default):
+    """A loop the server starts at launch. Every WATCH_EVERY_SEC seconds it runs sync_once(), which keeps the profile in
+    step with documents and answers once the user has paused. settings_get is the function that returns the current
+    settings (the server passes settings.get)."""
+    while True:
+        await asyncio.sleep(WATCH_EVERY_SEC)
+        try:
+            await sync_once(settings_get().get("profile", {}))
+        except Exception:  # noqa: BLE001 (the watcher must never stop; a failed build or update already showed its error)
+            pass
+
+
+async def sync_once(options: dict) -> str:
+    """One look for work by answers_watcher(). It acts once the user has paused for sync_delay_sec (60 by default), on the
+    first of these that applies:
     - Documents added or removed since the last build: build() runs again, so the profile reads them.
     - Standard answers changed on the Home page since the last build (onboarding.merge_answers): build() runs again.
     - Answers to follow-up questions that aren't in the profile yet: update_from_answers() adds them.
 
     It does nothing while a search or another profile update is running, when settings profile.auto_sync_answers is off,
-    or before the first build. settings_get is the function that returns the current settings (the server passes settings.get)."""
-    while True:
-        await asyncio.sleep(15)
-        try:
-            options = settings_get().get("profile", {})
-            if not options.get("auto_sync_answers", True) or not is_built():
-                continue
-            if _lock.locked() or bus.state.get("running"):
-                continue  # busy now, so check again on the next tick
-            delay = float(options.get("sync_delay_sec", 60))
-            documents_changed = db.kv_get("profile.documents_changed_at")
-            if documents_changed and documents_changed != db.kv_get("profile.documents_built"):
-                if time.time() - float(documents_changed) >= delay:
-                    await build("documents changed")  # a full build also reads every waiting answer
-                continue
-            answers_changed = db.kv_get("profile.answers_changed_at")
-            if answers_changed and answers_changed != db.kv_get("profile.answers_built"):
-                if time.time() - float(answers_changed) >= delay:
-                    await build("standard answers changed")
-                continue
-            pending = unsynced()
-            if pending and time.time() - max(float(q.get("answered_ts") or 0) for q in pending) >= delay:
-                await update_from_answers("answered questions")
-        except Exception:  # noqa: BLE001 (the watcher must never stop; update_from_answers already showed the error)
-            pass
+    or before the first build. A sync that failed is tried again only after RETRY_AFTER_FAILURE_SEC, unless what it was
+    for changed meanwhile (another document, another answer). `options` is the "profile" section of the settings.
+
+    Returns what happened, for tests: "" (nothing to do yet), "waiting" (the same sync failed a moment ago), "done", or
+    "failed" (the build or update raised; it already showed the error). Side effects: the build or update it runs."""
+    if not options.get("auto_sync_answers", True) or not is_built() or _lock.locked() or bus.state.get("running"):
+        return ""
+    delay, now = float(options.get("sync_delay_sec", 60)), time.time()
+    work = None  # (what the sync is for, the coroutine function to run, the reason for the changelog)
+    documents_changed = db.kv_get("profile.documents_changed_at")
+    answers_changed = db.kv_get("profile.answers_changed_at")
+    if documents_changed and documents_changed != db.kv_get("profile.documents_built"):
+        if now - float(documents_changed) >= delay:
+            work = (("documents", documents_changed), build, "documents changed")  # a full build also reads waiting answers
+    elif answers_changed and answers_changed != db.kv_get("profile.answers_built"):
+        if now - float(answers_changed) >= delay:
+            work = (("answers", answers_changed), build, "standard answers changed")
+    elif pending := unsynced():
+        newest = max(float(q.get("answered_ts") or 0) for q in pending)
+        if now - newest >= delay:
+            work = (("questions", newest), update_from_answers, "answered questions")
+    if not work:
+        return ""
+    key, run, reason = work
+    if _last_failure.get("key") == key and now - _last_failure["at"] < RETRY_AFTER_FAILURE_SEC:
+        return "waiting"
+    try:
+        await run(reason)
+    except Exception:  # noqa: BLE001 (remembered so the same failure isn't retried at once; the error was already shown)
+        _last_failure.update(key=key, at=time.time())
+        return "failed"
+    _last_failure.clear()
+    return "done"
