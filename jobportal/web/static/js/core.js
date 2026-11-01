@@ -2,6 +2,8 @@
 
    - Helpers: $ and $$ find elements, esc() makes text safe inside HTML, safeUrl() keeps only web and mail links, api()
      calls the server, store reads and writes browser storage, plus small formatters.
+   - Focus: focusKey() and refocus() keep a keyboard user's place when a live update redraws a part of the page, and
+     typingIn() tells a redraw to leave a text box alone while you type in it.
    - md(): a small Markdown renderer for the text the AI writes.
    - icon(): the line icons of the design, drawn in the color of the text around them.
    - S: the app state that every page reads and writes.
@@ -11,7 +13,8 @@
 
    How clicks work: any element with data-act="name" runs the handler registered with onAction("name", fn), wherever it
    is: a page in <main>, a dialog, the sidebar or the top bar. Each file registers its own handlers at the bottom, and
-   main.js holds the one listener that calls them. */
+   main.js holds the one listener that calls them.
+   APIs: only POST /api/open-external (openUrl, in a browser app window). Everything else calls the server through api(). */
 "use strict";
 
 // ---------------------------------------------------------------- helpers
@@ -111,11 +114,40 @@ async function copy(text, label = "Copied") {
   toast(label, text.length > 90 ? text.slice(0, 90) + "…" : text);
 }
 
+// ---------------------------------------------------------------- focus
+// Live updates and saves redraw parts of a page while you may be using them, and replacing HTML drops the focus.
+// focusKey(root) describes the focused element inside root as a CSS selector made of its tag and its id, href, name and
+// data-* attributes ("button[data-act="track-open"][data-id="12"]"), or "" when the focus is elsewhere or the element
+// has none of them. After root is redrawn, refocus(root, key) focuses the element that matches, so a keyboard user keeps
+// their place. It does nothing when something still has the focus.
+const FOCUS_ATTRS = /^(id|href|name|data-[\w-]+)$/;
+function focusKey(root) {
+  const el = document.activeElement;
+  if (!el || el === document.body || !root.contains(el)) return "";
+  const attrs = [...el.attributes].filter((attr) => FOCUS_ATTRS.test(attr.name)).map((attr) => `[${attr.name}="${CSS.escape(attr.value)}"]`);
+  return attrs.length ? el.tagName.toLowerCase() + attrs.join("") : "";
+}
+function refocus(root, key) {
+  const now = document.activeElement;
+  if (!key || (now && now !== document.body && now.isConnected)) return;
+  $(key, root)?.focus({ preventScroll: true });
+}
+
+// True while you're typing in a text box (or text area) inside el. A live redraw keeps such a part as it is, so it never
+// eats what you're typing or moves your cursor. Checkboxes and menus don't count: redrawing those loses nothing.
+const TEXT_INPUT_TYPES = /^(text|search|email|url|tel|number|password|date)$/;
+function typingIn(el) {
+  const now = document.activeElement;
+  return !!(el && now && el.contains(now) && (now.tagName === "TEXTAREA" || (now.tagName === "INPUT" && TEXT_INPUT_TYPES.test(now.type))));
+}
+
 // ---------------------------------------------------------------- formatting
 // "today", "1d ago", "12d ago" or "3mo ago" for an ISO date or timestamp. A bare date (2026-10-29) counts from noon.
+// "" for no date, or for one that can't be read (a scraped "posted" field can hold anything).
 function ago(iso) {
   if (!iso) return "";
   const time = new Date(iso.length <= 10 ? iso + "T12:00:00" : iso).getTime();
+  if (isNaN(time)) return "";
   const days = (Date.now() - time) / 86400000;
   if (days < 1) return "today";
   if (days < 2) return "1d ago";
@@ -311,7 +343,7 @@ const S = {
   industries: null,       // the industry list from Settings, for the lead details' industry menu
   profileCache: null,     // GET /api/profile, kept for the Application kit and Settings, Profile (reset on "profile")
   route: [],              // the current hash split into parts: #/leads/12/emails is ["leads", "12", "emails"]
-  dirty: false,           // the open editor or form has unsaved edits
+  dirty: false,           // unsaved edits on screen: an editor, a form, a lead's notes, an answer typed on Home
   quit: false,            // you quit JobPortal from Settings: don't reconnect the live stream
   notify: store.get("notify") === "1",  // system notifications for toasts while JobPortal is in the background
   // Leads page (leads.js). The filter and the feed's open state are remembered.
@@ -385,7 +417,10 @@ function toast(title, body = "", level = "", leadId = null, action = null) {
 // one opened from another sits on top of it. Clicks inside run data-act actions like anywhere else.
 // opts: eyebrow (the small heading), wide (a large dialog, for a lead's details), guard (it edits: closing it with
 // unsaved edits asks first, and closing it drops them), onClose (runs once it has closed, whatever closed it).
+// When it closes, the focus goes back to what opened it. The browser does that while the opener is still on the page;
+// when a live update redrew it meanwhile (a Tracker card, the search area card), its twin in the new HTML gets the focus.
 function openDialog(html, opts = {}) {
+  const openerKey = focusKey(document.body), page = main.dataset.page;
   const dialog = document.createElement("dialog");
   dialog.className = opts.wide ? "wide" : "";
   dialog.innerHTML = `<div class="dialog-body"><div class="dialog-top"><span class="eyebrow">${esc(opts.eyebrow || "")}</span>`
@@ -405,6 +440,7 @@ function openDialog(html, opts = {}) {
     }
     dialog.remove();
     if (dialog.jp.onClose) dialog.jp.onClose();
+    if (main.dataset.page === page) refocus(document.body, openerKey);  // not after a move to another page
   });
   document.body.appendChild(dialog);
   dialog.showModal();
@@ -420,19 +456,32 @@ function closeDialog(dialog = $$("dialog[open]").at(-1)) {
 }
 
 // ---------------------------------------------------------------- pop-up menus
-// A button with data-act="menu" opens the .menu right after it (both inside a .menu-wrap). Picking an item, a click
-// anywhere else or Esc closes it.
-function closeMenus() {
+// A button with data-act="menu" opens the .menu right after it (both inside a .menu-wrap), and the focus moves to its
+// first item. The arrow keys, Home and End move between the items. Picking one, a click anywhere else, or the focus
+// moving out (Tab past the last item) closes it; Esc closes it too and puts the focus back on the button.
+function closeMenus(focusButton = false) {
   $$(".menu:not([hidden])").forEach((menu) => {
+    const button = menu.previousElementSibling, hadFocus = menu.contains(document.activeElement);
     menu.hidden = true;
-    menu.previousElementSibling?.setAttribute("aria-expanded", "false");
+    button?.setAttribute("aria-expanded", "false");
+    if (focusButton && hadFocus) button?.focus();
   });
 }
 document.addEventListener("click", (e) => {
   if (!e.target.closest(".menu-wrap") || e.target.closest(".menu [data-act]")) closeMenus();
 });
+document.addEventListener("focusin", (e) => {
+  if (!e.target.closest?.(".menu-wrap")) closeMenus();
+});
+const MENU_KEYS = ["ArrowDown", "ArrowUp", "Home", "End"];
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeMenus();
+  if (e.key === "Escape") closeMenus(true);
+  const menu = MENU_KEYS.includes(e.key) && e.target.closest?.(".menu:not([hidden])");
+  if (!menu) return;
+  e.preventDefault();  // the arrows would scroll the page
+  const items = $$("[role=menuitem]", menu), at = items.indexOf(e.target);
+  const step = e.key === "ArrowDown" ? 1 : -1;
+  items[e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + step + items.length) % items.length]?.focus();
 });
 
 // ---------------------------------------------------------------- own window
@@ -515,4 +564,5 @@ onAction("menu", (el) => {
   closeMenus();
   menu.hidden = !opening;
   el.setAttribute("aria-expanded", String(opening));
+  if (opening) $("[role=menuitem]", menu)?.focus();
 });

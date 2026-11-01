@@ -5,8 +5,8 @@
    your resume's text, replace the main resume with one file, see the text read from it, make another document the main
    resume, have one read again, or remove it.
    APIs: PUT /api/profile/documents?filename= (one file as the body), POST /api/profile/documents/auto-main,
-   POST /api/profile/documents/{id}/main and /parse, DELETE /api/profile/documents/{id}, POST /api/onboarding/resume-text
-   and PUT /api/onboarding/resume?filename=. A "documents" event carries the new list (live.js). */
+   POST /api/profile/documents/{id}/main and /parse, DELETE /api/profile/documents/{id}, POST /api/onboarding/resume-text,
+   PUT /api/onboarding/resume?filename= and POST /api/profile/build. A "documents" event carries the new list (live.js). */
 "use strict";
 
 // The upload in progress: { done, total, name } while files go up, { reading: true } while the main resume is read.
@@ -30,25 +30,36 @@ function uploadNote() {
 }
 const showUploadNote = () => $$("[data-doc-progress]").forEach((el) => (el.innerHTML = uploadNote()));
 
-// The "Your documents" panel: the drop zone and the list, main resume first.
+// The "Your documents" panel: the drop zone and the list, main resume first. "Or paste your resume's text" shows only
+// until there's a main resume.
 function documentsPanel() {
-  const paste = S.onboarding?.resume ? "" : `<button class="text-button" type="button" data-act="paste-resume">Or paste your resume's text ${icon("arrow")}</button>`;
   return `<div class="tool-heading"><span class="tool-icon blue">${icon("file")}</span>
       <div><h2>Your documents</h2><p>Everything here goes into your profile.</p></div></div>
     ${documentsDropZone(false)}
     <div data-doc-list>${documentsList()}</div>
-    ${paste}`;
+    <button class="text-button" type="button" data-act="paste-resume" data-doc-paste${S.onboarding?.resume ? " hidden" : ""}>Or paste your resume's text ${icon("arrow")}</button>`;
+}
+
+// Draws the panel into el the first time, and after that only its list and the paste button. The drop zone stays in
+// the page: a live update while its file picker is open would otherwise drop the files you pick.
+function renderDocumentsPanel(el) {
+  if (!el) return;
+  if (!$("[data-doc-list]", el)) {
+    el.innerHTML = documentsPanel();
+    return;
+  }
+  renderDocumentLists();
+  $("[data-doc-paste]", el).hidden = !!S.onboarding?.resume;
 }
 
 // The list: the main resume, then each document with what kind it is and what was read from it.
 function documentsList() {
   const resume = S.onboarding?.resume, docs = S.documents || [];
-  const accept = esc(S.onboarding?.accept || "");
   const main = resume ? `<li class="doc main"><span class="doc-icon">${icon("file")}</span><div class="doc-body">
       <div class="doc-name"><strong title="${esc(resume.filename)}">${esc(resume.filename)}</strong><span class="tag green">MAIN RESUME</span></div>
       <small>Added ${esc(fmtTs(resume.imported_at))}</small>
       <div class="doc-actions"><button class="text-button" type="button" data-act="resume-read">What it read</button>
-        <label class="text-button">Replace<input type="file" data-replace-resume accept="${accept}" hidden></label>
+        <button class="text-button" type="button" data-act="resume-replace">Replace</button>
         <button class="text-button" type="button" data-act="paste-resume">Paste text instead</button></div></div></li>` : "";
   if (!main && !docs.length) return `<p class="muted-note">Nothing yet. Start with your resume.</p>`;
   return `<ul class="doc-list">${main}${docs.map(documentRow).join("")}</ul>`;
@@ -72,17 +83,40 @@ function documentRow(doc) {
         <button class="text-button danger" type="button" data-act="doc-remove" data-id="${esc(doc.id)}" data-name="${esc(doc.name)}">Remove</button></div></div></li>`;
 }
 
-// Redraws every document list on the page (Home has one in its panel).
-const renderDocumentLists = () => $$("[data-doc-list]").forEach((el) => (el.innerHTML = documentsList()));
+// Redraws every document list on the page (Home has one in its panel). A focused button gets the focus back.
+const renderDocumentLists = () => $$("[data-doc-list]").forEach((el) => {
+  const focus = focusKey(el);
+  el.innerHTML = documentsList();
+  refocus(el, focus);
+});
+
+// Whether the server can read a file, by its extension: the types in S.onboarding.accept (".pdf,.docx,...", from
+// SUPPORTED in documents/extract.py). A name without one is read as text there, so it passes too.
+function readable(file) {
+  const dot = file.name.lastIndexOf(".");
+  const ext = dot > 0 ? file.name.slice(dot).toLowerCase() : "";
+  const types = (S.onboarding?.accept || "").toLowerCase().split(",").map((type) => type.trim()).filter(Boolean);
+  return !ext || !types.length || types.includes(ext);
+}
+
+// "a.pdf, b.pdf, c.pdf and 4 more": the start of a long list of names, for a toast.
+const someNames = (names) => names.slice(0, 3).join(", ") + (names.length > 3 ? ` and ${names.length - 3} more` : "");
 
 // Sends the files one at a time. Then, with no main resume yet, the server makes the best resume among the documents the
-// main one, and its answers fill in your questions. A summary toast says what happened.
+// main one, and its answers fill in your questions. Summary toasts say what happened. Files the server can't read (a
+// folder's photos, a spreadsheet) are skipped before they're sent, and the ones that fail are grouped by why, so a big
+// folder makes a few short toasts instead of one per file.
 async function addDocuments(files) {
   if (docUpload) {
     toast("Still adding the last ones", "Drop these again in a moment.");
     return;
   }
-  const added = [], same = [], failed = [];
+  const skipped = files.filter((file) => !readable(file)).map((file) => file.name);
+  files = files.filter(readable);
+  if (skipped.length) toast(`Skipped ${plural(skipped.length, "file")}`, `JobPortal reads PDF, Word, ODT, RTF and text files. Skipped: ${someNames(skipped)}.`);
+  if (!files.length) return;
+  const added = [], same = [], failed = new Map();  // failed: the server's message, then the names it was for
+  const fail = (message, name) => failed.set(message, [...(failed.get(message) || []), name]);
   for (const [i, file] of files.entries()) {
     docUpload = { done: i, total: files.length, name: file.name };
     showUploadNote();
@@ -90,7 +124,7 @@ async function addDocuments(files) {
       const reply = await uploadFile(`/api/profile/documents?filename=${encodeURIComponent(file.name)}`, file);
       (reply.duplicate ? same : added).push(reply);
     } catch (err) {
-      failed.push(`${file.name}: ${err.message}`);
+      fail(err.message, file.name);
     }
   }
   let picked = null;
@@ -100,7 +134,7 @@ async function addDocuments(files) {
     try {
       picked = (await api("/api/profile/documents/auto-main", { method: "POST" })).picked;
     } catch (err) {
-      failed.push(`Your resume: ${err.message}`);
+      fail(err.message, "Your resume");
     }
   }
   docUpload = null;
@@ -112,12 +146,19 @@ async function addDocuments(files) {
   if (!S.onboarding?.resume && !picked && (added.length || same.length)) {
     toast("Which one is your resume?", "None of these looks like a resume. Pick one with Use as main resume, or paste the text.");
   }
-  if (failed.length) toast(`Couldn't read ${plural(failed.length, "file")}`, failed.join(" "), "error");
+  if (failed.size) {
+    const count = [...failed.values()].reduce((sum, names) => sum + names.length, 0);
+    toast(`Couldn't add ${plural(count, "file")}`, [...failed].map(([message, names]) => `${someNames(names)}: ${message}`).join(" "), "error");
+  }
 }
 
 // Replaces the main resume with one file. Before your answers are saved, it fills in the empty ones again; after, your
-// profile is rebuilt from it.
+// profile is rebuilt from it. Not while files are still going up: the batch would pick a main resume of its own.
 async function replaceResume(file) {
+  if (docUpload) {
+    toast("Still adding your documents", "Replace your resume when they're in.");
+    return;
+  }
   const answered = !!S.onboarding?.answers_saved;
   docUpload = { reading: true };
   showUploadNote();
@@ -132,6 +173,21 @@ async function replaceResume(file) {
   await reloadOnboarding();
 }
 
+// Opens the system's file picker for one file and calls pick with it. The input isn't part of any list: a live update
+// that redraws the list while the picker is open can't take your choice with it.
+function pickOneFile(accept, pick) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = accept;
+  input.hidden = true;
+  input.addEventListener("change", () => {
+    input.remove();
+    if (input.files[0]) pick(input.files[0]);
+  });
+  document.body.appendChild(input);  // some browsers open a picker only for an input that's in the page
+  input.click();
+}
+
 // The paste dialog: your resume as plain text, read like a file.
 function pasteResumeDialog() {
   const dialog = openDialog(`<h2>Paste your resume</h2><p>Copy all the text from your resume and paste it here.</p>
@@ -143,13 +199,9 @@ function pasteResumeDialog() {
 
 // ---------------------------------------------------------------- actions
 onDrop("documents", (files) => addDocuments(files));
-onChange(async (el) => {
-  if (!el.matches("[data-replace-resume]")) return false;
-  const file = el.files[0];
-  el.value = "";
-  if (file) await replaceResume(file);
-  return true;
-});
+onAction("resume-replace", () => pickOneFile(S.onboarding?.accept || "", (file) => {
+  replaceResume(file).catch((err) => toast("Couldn't replace your resume", err.message, "error"));
+}));
 onAction("paste-resume", () => pasteResumeDialog());
 onAction("resume-read", () => {  // the text JobPortal read from the main resume (the server sends the first 4,000 characters)
   const ob = S.onboarding, more = (ob.resume?.chars || 0) > 4000 ? " The first 4,000 characters are shown." : "";
@@ -180,7 +232,13 @@ onAction("paste-resume-go", async (el) => {
 onAction("doc-main", async (el) => {
   el.disabled = true;
   el.innerHTML = `${spinner()} Switching`;
-  await api(`/api/profile/documents/${el.dataset.id}/main`, { method: "POST" });
+  try {
+    await api(`/api/profile/documents/${el.dataset.id}/main`, { method: "POST" });
+  } catch (err) {
+    el.disabled = false;
+    el.textContent = "Use as main resume";
+    throw err;
+  }
   toast("Main resume changed", "Your old main resume stays in your documents.");
   await reloadOnboarding();
 });

@@ -22,11 +22,12 @@ const PROFILE_PARTS = [
   ["questions", "Answers along the way", renderQuestionsPart],
 ];
 
-// Draws the profile tab: the status line, the parts, and the open part.
+// Draws the profile tab: the status line, the parts, and the open part. A "profile" event draws it again (live.js) only
+// without unsaved edits; edits you start while it loads win too, and the tab stays as it is.
 async function renderProfileSettings(box, part) {
   S.profileSection = PROFILE_PARTS.some(([key]) => key === part) ? part : "answers";
   const profile = (S.profileCache = await api("/api/profile"));
-  if (S.route[1] !== "profile") return;
+  if (S.route[1] !== "profile" || S.dirty) return;
   box.innerHTML = `<div class="profile-status" id="profile-status"></div>
     <div class="filters" role="group" aria-label="Parts of your profile">${PROFILE_PARTS.map(([key, label]) =>
       `<a class="chip${S.profileSection === key ? " active" : ""}" href="#/settings/profile/${key}"${S.profileSection === key ? ' aria-current="page"' : ""}>${label}</a>`).join("")}</div>
@@ -220,7 +221,10 @@ onAction("save-std-answers", async () => {
   refreshSearchArea();
 });
 onAction("save-facts", async () => {
-  const facts = clone(S.profileCache.facts);
+  // The facts the form doesn't show come from the profile as it is now. A "profile" event empties S.profileCache, and
+  // while you have edits the tab isn't drawn again to fill it, so it's read again here.
+  if (!S.profileCache) S.profileCache = await api("/api/profile");
+  const facts = clone(S.profileCache.facts || {});
   $$("[data-fact]").forEach((input) => setPath(facts, input.dataset.fact, input.value));
   await api("/api/profile/facts", { method: "PUT", body: { value: facts } });
   S.dirty = false;

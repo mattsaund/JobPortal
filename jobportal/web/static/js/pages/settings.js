@@ -25,7 +25,9 @@ const SETTINGS_TABS = [
   ["data", "Data", "folder", (box) => renderDataSettings(box)],
 ];
 
-// Draws the page frame once, then the tab the address names.
+// Draws the page frame once, then the tab the address names. Opening a tab shows "Loading" until its data is in; the
+// same tab drawn again (another part of it, a live update) keeps what's on screen until the new content replaces it, so
+// it doesn't flash or jump to the top. A tab whose data didn't load says so, with Try again.
 async function renderSettings(tab, item) {
   const current = SETTINGS_TABS.find(([key]) => key === tab);
   if (!current) {
@@ -47,8 +49,15 @@ async function renderSettings(tab, item) {
     else link.removeAttribute("aria-current");
   });
   const box = $("#settings-body");
-  box.innerHTML = `<p class="loading">${spinner()} Loading</p>`;
-  await current[3](box, item);
+  if (box.dataset.tab !== tab) {
+    box.dataset.tab = tab;
+    box.innerHTML = `<p class="loading">${spinner()} Loading</p>`;
+  }
+  try {
+    await current[3](box, item);
+  } catch (err) {
+    if (S.route[1] === tab) box.innerHTML = loadError(err);
+  }
 }
 
 // A panel with a heading and a short note under it.
@@ -93,15 +102,16 @@ async function renderSearchSettings(box) {
   renderDreams($("#dream-card"));
 }
 
-// The search area's card (redrawn when the editor saves).
+// The search area's card (redrawn when the editor saves; setHtml gives the focus back to its button, which the closing
+// editor had just returned it to).
 function renderAreaCard() {
   const card = $("#area-card");
   if (!card) return;
   const loc = S.cfg?.locations || {};
-  card.innerHTML = `<div class="panel-heading"><h2>Where to look</h2><button class="button primary" type="button" data-act="edit-area">${icon("pin")}Change the search area</button></div>
+  setHtml(card, `<div class="panel-heading"><h2>Where to look</h2><button class="button primary" type="button" data-act="edit-area">${icon("pin")}Change the search area</button></div>
     <div class="tags area-tags">${areaTags(loc.allowed || S.searchArea)}</div>
     <p class="panel-note">${loc.dream_bypass ? "Dream companies can be anywhere in the US. " : ""}When a job's location is unclear,
-      ${loc.unknown_policy === "drop" ? "it's skipped" : "the AI decides"}.</p>`;
+      ${loc.unknown_policy === "drop" ? "it's skipped" : "the AI decides"}.</p>`);
 }
 
 // ---------------------------------------------------------------- AI
@@ -145,14 +155,15 @@ async function renderAISettings(box) {
         <button class="button primary" type="button" data-act="ai-signin">Continue with ChatGPT</button></div>`;
   const webSearchText = webSearch === false ? "isn't available on your account, so the AI reads pages directly"
     : webSearch ? "is available" : "is checked the first time the AI needs it";
+  // The stage and prompt keys come from the settings and the server, so they're escaped in the attributes too.
   const stageRow = ([key, stage]) => {
     const [label, help] = AI_STAGES[key] || [humanize(key), ""];
     return `<tr><td><b>${esc(label)}</b><small class="cell-note">${esc(help)}</small></td>
-      <td><select data-path="ai.stages.${key}.model" aria-label="${esc(label)} model">${modelOptions(models, stage.model, "Default model")}</select></td>
-      <td><select data-path="ai.stages.${key}.effort" aria-label="${esc(label)} effort">${selectOptions(S.meta.efforts.map((e) => [e, humanize(e)]), stage.effort)}</select></td></tr>`;
+      <td><select data-path="ai.stages.${esc(key)}.model" aria-label="${esc(label)} model">${modelOptions(models, stage.model, "Default model")}</select></td>
+      <td><select data-path="ai.stages.${esc(key)}.effort" aria-label="${esc(label)} effort">${selectOptions(S.meta.efforts.map((e) => [e, humanize(e)]), stage.effort)}</select></td></tr>`;
   };
   const prompt = (key) => `<label class="field"><span class="field-label">${esc(humanize(key))}</span>
-    <textarea rows="5" data-path="prompts.${key}" placeholder="${esc(defaults[key])}">${esc(c.prompts?.[key] || "")}</textarea></label>`;
+    <textarea rows="5" data-path="prompts.${esc(key)}" placeholder="${esc(defaults[key])}">${esc(c.prompts?.[key] || "")}</textarea></label>`;
   box.innerHTML = `<div class="stack" data-cfg>
     ${settingsPanel("Your ChatGPT account", `JobPortal's AI runs on your ChatGPT plan (Go, Plus or Pro), and what it uses counts against your plan. You can set a
       limit for JobPortal in ChatGPT's settings. Web search ${webSearchText}.`, account)}
@@ -253,13 +264,19 @@ onChange(async (el) => {
   }
   if (el.matches("[data-levels] [data-qm]")) {  // the experience levels are one of your standard answers
     const picked = $$("[data-levels] [data-qm]").filter((box) => box.checked).map((box) => box.value);
+    const undo = () => {  // the level goes back to how it's saved
+      el.checked = !el.checked;
+      el.closest(".choice").classList.toggle("active", el.checked);
+    };
     if (!picked.length) {
-      el.checked = true;
-      el.closest(".choice").classList.add("active");
+      undo();
       toast("Keep at least one level", "The search needs one to know what to look for.", "error");
       return true;
     }
-    const r = await api("/api/onboarding/answers", { method: "PATCH", body: { answers: { levels: picked } } });
+    const r = await api("/api/onboarding/answers", { method: "PATCH", body: { answers: { levels: picked } } }).catch((err) => {
+      undo();
+      throw err;
+    });
     S.onboarding.answers = r.answers;
     toast("Levels saved", "The title filters follow them.");
     if (!S.cfgDirty && !S.dirty) renderSettings("search");  // show the title filters made from them

@@ -7,16 +7,19 @@
 
    APIs: GET /api/leads/{id} (the lead with its package), PATCH /api/leads/{id} (every edit), POST /api/preview (the
    editor's live preview), POST /api/leads/{id}/revise, /package, /resume-check, /events, /contacts/{i},
-   /questions/generate and /apply-answers, POST /api/questions/answer and /dismiss, and the downloads under
-   /api/leads/{id}/export/. S.lead is the lead on screen and S.leadView where it's drawn; S.dirty marks unsaved edits. A
-   "lead" event redraws it unless edits are open (refreshLeadDetails, from live.js). */
+   /questions/generate and /apply-answers, POST /api/questions/answer and /dismiss, GET /api/questions, GET /api/profile
+   (the kit's standard answers), POST /api/library (Save to my resumes), and the downloads under /api/leads/{id}/export/.
+   S.lead is the lead on screen and S.leadView where it's drawn; S.dirty marks unsaved edits. A "lead" event redraws
+   it (refreshLeadDetails, from live.js), but never the open tab while it has unsaved edits or you're typing in it. */
 "use strict";
 
 // ---------------------------------------------------------------- showing a lead
-// Shows a lead in box. opts: tab (the one to open), hashBase (tabs change the address, as on Leads: #/leads/12/emails),
-// header (draw the title, company and match pill too: the Tracker's dialog has no card around it).
+// Shows a lead in box. opts: tab (the one to open; an unknown one, from an old or mistyped address, opens the
+// overview), hashBase (tabs change the address, as on Leads: #/leads/12/emails), header (draw the title, company and
+// match pill too: the Tracker's dialog has no card around it).
 async function showLeadDetails(box, id, opts = {}) {
-  S.leadView = { box, id, tab: opts.tab || "overview", hashBase: opts.hashBase || "", header: !!opts.header };
+  const tab = DETAIL_TABS.some(([key]) => key === opts.tab) ? opts.tab : "overview";
+  S.leadView = { box, id, tab, hashBase: opts.hashBase || "", header: !!opts.header };
   S.lead = null;
   box.innerHTML = `<p class="loading">${spinner()} Loading</p>`;
   let lead;
@@ -39,44 +42,52 @@ function closeLeadDetails() {
   S.dirty = false;
 }
 
-// Reads the lead again and redraws it on the same tab. fromEvent = a live update: skipped while you have unsaved edits,
-// or when nothing changed.
-async function refreshLeadDetails(fromEvent) {
-  const view = S.leadView;
-  if (!view || (fromEvent && S.dirty)) return;
+// Reads the lead again and redraws it on the same tab. summary = the lead's summary from a live "lead" event: then
+// nothing happens while you have unsaved edits, and nothing is even read when the summary shows no change from what's
+// on screen (the stage, the status and the time of the last update), as after a question was added to it.
+async function refreshLeadDetails(summary) {
+  const view = S.leadView, live = !!summary;
+  if (!view || (live && (S.dirty || sameLead(S.lead, summary)))) return;
   let lead;
   try {
     lead = await api(`/api/leads/${view.id}`);
   } catch (_) {
     return;
   }
-  if (S.leadView !== view || (fromEvent && S.dirty)) return;
-  const same = S.lead && ["stage", "updated_at", "app_status"].every((key) => S.lead[key] === lead[key]);
-  if (fromEvent && same) return;
+  if (S.leadView !== view || (live && (S.dirty || sameLead(S.lead, lead)))) return;
   S.lead = lead;
   drawLeadDetails();
 }
+const sameLead = (a, b) => !!a && ["stage", "updated_at", "app_status"].every((key) => a[key] === b[key]);
 
 // An element inside the lead on screen.
 const lv = (selector) => $(selector, S.leadView.box);
 
-// Draws the lead: the header (in the Tracker's dialog), the actions, the banners, the tabs and the open tab.
+// Draws the lead: the header (in the Tracker's dialog), the actions, the banners, the tabs and the open tab. Drawn
+// again after a change, it replaces only what's above the tabs, and draws the open tab again unless it has unsaved edits
+// or you're typing in it: the tab stays in the page, so its text, cursor and scroll position stay too. A focused button
+// or menu above the tabs gets the focus back in the new HTML.
 function drawLeadDetails() {
   const l = S.lead, view = S.leadView, packaged = !!l.resume_md;
-  const header = view.header ? `<div class="detail-header">${companyLogo(l.company)}
+  const head = (view.header ? `<div class="detail-header">${companyLogo(l.company)}
       <div class="job-title"><h2>${esc(l.title)}</h2><div class="company-line"><span>${esc(l.company)}</span>${stageTag(l)}</div>
         <div class="job-meta">${leadMeta(l)}</div></div>${matchPill(l.score || null)}</div>
-    <div class="tags">${leadTags(l)}</div>` : "";
-  const tabs = DETAIL_TABS.map(([key, label]) => `<button class="tab${view.tab === key ? " active" : ""}" type="button" role="tab"`
-    + ` aria-selected="${view.tab === key}" data-act="lead-tab" data-tab="${key}">${label}</button>`).join("");
-  const kept = S.dirty ? $("[data-lead-body]", view.box) : null;  // a tab with unsaved edits stays as it is
-  view.box.innerHTML = `<div class="lead-details">${header}
-    <div class="detail-actions">${leadActions(l, packaged)}</div>
-    ${leadBanners(l, packaged)}
-    <div class="tabs" role="tablist" aria-label="About this lead">${tabs}</div>
-    <div class="tab-body" data-lead-body></div></div>`;
-  if (kept) lv("[data-lead-body]").replaceWith(kept);
-  else drawLeadTab();
+    <div class="tags">${leadTags(l)}</div>` : "")
+    + `<div class="detail-actions">${leadActions(l, packaged)}</div>${leadBanners(l, packaged)}`;
+  const body = lv("[data-lead-body]");
+  if (!body) {  // the first time
+    const tabs = DETAIL_TABS.map(([key, label]) => `<button class="tab${view.tab === key ? " active" : ""}" type="button" role="tab"`
+      + ` aria-selected="${view.tab === key}" data-act="lead-tab" data-tab="${key}">${label}</button>`).join("");
+    view.box.innerHTML = `<div class="lead-details">${head}<div class="tabs" role="tablist" aria-label="About this lead">${tabs}</div>`
+      + `<div class="tab-body" data-lead-body></div></div>`;
+    drawLeadTab();
+    return;
+  }
+  const details = lv(".lead-details"), tabs = lv(".tabs"), focus = focusKey(details);
+  while (details.firstChild !== tabs) details.firstChild.remove();
+  tabs.insertAdjacentHTML("beforebegin", head);
+  if (!S.dirty && !typingIn(body)) drawLeadTab();
+  refocus(details, focus);
 }
 
 // The actions row. A deleted lead has Restore and Delete forever instead of Delete.
@@ -195,10 +206,12 @@ function renderOverviewTab(box, l, pkg) {
     + `<span class="${done.includes(i) ? "done" : ""}">${esc(step)}</span></label>`;
   const planBlock = plan.length ? block("Your action plan", `<div class="check-list">${plan.map(planItem).join("")}</div>`) : "";
   const roleBlock = pkg.job_summary ? block("The role in brief", `<div class="prose">${md(pkg.job_summary)}</div>`) : "";
-  const posting = safeUrl(l.url) ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\//, "").slice(0, 60))}</a>` : "None";
+  const postingUrl = safeUrl(l.url);
+  const posting = postingUrl ? `<a href="${esc(postingUrl)}" target="_blank" rel="noopener">${esc(postingUrl.replace(/^https?:\/\//, "").slice(0, 60))}</a>` : "None";
   const foundAt = foundList(l).map((f) => `<a class="tag blue" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.label)}">${icon("external")}${esc(foundShort(f))}</a>`).join("");
-  // "82, eligible: reason; reason". The eligibility part is left out when the scoring didn't give one.
-  const scored = [triage.score ?? "-", esc(triage.eligibility || "")].filter((part) => part !== "").join(", ")
+  // "82, eligible: reason; reason". The eligibility part is left out when the scoring didn't give one. The score comes
+  // from the AI's answer, so it's escaped like any other text.
+  const scored = [esc(triage.score ?? "-"), esc(triage.eligibility || "")].filter((part) => part !== "").join(", ")
     + (triage.reasons?.length ? `: ${esc(triage.reasons.join("; "))}` : "");
   const flagsBlock = triage.red_flags?.length ? block("Red flags", bulletList(triage.red_flags, "warn")) : "";
   const coverageBlock = coverage.hit || coverage.miss
@@ -310,6 +323,7 @@ function renderEmailsTab(box, l, pkg) {
       <div class="block-actions end"><span class="muted-note">Download all emails:</span>${exportButtons(l.id, "emails", ["md", "docx", "pdf"])}
         <button class="button primary" type="button" data-act="save-emails">Save edits</button></div></div>`;
   box.addEventListener("input", (e) => {
+    if (e.target.dataset.erev != null) return;  // a "how to change it" instruction isn't an edit to save
     S.dirty = true;
     if (e.target.matches("[data-note]")) lv("[data-note-count]").textContent = `${e.target.value.length}/300`;  // LinkedIn allows 300 characters
   });
@@ -329,14 +343,14 @@ function renderContactsTab(box, l, pkg) {
   const contacts = pkg.contacts || [];
   const input = (i, key, value, placeholder) => `<input type="text" data-cf="${key}" data-i="${i}" value="${esc(value || "")}" placeholder="${placeholder}" aria-label="${placeholder}">`;
   const confidence = (c) => (c.email_confidence === "found" ? "green" : c.email_confidence === "pattern" ? "warn" : "");
-  const links = (c) => (safeUrl(c.linkedin) ? `<a href="${esc(c.linkedin)}" target="_blank" rel="noopener">LinkedIn</a>` : "")
-    + (safeUrl(c.source_url) ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener">Source</a>` : "");
+  const link = (url, label) => (safeUrl(url) ? `<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener">${label}</a>` : "");
+  const links = (c) => link(c.linkedin, "LinkedIn") + link(c.source_url, "Source");
   const row = (c, i) => `<tr><td><div class="cell-stack">${input(i, "name", c.name, "Name")}${input(i, "title", c.title, "Title")}${input(i, "org", c.org, "Organization")}</div></td>
       <td><div class="cell-stack">${input(i, "email", c.email, "Email")}<div class="cell-row"><span class="tag ${confidence(c)}">${esc(humanize(c.email_confidence || "unknown"))}</span>
         ${c.email ? `<button class="text-button" type="button" data-act="copytext" data-text="${esc(c.email)}">Copy</button>` : ""}</div></div></td>
       <td><div class="cell-stack">${input(i, "linkedin", c.linkedin, "LinkedIn link")}${input(i, "notes", c.notes, "Notes")}<div class="cell-row">${links(c)}</div></div></td>
       <td><textarea class="why" data-cf="why" data-i="${i}" rows="4" aria-label="Why them">${esc(c.why || "")}</textarea></td>
-      <td>${contactStatusSelect(l.id, i, c.status)}</td>
+      <td>${contactStatusSelect(l.id, i, c.status, c.name)}</td>
       <td><button class="icon-button" type="button" data-act="rm-contact" data-i="${i}" aria-label="Remove ${esc(c.name)}">${icon("trash")}</button></td></tr>`;
   const table = contacts.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Name, title, organization</th><th>Email</th><th>LinkedIn and notes</th>
       <th>Why them</th><th>Status</th><th><span class="sr-only">Remove</span></th></tr></thead><tbody>${contacts.map(row).join("")}</tbody></table></div>`
@@ -349,21 +363,30 @@ function renderContactsTab(box, l, pkg) {
       <input type="url" placeholder="LinkedIn link" data-nc="linkedin" aria-label="LinkedIn link"><input type="text" placeholder="Why them, or notes" data-nc="why" aria-label="Why them">
       <button class="button outline" type="button" data-act="add-contact">${icon("plus")}Add contact</button></div>`,
     exportButtons(l.id, "contacts", ["csv"]));
-  box.addEventListener("change", async (e) => {  // an edited contact field: save that one field
+  // An edited contact field saves that one field when you leave it. The value also goes into the lead on screen (S.lead,
+  // which a live update may have read again since this tab was drawn), so the tab shows it when it's drawn again.
+  box.addEventListener("change", async (e) => {
     const el = e.target;
     if (!el.dataset.cf) return;
-    await api(`/api/leads/${l.id}/contacts/${el.dataset.i}`, { method: "POST", body: { [el.dataset.cf]: el.value } });
-    pkg.contacts[+el.dataset.i][el.dataset.cf] = el.value;
+    try {
+      await api(`/api/leads/${l.id}/contacts/${el.dataset.i}`, { method: "POST", body: { [el.dataset.cf]: el.value } });
+    } catch (err) {
+      toast("Couldn't save the contact", err.message, "error");
+      return;
+    }
+    const contact = S.lead?.id === l.id && S.lead.package?.contacts?.[+el.dataset.i];
+    if (contact) contact[el.dataset.cf] = el.value;
   });
 }
 
-// Interview prep and the company brief: Markdown documents with a preview, downloads and "Revise with AI".
+// Interview prep and the company brief: Markdown documents with a preview, downloads and "Revise with AI". For each tab:
+// key (where the package keeps it), name (what the empty tab and the AI call it) and stem (the download's file name).
 const NOTES_DOCS = {
-  intel: { key: "company_brief_md", name: "company brief", stem: "company_intel", doc: "company brief" },
-  prep: { key: "interview_prep_md", name: "interview prep", stem: "interview_prep", doc: "interview prep" },
+  intel: { key: "company_brief_md", name: "company brief", stem: "company_intel" },
+  prep: { key: "interview_prep_md", name: "interview prep", stem: "interview_prep" },
 };
 function renderNotesTab(box, l, pkg, tab) {
-  const { key, name, stem, doc } = NOTES_DOCS[tab];
+  const { key, name, stem } = NOTES_DOCS[tab];
   if (!pkg[key]) {
     box.innerHTML = noneYet(name);
     return;
@@ -372,7 +395,7 @@ function renderNotesTab(box, l, pkg, tab) {
     text: pkg[key],
     leadId: l.id,
     stem,
-    doc,
+    doc: name,
     save: async (value) => {
       await api(`/api/leads/${l.id}`, { method: "PATCH", body: { package: { [key]: value } } });
       pkg[key] = value;
@@ -381,10 +404,14 @@ function renderNotesTab(box, l, pkg, tab) {
 }
 
 // Application kit: the files to download, the tailored answers to this application's questions (editable), and your
-// standard answers ready to copy. Reads GET /api/profile once for the standard answers.
+// standard answers ready to copy. Reads GET /api/profile once for the standard answers; when that fails, the kit is
+// drawn without them (with a note) instead of staying blank.
 async function renderKitTab(box, l, pkg) {
-  if (!S.profileCache) S.profileCache = await api("/api/profile");
-  const qa = S.profileCache.qa || [];
+  let qa = null;
+  try {
+    if (!S.profileCache) S.profileCache = await api("/api/profile");
+    qa = S.profileCache.qa || [];
+  } catch (_) {}
   const copyRow = (q, a) => `<div class="copy-row"><span class="copy-q">${esc(q)}</span><span class="copy-a">${esc(a)}</span>`
     + `<button class="text-button" type="button" data-act="copytext" data-text="${esc(a)}">${icon("copy")}Copy</button></div>`;
   const apply = safeUrl(l.apply_url) || safeUrl(l.url);
@@ -393,7 +420,8 @@ async function renderKitTab(box, l, pkg) {
         <button class="button outline small" type="button" data-act="copy-answer" data-i="${i}">${icon("copy")}Copy</button>
         <button class="icon-button" type="button" data-act="rm-answer" data-i="${i}" aria-label="Remove this question">${icon("trash")}</button></div>
       <textarea data-aa="${i}" rows="5" aria-label="Answer">${esc(x.answer)}</textarea></div>`;
-  const standard = qa.filter((x) => !x.eeo), selfId = qa.filter((x) => x.eeo);  // eeo = voluntary self-identification
+  const standard = (qa || []).filter((x) => !x.eeo), selfId = (qa || []).filter((x) => x.eeo);  // eeo = voluntary self-identification
+  const noStandard = qa ? "Answer the standard questions to fill these in." : "Your standard answers didn't load. Open this tab again to see them.";
   const selfIdBlock = selfId.length ? block("Voluntary self-identification", `<p class="block-note">Shown here only so you can copy it.
       It's never sent to the AI.</p>${selfId.map((x) => copyRow(x.q, x.a)).join("")}`) : "";
   box.innerHTML = `<div class="two-col"><div class="stack">
@@ -407,7 +435,7 @@ async function renderKitTab(box, l, pkg) {
         <span class="muted-note" data-answers-state></span><button class="button primary" type="button" data-act="save-answers">Save answers</button></div>`,
       exportButtons(l.id, "answers", ["docx", "pdf", "md"]))}
   </div><div class="stack">${block("Your standard answers", `<p class="block-note">From your answers in <a href="#/settings/profile/answers">Settings, Profile</a>.
-      Change them there.</p>${standard.map((x) => copyRow(x.q, x.a)).join("") || `<p class="muted-note">Answer the standard questions to fill these in.</p>`}`)}
+      Change them there.</p>${standard.map((x) => copyRow(x.q, x.a)).join("") || `<p class="muted-note">${noStandard}</p>`}`)}
     ${selfIdBlock}</div></div>`;
   box.addEventListener("input", (e) => {
     if (e.target.dataset.aq == null && e.target.dataset.aa == null) return;
@@ -434,9 +462,10 @@ async function saveKitAnswers() {
 
 // Posting: the job description as JobPortal captured it, with links to the posting and the apply page.
 function renderPostingTab(box, l) {
-  const posting = safeUrl(l.url) ? `<a class="button outline" href="${esc(l.url)}" target="_blank" rel="noopener">Open the posting ${icon("external")}</a>` : "";
-  const applyPage = safeUrl(l.apply_url) && l.apply_url !== l.url
-    ? `<a class="button outline" href="${esc(l.apply_url)}" target="_blank" rel="noopener">Apply page ${icon("external")}</a>` : "";
+  const postingUrl = safeUrl(l.url), applyUrl = safeUrl(l.apply_url);
+  const posting = postingUrl ? `<a class="button outline" href="${esc(postingUrl)}" target="_blank" rel="noopener">Open the posting ${icon("external")}</a>` : "";
+  const applyPage = applyUrl && applyUrl !== postingUrl
+    ? `<a class="button outline" href="${esc(applyUrl)}" target="_blank" rel="noopener">Apply page ${icon("external")}</a>` : "";
   box.innerHTML = block("", `<div class="button-row">${posting}${applyPage}<span class="muted-note">${esc(l.source_detail || "")}</span></div>
     <pre class="posting-text">${esc(l.description || "No description was captured for this job.")}</pre>`);
 }
@@ -456,6 +485,27 @@ function renderActivityTab(box, l) {
       ${block("Log what happened", `<div class="filters">${presets}</div>
         <div class="inline-form"><input type="text" data-event-text placeholder="Something else" aria-label="What happened">
           <button class="button outline" type="button" data-act="log-event">Log it</button></div>`)}</div></div>`;
+  // The notes and the follow-up date have Save buttons, so a change to either is an unsaved edit until it's saved: moving
+  // away asks first, and live updates leave the tab alone. "Log what happened" isn't: it's sent as you log it.
+  box.addEventListener("input", () => (S.dirty = activityEdited()));
+}
+
+// True when the notes or the follow-up date on screen differ from what was saved. Saving one of them updates its
+// defaultValue, so an unsaved change to the other one still counts.
+function activityEdited() {
+  return ["[data-notes]", "[data-follow-up]"].some((selector) => {
+    const field = lv(selector);
+    return !!field && field.value !== field.defaultValue;
+  });
+}
+
+// Saves the notes or the follow-up date (one field of the lead), then marks what was sent as saved.
+async function saveActivityField(selector, key, emptyValue) {
+  const field = lv(selector), value = field.value;
+  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { [key]: value || emptyValue } });
+  field.defaultValue = value;  // what you typed while it saved stays unsaved
+  S.lead[key] = value || emptyValue;
+  S.dirty = activityEdited();
 }
 
 // Download buttons: exportButtons(12, "resume", ["pdf", "docx"], "Resume") makes "Resume PDF" and "Resume DOCX".
@@ -473,6 +523,23 @@ function saveOnCtrlS(textarea, save) {
       save();
     }
   });
+}
+
+// The Save of both editors: saves the text with o.save and says so in the toolbar (state). Returns false when it failed,
+// after a toast that says why: the editor's own buttons and Ctrl+S run outside the action registry, so nothing else
+// would show the error. Text typed while the save was on its way stays an unsaved edit.
+async function saveEditor(o, editor, state) {
+  const text = editor.value;
+  try {
+    await o.save(text);
+  } catch (err) {
+    state.textContent = "Not saved";
+    toast("Couldn't save it", err.message, "error");
+    return false;
+  }
+  S.dirty = editor.value !== text;
+  state.textContent = S.dirty ? "Not saved yet" : "Saved";
+  return true;
 }
 
 // "Revise with AI" in both editors: sends the text and your instruction (POST .../revise) and puts the AI's version in
@@ -505,24 +572,20 @@ function mountDocEditor(container, o) {
     <div class="editor"><textarea class="editor-text" spellcheck="true" aria-label="Text">${esc(o.text)}</textarea><div class="block prose editor-preview"></div></div>`;
   const editor = $(".editor-text", container), preview = $(".editor-preview", container), state = $("[data-state]", container);
   const draw = () => (preview.innerHTML = md(editor.value));
-  const save = async () => {
-    await o.save(editor.value);
-    S.dirty = false;
-    state.textContent = "Saved";
-  };
-  editor.addEventListener("input", debounce(() => {
-    S.dirty = true;
+  const drawSoon = debounce(draw, 150);
+  const save = () => saveEditor(o, editor, state);
+  editor.addEventListener("input", () => {
+    S.dirty = true;  // at once, not with the preview: leaving right after typing must still ask first
     state.textContent = "Not saved yet";
-    draw();
-  }, 150));
+    drawSoon();
+  });
   saveOnCtrlS(editor, save);
   container.onclick = async (e) => {
     const button = e.target.closest("[data-de]");
     if (!button) return;
     const what = button.dataset.de;
     if (what === "save") save();
-    if (what === "exp") {
-      if (S.dirty) await save();  // download what you see
+    if (what === "exp" && (!S.dirty || (await save()))) {  // download what you see
       openUrl(`/api/leads/${o.leadId}/export/${o.stem}.${button.dataset.fmt}`);
     }
     if (what === "revise") {
@@ -542,8 +605,9 @@ const PAGE_W = 816, PAGE_H = 1056;
 // the page exactly as its PDF will look on the right (POST /api/preview renders it on the server).
 // o: { doc ("resume" or "cover"), text, save(text), files (download names), leadId, theme, maxPages, original (the AI's
 //      version, for Revert), tools (more toolbar buttons), coverage (keyword tags), reviseUrl and fileHref (saved resumes) }
-// It adds o.refresh() (redraw the preview), o.saveNow() and o.text() (what's in the editor), and keeps o in S.editor
-// for the layout menu and Re-check.
+// It adds o.refresh() (redraw the preview), o.saveNow(), o.text() (what's in the editor) and o.setPages(n) (a new page
+// limit: the preview gets taller or shorter, and the text stays as it is), and keeps o in S.editor for the layout menu
+// and Re-check.
 function mountEditor(container, o) {
   container.innerHTML = `<div class="toolbar">
       <button class="button primary" type="button" data-ed="save">Save</button>
@@ -556,30 +620,49 @@ function mountEditor(container, o) {
     <div class="editor"><textarea class="editor-text" spellcheck="true" aria-label="${o.doc === "cover" ? "Cover letter" : "Resume"} text">${esc(o.text)}</textarea>
       <div class="preview"><div class="preview-page"><iframe sandbox="allow-same-origin" title="Preview"></iframe></div></div></div>`;
   const editor = $(".editor-text", container), frame = $("iframe", container), state = $("[data-state]", container);
-  const wrap = $(".preview", container), page = $(".preview-page", container);
-  const pages = Math.max(1, +o.maxPages || 1);
-  frame.style.height = `${PAGE_H * pages}px`;
+  const wrap = $(".preview", container), page = $(".preview-page", container), fitTag = $("[data-fit]", container);
+  let pages = Math.max(1, +o.maxPages || 1);
   // Shrink the full-size page to the width of the preview column.
   const scale = () => {
     const s = Math.min(1, (wrap.clientWidth - 28) / PAGE_W);
+    frame.style.height = `${PAGE_H * pages}px`;
     frame.style.transform = `scale(${s})`;
     page.style.width = `${PAGE_W * s}px`;
     page.style.height = `${PAGE_H * pages * s}px`;
   };
+  // Typing sends a preview request every pause, and they can come back out of order: only the newest one is shown. A
+  // failed one leaves the last good preview up and says so in the toolbar; the next edit tries again.
+  let newest = 0;
   const refresh = async () => {
-    frame.srcdoc = await api("/api/preview", { method: "POST", body: { doc: o.doc, md: editor.value, lead_id: o.leadId, theme: o.theme } });
-    frame.onload = () => showFit(frame, o.doc, pages, $("[data-fit]", container));
+    const ticket = ++newest;
+    let html;
+    try {
+      html = await api("/api/preview", { method: "POST", body: { doc: o.doc, md: editor.value, lead_id: o.leadId, theme: o.theme } });
+    } catch (_) {
+      if (ticket !== newest) return;
+      fitTag.hidden = false;
+      fitTag.className = "tag bad";
+      fitTag.textContent = "The preview didn't update";
+      return;
+    }
+    if (ticket !== newest) return;
+    frame.onload = () => showFit(frame, o.doc, pages, fitTag);
+    frame.srcdoc = html;
   };
   const later = debounce(refresh, 350);
   const save = async () => {
-    await o.save(editor.value);
-    S.dirty = false;
-    state.textContent = "Saved";
-    if (o.doc === "resume" && o.leadId) recheckResume(o.leadId);
+    const saved = await saveEditor(o, editor, state);
+    if (saved && o.doc === "resume" && o.leadId) recheckResume(o.leadId);
+    return saved;
   };
   o.refresh = refresh;
   o.saveNow = save;
   o.text = () => editor.value;
+  o.setPages = (n) => {
+    pages = Math.max(1, +n || 1);
+    scale();
+    refresh();
+  };
   S.editor = o;
   editor.addEventListener("input", () => {
     S.dirty = true;
@@ -592,8 +675,7 @@ function mountEditor(container, o) {
     if (!button) return;
     const what = button.dataset.ed;
     if (what === "save") save();
-    if (what === "file") {
-      if (S.dirty) await save();  // download what you see
+    if (what === "file" && (!S.dirty || (await save()))) {  // download what you see
       openUrl(o.fileHref ? o.fileHref(button.dataset.file) : `/api/leads/${o.leadId}/export/${button.dataset.file}`);
     }
     if (what === "revert" && confirm("Replace what's in the editor with the AI's original version?")) {
@@ -610,7 +692,9 @@ function mountEditor(container, o) {
       });
     }
   };
-  new ResizeObserver(scale).observe(wrap);
+  // Rescale when the column changes width. Once the editor is gone (another tab, a redraw), the observer lets go of it.
+  const resized = new ResizeObserver(() => (wrap.isConnected ? scale() : resized.disconnect()));
+  resized.observe(wrap);
   scale();
   refresh();
 }
@@ -629,12 +713,13 @@ function showFit(frame, doc, pages, tag) {
     // The tallest the preview may be: PAGE_H per page plus a few pixels of slack. When the page has
     // box-decoration-break: clone (render.py sets it), every printed page repeats the top and bottom margins, but the
     // preview is one tall sheet that has them once. So a two-page resume loses one set of margins at the page break.
+    const tallest = (PAGE_H + 4) * pages;
     const limit = () => {
-      if (!page) return 1060 * pages;
+      if (!page) return tallest;
       const css = getComputedStyle(page);  // this window's: the sandboxed preview runs no script of its own
       const repeats = (css.boxDecorationBreak || css.webkitBoxDecorationBreak) === "clone";
       const margins = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
-      return 1060 * pages - (repeats ? (pages - 1) * margins : 0);
+      return tallest - (repeats ? (pages - 1) * margins : 0);
     };
     let fit = 1;
     if (doc === "resume" && page) {
@@ -657,7 +742,6 @@ function showFit(frame, doc, pages, tag) {
 }
 
 // ---------------------------------------------------------------- the resume's strategy and check
-// Names for the resume strategies (archetypes) the AI picks. A strategy not listed here shows its key, made readable.
 // The kinds of resume the AI writes (resume_strategy.archetype, from the package prompt in ai/prompts.py). A key that isn't
 // here, such as one from a lead tailored by an older version, shows as its words with the first letter capitalized.
 const ARCHETYPE_LABEL = { large_employer: "Large employer", small_business: "Small business or startup", public_sector: "Public sector",
@@ -671,9 +755,9 @@ const archetypeLabel = (key) => ARCHETYPE_LABEL[key] || humanize(key);
 function resumeStrategyBlock(pkg) {
   const st = pkg.resume_strategy || {}, style = pkg.resume_style || { theme: "classic", max_pages: 1 }, review = pkg.resume_review || {};
   const detail = (label, text) => `<p class="detail-line"><b>${label}</b> ${text}</p>`;
-  const critic = review.changes?.length
-    ? `<details class="disclosure"><summary>Recruiter review: ${plural(review.changes.length, "change")} (score ${review.before_score}
-        to ${review.after_score ?? review.before_score})</summary>${bulletList(review.changes)}</details>`
+  const critic = review.changes?.length  // the scores come from the AI's answer, so they're escaped like its text
+    ? `<details class="disclosure"><summary>Recruiter review: ${plural(review.changes.length, "change")} (score ${esc(review.before_score)}
+        to ${esc(review.after_score ?? review.before_score)})</summary>${bulletList(review.changes)}</details>`
     : "";
   return block("Strategy",
     `${st.archetype ? `<p><span class="tag purple">${esc(archetypeLabel(st.archetype))}</span></p>` : ""}
@@ -705,6 +789,7 @@ function resumeCheckBlock(check) {
 }
 
 // Runs the resume check again (POST /api/leads/{id}/resume-check) and swaps in the new block. The block dims meanwhile.
+// Check again keeps the focus when it was the button you pressed.
 async function recheckResume(id) {
   const shown = S.leadView && lv(".resume-check");
   if (shown) shown.style.opacity = 0.5;
@@ -712,7 +797,11 @@ async function recheckResume(id) {
     const check = await api(`/api/leads/${id}/resume-check`, { method: "POST" });
     if (S.lead?.id === id && S.lead.package) S.lead.package.resume_check = check;
     const current = S.leadView && lv(".resume-check");
-    if (current) current.outerHTML = resumeCheckBlock(check);
+    if (current) {
+      const parent = current.parentElement, focus = focusKey(current);
+      current.outerHTML = resumeCheckBlock(check);
+      refocus(parent, focus);
+    }
   } catch (e) {
     if (shown) shown.style.opacity = "";
     toast("The check didn't run", e.message, "error");
@@ -774,11 +863,14 @@ async function saveEmails() {
   S.dirty = false;
 }
 
-// After answering, dismissing or adding questions: reload them (for Home and the sidebar) and redraw the lead.
+// After answering, dismissing or adding questions: reload them (for Home and the sidebar) and redraw the lead. When the
+// list doesn't load, the lead is still redrawn; the sidebar catches up with the next "questions" event.
 async function refreshLeadQuestions() {
-  S.questions = await api("/api/questions");
-  renderNextStep();
-  refreshLeadDetails();
+  try {
+    S.questions = await api("/api/questions");
+    renderNextStep();
+  } catch (_) {}
+  await refreshLeadDetails();
 }
 
 // ---------------------------------------------------------------- actions
@@ -798,8 +890,11 @@ onAction("apply", (el) => {
 });
 onAction("detail-track", () => setStatus(S.lead.id, "ready"));
 onAction("detail-delete", async () => {
+  // Ask about unsaved edits now: once it's deleted, closing its card or dialog must not ask again (and get a no).
+  if (S.dirty && !confirm("Discard your unsaved edits?")) return;
   const { id, title, app_status: before } = S.lead;
   const summary = await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: "trashed" } });
+  S.dirty = false;
   toast("Deleted", title, "", null, { label: "Undo", run: async () => leadChanged(await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: before } })) });
   if (S.leadView.hashBase) location.hash = "#/leads";  // close its card
   else closeDialog(S.leadView.box.closest("dialog"));
@@ -825,7 +920,7 @@ onAction("resume-recheck", async () => {
   else recheckResume(S.lead.id);
 });
 onAction("lead-lib-save", async () => {
-  const name = prompt("Name this resume:", `${S.lead.company}: ${S.lead.title}`.slice(0, 90));
+  const name = prompt("Name this resume:", [S.lead.company, S.lead.title].filter(Boolean).join(": ").slice(0, 90));
   if (name === null) return;
   const item = await api("/api/library", { method: "POST", body: { lead_id: S.lead.id, name, md: S.editor?.text() || S.lead.resume_md, style: S.lead.package?.resume_style } });
   toast("Saved to your resumes", item.name);
@@ -859,8 +954,11 @@ onAction("copy-note", () => copy(lv("[data-note]").value, "LinkedIn note copied"
 // Contacts tab
 onAction("add-contact", async () => {
   const contact = {};
-  $$("[data-nc]", S.leadView.box).forEach((input) => (contact[input.dataset.nc] = input.value));
-  if (!contact.name) return;
+  $$("[data-nc]", S.leadView.box).forEach((input) => (contact[input.dataset.nc] = input.value.trim()));
+  if (!contact.name) {
+    toast("Add a name first", "A contact needs at least a name.", "error");
+    return;
+  }
   const r = await api(`/api/leads/${S.lead.id}/contacts/-1`, { method: "POST", body: contact });  // index -1 adds a contact
   S.lead.package.contacts = r.contacts;
   drawLeadTab();
@@ -891,11 +989,11 @@ onAction("rm-answer", (el) => {
 onAction("copy-answer", (el) => copy(lv(`[data-aa="${el.dataset.i}"]`).value));
 // Activity tab
 onAction("save-notes", async () => {
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { notes: lv("[data-notes]").value } });
+  await saveActivityField("[data-notes]", "notes", "");
   toast("Saved", "Your notes are updated.");
 });
 onAction("save-follow-up", async () => {
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { follow_up_at: lv("[data-follow-up]").value || null } });
+  await saveActivityField("[data-follow-up]", "follow_up_at", null);
   toast("Saved", "Follow-up date set.");
   refreshStats();
 });
@@ -916,6 +1014,10 @@ onAction("lead-gapq", async (el) => {
     toast("Couldn't find questions", err.message, "error");
   }
   await refreshLeadQuestions();
+  if (el.isConnected) {  // not drawn again (the lead didn't load, or you're editing this tab): usable again
+    el.disabled = false;
+    el.innerHTML = `${icon("sparkle")}Ask me about gaps`;
+  }
 });
 onAction("lead-answer", async (el) => {
   const input = $("[data-lead-answer]", el.closest(".question-row"));
@@ -929,29 +1031,52 @@ onAction("lead-dismiss", async (el) => {
   await refreshLeadQuestions();
 });
 onAction("lead-apply-answers", async (el) => {
-  await api(`/api/leads/${S.lead.id}/apply-answers`, { method: "POST" });
-  el.disabled = true;
+  el.disabled = true;  // before the request, not after it: a second click mustn't start a second rework
   el.innerHTML = `${spinner()} Adding your answers and reworking the resume`;
+  try {
+    await api(`/api/leads/${S.lead.id}/apply-answers`, { method: "POST" });
+  } catch (err) {
+    el.disabled = false;
+    el.innerHTML = `${icon("sparkle")}Update this resume with my answers`;
+    throw err;
+  }
   toast("Updating the resume", "Adding your answers to your profile, then rewriting this resume with them. A minute or two.");
 });
+// The menus and checkboxes in a lead's details save as soon as they change. When a save fails, the control goes back to
+// what's saved (and the error shows in a toast), so the screen never shows a status or a layout the lead doesn't have.
 onChange(async (el) => {
   if (!S.leadView || !S.leadView.box.contains(el)) return false;
   if (el.matches("[data-lead-status]")) {
-    await setStatus(S.lead.id, el.value);
+    await setStatus(S.lead.id, el.value).catch((err) => {
+      el.value = S.lead.app_status;
+      throw err;
+    });
   } else if (el.matches("[data-lead-industry]")) {
-    leadChanged(await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { industry: el.value } }));
+    const summary = await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { industry: el.value } }).catch((err) => {
+      el.value = S.lead.industry || "";
+      throw err;
+    });
+    leadChanged(summary);
     toast("Industry changed", el.value || "Not set");
   } else if (el.matches("[data-plan]")) {  // an action plan step done or not
-    const pkg = S.lead.package;
-    const done = new Set(pkg.plan_done || []);
+    const pkg = S.lead.package, before = pkg.plan_done || [];
+    const done = new Set(before);
     if (el.checked) done.add(+el.dataset.plan);
     else done.delete(+el.dataset.plan);
     pkg.plan_done = [...done];
     el.nextElementSibling.classList.toggle("done", el.checked);
-    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { plan_done: pkg.plan_done } } });
+    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { plan_done: pkg.plan_done } } }).catch((err) => {
+      pkg.plan_done = before;
+      el.checked = !el.checked;
+      el.nextElementSibling.classList.toggle("done", el.checked);
+      throw err;
+    });
   } else if (el.matches("[data-resume-theme]")) {  // the Layout menu on the strategy block
     const style = { ...(S.lead.package.resume_style || { max_pages: 1 }), theme: el.value };
-    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { resume_style: style } } });
+    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { resume_style: style } } }).catch((err) => {
+      el.value = S.lead.package.resume_style?.theme || "classic";
+      throw err;
+    });
     S.lead.package.resume_style = style;
     if (S.editor) {
       S.editor.theme = el.value;
