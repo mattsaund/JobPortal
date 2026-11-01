@@ -24,7 +24,8 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
 
 
 async def auto_runner() -> None:
-    """Start a full search every N hours when Settings, "Auto-run every N hours" is above zero. Checks once a minute."""
+    """Start a full search every N hours when Settings, Search, "Search by itself every (hours)" is above zero. Checks
+    once a minute."""
     while True:
         await asyncio.sleep(60)
         try:

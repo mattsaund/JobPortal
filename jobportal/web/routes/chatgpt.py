@@ -65,6 +65,7 @@ async def ai_callback(request: Request):
 
 @router.post("/api/ai/signout")
 async def ai_signout():
+    """Sign out of ChatGPT: revoke the sign-in at OpenAI when it can be reached, and forget the tokens either way."""
     return await signin.sign_out()
 
 

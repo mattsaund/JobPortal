@@ -1,7 +1,8 @@
 """The candidate profile: everything JobPortal knows about the user, kept in one place.
 
-Every search, score and document is made from it. Triage and the AI hunt read a short digest(). Application packages, resume
-revisions and the Analysis page read the full_context(). The Profile page shows overview() and saves hand edits with save().
+Every search, score and document is made from it. Triage and the AI hunt read a short digest(). Application packages,
+resume revisions and the Analysis page read the full_context(). Settings, Profile shows overview() and saves hand edits
+with save().
 
 Where it comes from (these are the only inputs):
   1. The resume the user imports, their main resume. onboarding.import_resume() stores it as "profile.resume".
@@ -39,7 +40,7 @@ How it changes:
   - The writing sample changes, and learn_voice() rewrites the voice section.
   The standard answers always win over what the AI read from the resume: their facts are copied back after every build and
   update. save() keeps each section's previous version in the profile_history table, and every build, update and voice
-  change adds an entry to the changelog on the Profile page.
+  change adds an entry to the changelog in Settings, Profile.
 
 Side effects: builds and updates call the AI, write to the database and publish live events (core/bus.py) so open dashboard
 pages update. When one finishes it starts background work: re-scoring leads, learning the voice and refreshing the analysis.
@@ -87,7 +88,7 @@ MAX_OPEN_QUESTIONS = 40  # ask() adds nothing past this many open questions, so 
 MIN_SAMPLE_CHARS = 200  # learn_voice() needs at least this much of the user's own writing
 
 _lock = asyncio.Lock()  # one build or update at a time
-# What the profile is doing right now. The sidebar and the setup page show it (see status_snapshot()).
+# What the profile is doing right now. The sidebar and Home show it (see status_snapshot()).
 status: dict = {"busy": False, "phase": "", "error": None}
 
 
@@ -103,7 +104,7 @@ def get_all() -> dict:
 
 
 def save(key: str, value) -> None:
-    """Replace one section. The previous version goes into profile_history first, so the Profile page can restore it.
+    """Replace one section. The previous version goes into profile_history first, so Settings, Profile can restore it.
     Raises KeyError when key isn't a section."""
     if key not in KEYS:
         raise KeyError(key)
@@ -151,13 +152,13 @@ def ready_to_search() -> str:
     """What's missing before a search can run, worded for the user, or "" when nothing is. search/pipeline.py checks this
     before every run."""
     if not resume():
-        return "Import your resume first (Profile -> Setup)."
+        return "Import your resume first: drop it on Home."
     if not standard_answers().get("_saved_at"):
-        return "Answer the standard job questions first (Profile -> Setup)."
+        return "Answer the standard job questions first. Home asks them one at a time."
     if not is_built():
         if status["busy"]:
             return "Your profile is still being built. Try again in a minute."
-        return "Your profile hasn't been built yet. Open Profile and click Rebuild profile."
+        return "Your profile hasn't been built yet. Open Settings, Profile and click Build again."
     return ""
 
 
@@ -298,7 +299,8 @@ def _save_questions(qs: list[dict]) -> None:
 
 @_one_at_a_time
 def ask(question: str, why: str, field: str = "", source: str = "JobPortal", lead_id: int | None = None) -> bool:
-    """Add an open question to Profile -> Questions. Returns True if it was added.
+    """Add an open question to the ones JobPortal asks (on Home, and in Settings, Profile, "Answers along the way").
+    Returns True if it was added.
 
     A question asked before in any form (see _qkey()) is skipped, even one that was answered or dismissed. Nothing is added
     once MAX_OPEN_QUESTIONS are open. Application packages pass lead_id, so the question also shows on that lead."""
@@ -465,7 +467,7 @@ def _prompt_head() -> str:
 async def _working(phase: str, failure_title: str):
     """Hold the profile lock while a build or update runs, and show its progress in the dashboard.
 
-    If the work fails, the error is kept in status["error"] (the setup page shows it) and shown as a toast, then raised
+    If the work fails, the error is kept in status["error"] (Home shows it) and shown as a toast, then raised
     again for the caller."""
     async with _lock:
         status["error"] = None
@@ -569,7 +571,8 @@ def _save_result(mode: str, reason: str, out: dict, read: list[dict]) -> dict:
 
 
 def _log_change(mode: str, reason: str, sections: list[str], changes: list[str], tokens: int) -> dict:
-    """Add an entry to the changelog the Profile page shows (newest first, 60 kept) and tell open dashboards. Returns it."""
+    """Add an entry to the changelog Settings, Profile shows (newest first, 60 kept) and tell open dashboards. Returns
+    it."""
     entry = {"ts": db.now(), "mode": mode, "reason": reason, "sections": sections, "changes": changes, "tokens": tokens}
     db.kv_set("profile.changelog", ([entry] + changelog())[:60])
     bus.publish("profile", entry)
@@ -660,7 +663,7 @@ def _count_entries(md: str, section_re: str) -> int:
 
 
 def overview() -> dict:
-    """Everything the Profile page's Overview tab shows: who the user is, what the profile knows, the voice, the build
+    """Everything the overview in Settings, Profile shows: who the user is, what the profile knows, the voice, the build
     history, and how much JobPortal has made from the profile so far."""
     from jobportal.candidate.onboarding import label_of
     p = get_all()
@@ -696,36 +699,63 @@ def overview() -> dict:
 
 # ---------------------------------------------------------------- background sync of answers
 
+WATCH_EVERY_SEC = 15  # how often answers_watcher() looks for work
+# After a sync fails (signed out of ChatGPT, the plan's usage cap, no connection), the same sync waits this long before it
+# is tried again, so the user gets one error toast instead of one every WATCH_EVERY_SEC.
+RETRY_AFTER_FAILURE_SEC = 600
+_last_failure: dict = {}  # the sync that failed last: {"key": what it was for, "at": when}
+
+
 async def answers_watcher(settings_get):
-    """A loop the server starts at launch. Every 15 seconds it checks three things, and acts once the user has paused for
-    sync_delay_sec (60 by default):
+    """A loop the server starts at launch. Every WATCH_EVERY_SEC seconds it runs sync_once(), which keeps the profile in
+    step with documents and answers once the user has paused. settings_get is the function that returns the current
+    settings (the server passes settings.get)."""
+    while True:
+        await asyncio.sleep(WATCH_EVERY_SEC)
+        try:
+            await sync_once(settings_get().get("profile", {}))
+        except Exception:  # noqa: BLE001 (the watcher must never stop; a failed build or update already showed its error)
+            pass
+
+
+async def sync_once(options: dict) -> str:
+    """One look for work by answers_watcher(). It acts once the user has paused for sync_delay_sec (60 by default), on the
+    first of these that applies:
     - Documents added or removed since the last build: build() runs again, so the profile reads them.
     - Standard answers changed on the Home page since the last build (onboarding.merge_answers): build() runs again.
     - Answers to follow-up questions that aren't in the profile yet: update_from_answers() adds them.
 
     It does nothing while a search or another profile update is running, when settings profile.auto_sync_answers is off,
-    or before the first build. settings_get is the function that returns the current settings (the server passes settings.get)."""
-    while True:
-        await asyncio.sleep(15)
-        try:
-            options = settings_get().get("profile", {})
-            if not options.get("auto_sync_answers", True) or not is_built():
-                continue
-            if _lock.locked() or bus.state.get("running"):
-                continue  # busy now, so check again on the next tick
-            delay = float(options.get("sync_delay_sec", 60))
-            documents_changed = db.kv_get("profile.documents_changed_at")
-            if documents_changed and documents_changed != db.kv_get("profile.documents_built"):
-                if time.time() - float(documents_changed) >= delay:
-                    await build("documents changed")  # a full build also reads every waiting answer
-                continue
-            answers_changed = db.kv_get("profile.answers_changed_at")
-            if answers_changed and answers_changed != db.kv_get("profile.answers_built"):
-                if time.time() - float(answers_changed) >= delay:
-                    await build("standard answers changed")
-                continue
-            pending = unsynced()
-            if pending and time.time() - max(float(q.get("answered_ts") or 0) for q in pending) >= delay:
-                await update_from_answers("answered questions")
-        except Exception:  # noqa: BLE001 (the watcher must never stop; update_from_answers already showed the error)
-            pass
+    or before the first build. A sync that failed is tried again only after RETRY_AFTER_FAILURE_SEC, unless what it was
+    for changed meanwhile (another document, another answer). `options` is the "profile" section of the settings.
+
+    Returns what happened, for tests: "" (nothing to do yet), "waiting" (the same sync failed a moment ago), "done", or
+    "failed" (the build or update raised; it already showed the error). Side effects: the build or update it runs."""
+    if not options.get("auto_sync_answers", True) or not is_built() or _lock.locked() or bus.state.get("running"):
+        return ""
+    delay, now = float(options.get("sync_delay_sec", 60)), time.time()
+    work = None  # (what the sync is for, the coroutine function to run, the reason for the changelog)
+    documents_changed = db.kv_get("profile.documents_changed_at")
+    answers_changed = db.kv_get("profile.answers_changed_at")
+    if documents_changed and documents_changed != db.kv_get("profile.documents_built"):
+        if now - float(documents_changed) >= delay:
+            work = (("documents", documents_changed), build, "documents changed")  # a full build also reads waiting answers
+    elif answers_changed and answers_changed != db.kv_get("profile.answers_built"):
+        if now - float(answers_changed) >= delay:
+            work = (("answers", answers_changed), build, "standard answers changed")
+    elif pending := unsynced():
+        newest = max(float(q.get("answered_ts") or 0) for q in pending)
+        if now - newest >= delay:
+            work = (("questions", newest), update_from_answers, "answered questions")
+    if not work:
+        return ""
+    key, run, reason = work
+    if _last_failure.get("key") == key and now - _last_failure["at"] < RETRY_AFTER_FAILURE_SEC:
+        return "waiting"
+    try:
+        await run(reason)
+    except Exception:  # noqa: BLE001 (remembered so the same failure isn't retried at once; the error was already shown)
+        _last_failure.update(key=key, at=time.time())
+        return "failed"
+    _last_failure.clear()
+    return "done"

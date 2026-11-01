@@ -32,6 +32,8 @@ from jobportal.core.config import APPLIED_STATUSES, CACHE, LEADS_DIR
 from jobportal.core.genres import DEFAULT_INDUSTRIES
 from jobportal.core.textutil import coverage, extract_terms, fingerprint, url_key
 from jobportal.documents import render, resumecheck
+from jobportal.documents.render import DEFAULT_STYLE
+from jobportal.documents.revise import resume_writer_system
 from jobportal.search.collectors import details
 from jobportal.search.collectors.base import SOCIAL_SOURCES, Ctx
 
@@ -40,7 +42,6 @@ from jobportal.search.collectors.base import SOCIAL_SOURCES, Ctx
 LIST_FIELDS = ("id, title, company, location, kind, category, source, sources, source_detail, posted_at, deadline, score, "
                "verdict, stage, stage_error, app_status, dream, ats_coverage, url, apply_url, created_at, updated_at, "
                "follow_up_at, applied_at, tokens, triage, found, industry, (COALESCE(resume_md, '') != '') AS has_resume")
-DEFAULT_STYLE = {"theme": "classic", "max_pages": 1}  # resume layout and page limit when nothing else picked one
 # The rendered resume in a lead's folder: the PDF, its Word copy (made on first download) and the PDF's fit info.
 RENDERED_RESUME = ("resume.pdf", "resume.docx", "resume.fit")
 # Sources whose title, company and location are guesses from a post or a headline, or placeholders for a job added by
@@ -277,19 +278,12 @@ async def build_package(lead_id: int, run_id: int | None = None, ctx: Ctx | None
 # ---------------------------------------------------------------- checking and rendering resumes
 
 
-def _resume_writer_system(prompt_name: str, default: str, cfg: dict) -> str:
-    """Instructions for an AI that rewrites a resume: the task prompt (Settings can override it), the resume format rules,
-    the resume playbook and the full candidate profile."""
-    return (f"{prompts.system(prompt_name, default)}\n\n{prompts.RESUME_FORMAT}\n\n=== RESUME PLAYBOOK ===\n"
-            f"{settings_mod.resume_playbook(cfg)}\n\n=== CANDIDATE PROFILE ===\n{profile_mod.full_context()}")
-
-
 async def check_resume(md: str, keywords: list[str], style: dict, archetype: str = "") -> dict:
     """Score a resume with the fixed-rule checks in documents/resumecheck.py: ATS safety, length, skills the profile backs,
     keyword coverage and style. The page count is one of the checks, so the resume is rendered to a throwaway PDF first.
 
-    Returns the check: score (0 to 100), issues, coverage, unverified_skills, pages and max_pages. Raises when no PDF engine
-    is available."""
+    Returns the check: score (0 to 100), issues, coverage, unverified_skills, pages and max_pages. Raises render.PDFError
+    when no PDF engine is available or printing fails."""
     CACHE.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=CACHE, ignore_cleanup_errors=True) as tmp:
         info = await render.resume_pdf(md, Path(tmp) / "check.pdf", style.get("theme", "classic"), style.get("max_pages", 1))
@@ -328,7 +322,7 @@ JOB DESCRIPTION (excerpt):
 RESUME TO REVIEW:
 {resume_md}"""
     try:
-        out = await ai.run(prompt, system=_resume_writer_system("resume_review", prompts.RESUME_REVIEW_SYSTEM, cfg),
+        out = await ai.run(prompt, system=resume_writer_system("resume_review", prompts.RESUME_REVIEW_SYSTEM, cfg),
                            schema=prompts.RESUME_REVIEW_SCHEMA, stage="revise", purpose="resume-review", run_id=run_id,
                            lead_id=lead["id"], label=f"resume critic: {lead['company'][:24]}", timeout=900)
     except ai.UsageLimitError:
@@ -388,7 +382,7 @@ INSTRUCTION: {instruction}
 
 CURRENT DOCUMENT:
 {current_md}"""
-    out = await ai.run(prompt, system=_resume_writer_system("revise", prompts.REVISE_SYSTEM, settings_mod.get()),
+    out = await ai.run(prompt, system=resume_writer_system("revise", prompts.REVISE_SYSTEM, settings_mod.get()),
                        schema=prompts.REVISE_SCHEMA, stage="revise", purpose=purpose, lead_id=lead["id"], label=label, timeout=900)
     md, review, critic_tokens = await polish_resume(lead, out["text"], package.get("keywords") or [], package.get("resume_strategy") or {}, style)
     return md, review, out.get("_tokens", 0) + critic_tokens, out.get("change_summary", "")
@@ -397,15 +391,34 @@ CURRENT DOCUMENT:
 async def _save_reworked_resume(lead: dict, md: str, review: dict, tokens: int, **package_updates) -> float:
     """Save a new resume on its lead: the review, check and keyword coverage go into the package (with any
     package_updates), the old rendered files are deleted and the PDFs are rendered again. Returns the new keyword coverage
-    (0 to 1)."""
-    package = lead.get("package") or {}
+    (0 to 1).
+
+    The lead is read again first. The AI work before this took a minute or more, and edits the lead page saved meanwhile
+    (contacts, the checklist, notes) must not be overwritten with the copy read before it started."""
+    current = _load_lead(lead["id"]) or lead
+    package = current.get("package") or {}
     ats_coverage, hit, miss = coverage(package.get("keywords") or [], md)
     package.update(resume_review=review, resume_check=review.get("check"), coverage={"hit": hit, "miss": miss}, **package_updates)
-    db.update_lead(lead["id"], resume_md=md, package=package, ats_coverage=ats_coverage, tokens=(lead.get("tokens") or 0) + tokens)
+    db.update_lead(lead["id"], resume_md=md, package=package, ats_coverage=ats_coverage, tokens=(current.get("tokens") or 0) + tokens)
     _delete_rendered_resume(lead["id"])
     await render_files(lead["id"])
     return ats_coverage
 
+
+async def recheck_resume(lead: dict) -> dict:
+    """Run the resume checks again on the lead's current resume (the lead editor's recheck, after each save and layout
+    change) and save the result as the package's resume_check. Returns the check.
+
+    The check renders a PDF, which takes a few seconds, so the lead is read again before saving: package edits saved
+    meanwhile stay, and when the resume itself changed meanwhile, this check of the old one isn't saved at all."""
+    package = lead.get("package") or {}
+    style = package.get("resume_style") or dict(DEFAULT_STYLE)
+    archetype = (package.get("resume_strategy") or {}).get("archetype", "")
+    check = await check_resume(lead["resume_md"], package.get("keywords") or [], style, archetype)
+    current = _load_lead(lead["id"])
+    if current and current.get("resume_md") == lead["resume_md"]:
+        db.update_lead(lead["id"], package={**(current.get("package") or {}), "resume_check": check})
+    return check
 
 
 async def gap_questions(lead_id: int) -> int:

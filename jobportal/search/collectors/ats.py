@@ -1,18 +1,21 @@
 """Company job boards: applicant tracking systems (ATS) that publish openings at public addresses. Supported: Greenhouse,
 Lever, Ashby, Workday, UKG (UltiPro), iCIMS and SmartRecruiters. No API keys are needed.
 
-Each board in Settings, Sources (cfg["sources"]["ats_boards"]["boards"]) names its system ("ats") and either a slug (the
+Each board in the Sources dialog (cfg["sources"]["ats_boards"]["boards"]) names its system ("ats") and either a slug (the
 company's id on that system, for example "example-robotics") or its careers page URL. HANDLERS maps each system to the
 function that reads that kind of board, and collect() reads every enabled board, eight at a time. detect() turns a careers
-page link into a board entry; that is how the Sources page adds a company from a pasted link (see sources.py).
+page link into a board entry; that is how the Sources dialog adds a company from a pasted link (see sources.py).
 
 Most systems return every opening in one request. Workday and iCIMS need a search word, so they are searched once per term
-from search_terms(). Postings from a board the user starred on the Sources page carry dream=True. strict_titles stays True:
-these are real job titles, so the rule filters check them against the user's levels. Several systems leave descriptions
-out of their lists; collectors/details.py fetches those later, one posting at a time, using what meta keeps."""
+from search_terms(). Postings from a board the user starred in the Sources dialog carry dream=True. strict_titles stays
+True: these are real job titles, so the rule filters check them against the user's levels. Several systems leave
+descriptions out of their lists; collectors/details.py fetches those later, one posting at a time, using what meta
+keeps."""
 import asyncio
 import re
 from urllib.parse import quote_plus, urlparse
+
+import httpx
 
 from jobportal.core.levels import ats_search_terms
 from jobportal.core.textutil import clean, html_to_text, parse_date
@@ -20,6 +23,9 @@ from jobportal.search import plan
 from jobportal.search.collectors.base import Ctx, RawJob
 
 BOARDS_AT_ONCE = 8  # boards read in parallel; Ctx still sends at most 4 requests at a time to one host (Greenhouse's API)
+# The most one board may take. collect() hands back every board's postings only at the end, and the search run gives the
+# whole source 15 minutes, so one stuck board must not use them up and lose every other board's postings.
+BOARD_TIMEOUT = 240
 LOCALE_SEGMENT = re.compile(r"[a-z]{2}-[A-Z]{2}")  # Workday URLs may carry a language part such as /en-US/
 WORKDAY_PAGE = 20  # Workday returns at most 20 postings per request
 WORKDAY_MAX = 100  # postings read per search term on one Workday board
@@ -60,9 +66,10 @@ async def greenhouse(ctx: Ctx, b: dict) -> list[RawJob]:
 
 def lever_description(posting: dict) -> str:
     """A Lever posting's text. Lever splits it into a plain-text body, titled lists (responsibilities, requirements and so
-    on, in HTML) and an optional closing section."""
-    lists = "\n".join(f"{part.get('text', '')}:\n{html_to_text(part.get('content', ''))}" for part in posting.get("lists", []))
-    return (posting.get("descriptionPlain") or "") + "\n" + lists
+    on, in HTML) and an optional closing section (additionalPlain, often the pay range and benefits). details.py uses it
+    for a single posting, and lever() for a whole board."""
+    lists = "\n".join(f"{part.get('text', '')}:\n{html_to_text(part.get('content', ''))}" for part in posting.get("lists") or [])
+    return "\n".join([posting.get("descriptionPlain") or "", lists, posting.get("additionalPlain") or ""]).strip()
 
 
 async def lever(ctx: Ctx, b: dict) -> list[RawJob]:
@@ -71,10 +78,10 @@ async def lever(ctx: Ctx, b: dict) -> list[RawJob]:
     out = []
     for j in d if isinstance(d, list) else []:
         categories = j.get("categories") or {}
-        description = lever_description(j) + "\n" + (j.get("additionalPlain") or "")
+        description = lever_description(j)
         locations = categories.get("allLocations") or ([categories.get("location")] if categories.get("location") else [])
         out.append(RawJob(source="ats", title=j.get("text", ""), company=b["name"], url=j.get("hostedUrl", ""),
-                          apply_url=j.get("applyUrl"), locations=locations, location=" | ".join(locations),
+                          apply_url=j.get("applyUrl"), locations=locations,
                           description=description.strip(), posted_at=parse_date(j.get("createdAt")),
                           category_hint=categories.get("commitment", ""), dream=bool(b.get("dream")),
                           source_detail=f"Lever: {b['name']}", found_url=f"https://jobs.lever.co/{b['slug']}", meta={"ats": "lever"}))
@@ -92,7 +99,7 @@ async def ashby(ctx: Ctx, b: dict) -> list[RawJob]:
             locations.append("Remote")
         locations = [loc for loc in locations if loc]
         out.append(RawJob(source="ats", title=j.get("title", ""), company=b["name"], url=j.get("jobUrl", ""),
-                          apply_url=j.get("applyUrl"), locations=locations, location=" | ".join(locations),
+                          apply_url=j.get("applyUrl"), locations=locations,
                           description=j.get("descriptionPlain") or html_to_text(j.get("descriptionHtml")),
                           posted_at=parse_date(j.get("publishedAt")), category_hint=j.get("employmentType", ""),
                           dream=bool(b.get("dream")), source_detail=f"Ashby: {b['name']}", found_url=f"https://jobs.ashbyhq.com/{b['slug']}",
@@ -100,21 +107,47 @@ async def ashby(ctx: Ctx, b: dict) -> list[RawJob]:
     return out
 
 
+class _Terms:
+    """Bookkeeping for the boards searched once per term (Workday, iCIMS), so one failing term costs only that term.
+
+    A term the site refuses (an error status, a page it can't build) is logged and the next term is tried. A site that
+    can't be reached at all ends the board instead: every other term would wait out the same retries again (about 50
+    seconds each), long enough to push the whole company-boards source past its time limit. When no term got an answer,
+    the board raises its last error, so the run log and the Sources dialog's check show it as failed instead of empty."""
+
+    def __init__(self, ctx: Ctx, board: dict):
+        self.ctx, self.board, self.answered, self.error = ctx, board, False, None
+
+    def failed(self, term: str, error: Exception) -> bool:
+        """Note one failed request for `term`. Returns True when the board should stop (the site can't be reached)."""
+        self.error = error
+        self.ctx.log("ats", f"{self.board['name']}: {self.board.get('ats')} '{term}' failed: {type(error).__name__}: {error}", "warn")
+        return isinstance(error, httpx.TransportError)
+
+    def done(self, out: list[RawJob]) -> list[RawJob]:
+        """The board's postings, or its last error raised when no term got an answer."""
+        if not self.answered and self.error:
+            raise self.error
+        return out
+
+
 async def workday(ctx: Ctx, b: dict) -> list[RawJob]:
     """Workday: the JSON API behind every Workday careers site (POST <site root>/wday/cxs/<tenant>/<site>/jobs). It needs a
     search word and pages 20 postings at a time, so each term reads up to 100. No descriptions: meta["api"] keeps each
-    posting's own API address for details.py."""
+    posting's own API address for details.py. Failed terms are handled by _Terms."""
     base, tenant, site = _wd_parts(b["url"])
     api = f"{base}/wday/cxs/{tenant}/{site}/jobs"
-    seen, out = set(), []
+    seen, out, terms = set(), [], _Terms(ctx, b)
     for term in search_terms(ctx.cfg):
         total = 0
         for offset in range(0, WORKDAY_MAX, WORKDAY_PAGE):
             try:
                 d = await ctx.post_json(api, {"appliedFacets": {}, "limit": WORKDAY_PAGE, "offset": offset, "searchText": term})
             except Exception as e:  # noqa: BLE001 (one failing term shouldn't sink the board)
-                ctx.log("ats", f"{b['name']}: workday '{term}' failed: {e}", "warn")
+                if terms.failed(term, e):
+                    return terms.done(out)
                 break
+            terms.answered = True
             posts = d.get("jobPostings", [])
             for j in posts:
                 path = j.get("externalPath")  # the posting's path on the careers site, unique per posting
@@ -129,7 +162,7 @@ async def workday(ctx: Ctx, b: dict) -> list[RawJob]:
             total = d.get("total") or total
             if len(posts) < WORKDAY_PAGE or offset + WORKDAY_PAGE >= total:
                 break
-    return out
+    return terms.done(out)
 
 
 # The search UKG's own job board page sends with nothing selected: the 100 newest openings, no keyword, no filters.
@@ -153,9 +186,9 @@ async def ukg(ctx: Ctx, b: dict) -> list[RawJob]:
         for place in j.get("Locations") or []:
             address = place.get("Address") or {}
             city_state = ", ".join(x for x in [address.get("City"), (address.get("State") or {}).get("Code")] if x)
-            locations.append(city_state or place.get("LocalizedName", ""))
+            locations.append(city_state or place.get("LocalizedName"))  # RawJob drops a place with neither
         out.append(RawJob(source="ats", title=j.get("Title", ""), company=b["name"],
-                          url=f"{base}/OpportunityDetail?opportunityId={j.get('Id')}", locations=locations, location=" | ".join(locations),
+                          url=f"{base}/OpportunityDetail?opportunityId={j.get('Id')}", locations=locations,
                           description=j.get("BriefDescription", ""), posted_at=parse_date(j.get("PostedDate")),
                           dream=bool(b.get("dream")), source_detail=f"UKG: {b['name']}", found_url=base, meta={"ats": "ukg"}))
     return out
@@ -164,12 +197,19 @@ async def ukg(ctx: Ctx, b: dict) -> list[RawJob]:
 async def icims(ctx: Ctx, b: dict) -> list[RawJob]:
     """iCIMS: there is no public JSON API, so this reads the careers site's search results page as HTML, once per term.
     in_iframe=1 asks for the bare results list, without the company's page around it. Each result is an
-    iCIMS_JobCardItem block holding the link, title, location, posted date and a short description."""
+    iCIMS_JobCardItem block holding the link, title, location, posted date and a short description. Failed terms are
+    handled by _Terms."""
     base = b["url"].rstrip("/")
     host = urlparse(base).netloc
-    out, seen = [], set()
+    out, seen, terms = [], set(), _Terms(ctx, b)
     for term in search_terms(ctx.cfg):
-        html = await ctx.get_text(f"{base}/jobs/search?ss=1&searchKeyword={quote_plus(term)}&in_iframe=1")
+        try:
+            html = await ctx.get_text(f"{base}/jobs/search?ss=1&searchKeyword={quote_plus(term)}&in_iframe=1")
+        except Exception as e:  # noqa: BLE001 (one failing term shouldn't sink the board)
+            if terms.failed(term, e):
+                break
+            continue
+        terms.answered = True
         for card in html.split('class="iCIMS_JobCardItem"')[1:]:
             link = re.search(rf'href="(https://{re.escape(host)}/jobs/(\d+)/[^"]+)"', card)  # group 2 is the job number
             if not link or link.group(2) in seen:
@@ -185,7 +225,7 @@ async def icims(ctx: Ctx, b: dict) -> list[RawJob]:
                               posted_at=parse_date((posted.group(1).split(" ")[0]) if posted else None),
                               dream=bool(b.get("dream")), source_detail=f"iCIMS: {b['name']}", found_url=f"{base}/jobs/search?ss=1",
                               meta={"ats": "icims"}))
-    return out
+    return terms.done(out)
 
 
 async def smartrecruiters(ctx: Ctx, b: dict) -> list[RawJob]:
@@ -209,8 +249,8 @@ HANDLERS = {"greenhouse": greenhouse, "lever": lever, "ashby": ashby, "workday":
 
 
 async def collect(ctx: Ctx) -> list[RawJob]:
-    """Read every enabled board, BOARDS_AT_ONCE at a time. A board that fails (wrong slug, site down, format changed) is
-    logged and skipped. A board naming an unknown system is skipped quietly."""
+    """Read every enabled board, BOARDS_AT_ONCE at a time. A board that fails (wrong slug, site down, format changed) or
+    takes longer than BOARD_TIMEOUT is logged and skipped. A board naming an unknown system is skipped quietly."""
     boards = [b for b in ctx.cfg["sources"]["ats_boards"]["boards"] if b.get("enabled", True)]
     slots = asyncio.Semaphore(BOARDS_AT_ONCE)
 
@@ -221,7 +261,10 @@ async def collect(ctx: Ctx) -> list[RawJob]:
             if not handler:
                 return []
             try:
-                return await handler(ctx, b)
+                return await asyncio.wait_for(handler(ctx, b), timeout=BOARD_TIMEOUT)
+            except TimeoutError:
+                ctx.log("ats", f"{b['name']} ({b.get('ats')}): no answer within {BOARD_TIMEOUT} seconds, skipped this run", "warn")
+                return []
             except Exception as e:  # noqa: BLE001 (one broken board shouldn't sink the rest)
                 ctx.log("ats", f"{b['name']} ({b.get('ats')}): {type(e).__name__}: {str(e)[:120]}", "warn")
                 return []
@@ -232,30 +275,41 @@ async def collect(ctx: Ctx) -> list[RawJob]:
     return out
 
 
+# The hosts of the job boards found by slug, where the company's slug comes first in the path. Only these count: a link to
+# the systems' own websites (www.greenhouse.io/privacy-policy, www.lever.co/careers) isn't a board, and boards on hosts
+# the readers above don't call (jobs.eu.lever.co) would only fail later.
+SLUG_HOSTS = {"greenhouse": ("boards.greenhouse.io", "job-boards.greenhouse.io"), "lever": ("jobs.lever.co",),
+              "ashby": ("jobs.ashbyhq.com",), "smartrecruiters": ("jobs.smartrecruiters.com", "careers.smartrecruiters.com")}
+
+
 def detect(url: str) -> dict | None:
     """Turn a careers page or posting URL into a board entry ({"ats": ..., plus "slug" or "url"}), or None when it isn't a
-    supported system. For example jobs.lever.co/example-robotics/123 gives {"ats": "lever", "slug": "example-robotics"}."""
-    u = urlparse(url.strip())
-    host, path = u.netloc.lower(), u.path
+    supported board (or isn't a valid address). For example jobs.lever.co/example-robotics/123 gives {"ats": "lever",
+    "slug": "example-robotics"}."""
+    try:
+        u = urlparse(url.strip())
+        host = (u.hostname or "").lower()
+    except ValueError:  # such as "https://[x", whose host can't be read
+        return None
+    path = u.path
     segments = [s for s in path.split("/") if s]
-    if "greenhouse.io" in host:
+    if host in SLUG_HOSTS["greenhouse"]:
         embed = re.search(r"for=([\w-]+)", u.query)  # embedded boards: boards.greenhouse.io/embed/job_board?for=<slug>
         if embed:
             return {"ats": "greenhouse", "slug": embed.group(1)}
         if segments and segments[0] not in ("embed", "v1"):  # job-boards.greenhouse.io/<slug>/jobs/<id>
             return {"ats": "greenhouse", "slug": segments[0]}
-    if "lever.co" in host and segments:
-        return {"ats": "lever", "slug": segments[0]}
-    if "ashbyhq.com" in host and segments:
-        return {"ats": "ashby", "slug": segments[0]}
-    if "myworkdayjobs.com" in host:
+        return None
+    for system in ("lever", "ashby", "smartrecruiters"):
+        if host in SLUG_HOSTS[system] and segments:
+            return {"ats": system, "slug": segments[0]}
+    if host.endswith(".myworkdayjobs.com"):  # <tenant>.wd5.myworkdayjobs.com
         site = [s for s in segments if not LOCALE_SEGMENT.fullmatch(s)]
         return {"ats": "workday", "url": f"https://{host}/{site[0] if site else 'External'}"}
-    if "ultipro.com" in host and "JobBoard" in path:
-        board = re.search(r"(.*/JobBoard/[0-9a-f-]+)", f"https://{host}{path}")  # everything up to the board's id
+    if host.endswith("ultipro.com") and "/jobboard/" in path.lower():
+        # Everything up to the board's id, a GUID written in either case.
+        board = re.search(r"(.*/JobBoard/[0-9a-f-]+)", f"https://{host}{path}", re.I)
         return {"ats": "ukg", "url": board.group(1)} if board else None
     if host.endswith(".icims.com"):
         return {"ats": "icims", "url": f"https://{host}"}
-    if "smartrecruiters.com" in host and segments:
-        return {"ats": "smartrecruiters", "slug": segments[0]}
     return None

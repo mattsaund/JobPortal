@@ -1,33 +1,38 @@
 """First-run setup: the standard job questions, the resume import, and what the answers change.
 
-How it fits: the Setup page and the Profile page's Standard answers tab (web/static/js/pages/setup.js and profile.js) draw
-their form from QUESTIONS. They call web/routes/candidate.py, which calls import_resume(), save_answers() and state() here.
-Then candidate/profile.py builds the rest of the profile from the resume and these answers.
+How it fits: Home asks the standard questions one at a time (web/static/js/pages/home.js) and saves each answer with
+merge_answers(). Settings, Profile shows them all as one form (pages/profile.js and components/answers-form.js), saved
+with save_answers(). Both draw the questions from QUESTIONS and go through web/routes/candidate.py, which also calls
+import_resume() and state() here. Then candidate/profile.py builds the rest of the profile from the resume, the extra
+documents and these answers.
 
 Key ideas:
 - QUESTIONS is data, not code. Each field's id, label, type and options drive the form, the saved answers and the AI
   prompts. A new question shows up in all of them with no other change. Only a function below that maps an answer
   somewhere on purpose (facts, the Application kit, settings) needs to know about it.
-- Importing a resume pre-fills the form. A regex pass finds the email, phone and links, then the AI fills in the rest.
-  The user checks every pre-filled answer before saving.
-- Saving the answers stores them as "profile.answers" and changes two other things. apply_to_profile() rewrites the
-  profile's facts and Application kit from them. apply_to_settings() points the search at them: the experience levels and
-  the title filters they imply, the allowed locations (the search area), the dream companies and the clearance filter.
+- Importing a resume fills in the answers that are still empty (until the answers are saved for the first time). A regex
+  pass finds the email, phone and links, then the AI fills in the rest. Home shows the user what the resume answered, to
+  check.
+- The answers count as saved once every required question has one ("_saved_at"). Saving stores them as "profile.answers"
+  and changes two other things. apply_to_profile() rewrites the profile's facts and Application kit from them.
+  apply_to_settings() points the search at them: the experience levels and the title filters they imply, the allowed
+  locations (the search area), the dream companies and the clearance filter.
 - The voluntary self-identification section only fills in the Application kit, so the user can copy the answers into a
   form. It never reaches the AI.
 """
+import asyncio
 import hashlib
 import re
 import time
 from datetime import date
-from pathlib import Path
 
 from jobportal.ai import client as ai
 from jobportal.candidate import documents, profile as profile_mod
-from jobportal.core import bus, db, settings as settings_mod
+from jobportal.core import bus, db, osutil, settings as settings_mod
 from jobportal.core.config import RESUME_DIR
 from jobportal.core.genres import DEFAULT_INDUSTRIES, OLD_INDUSTRIES
 from jobportal.core.levels import LEVELS, title_filters
+from jobportal.core.textutil import unique
 from jobportal.documents import extract
 
 # Answer options as [saved id, label shown]. Saved answers keep the id, so renaming an id breaks answers already saved.
@@ -235,7 +240,7 @@ async def prefill(text: str) -> dict:
     """Answer as many standard questions as the resume allows (one AI call), for the user to check.
 
     The AI's answers win over regex_prefill()'s finds, but a field the AI leaves blank keeps the regex find. When the AI
-    call fails, returns the regex finds plus "_error", and the setup page asks the user to fill in the rest."""
+    call fails, returns the regex finds plus "_error", and Home asks the user the rest."""
     found = regex_prefill(text)
     try:
         out = await ai.run(f"RESUME:\n{text[:30000]}", system=PREFILL_SYSTEM, schema=PREFILL_SCHEMA, stage="prefill",
@@ -252,19 +257,20 @@ async def prefill(text: str) -> dict:
 async def import_resume(filename: str, data: bytes | None = None, text: str | None = None, do_prefill: bool = True) -> dict:
     """Store the user's resume and pre-fill the standard questions from it.
 
-    Pass the uploaded file as data, or pasted text as text. Keeps a copy of the file in the resume folder, and stores the
-    text and file details as "profile.resume" and the pre-fill as "onboarding.prefill". do_prefill=False skips the AI call
-    (the Profile page does that when it replaces a resume, because the answers are already saved). Returns
-    {"resume": file details, "prefill": answers found}. Raises extract.ExtractError when no text can be read or pasted text
-    is too short. It doesn't rebuild the profile; the caller decides when to."""
+    Pass the uploaded file as data, or pasted text as text. Keeps a copy of the file in the resume folder, stores the
+    text and file details as "profile.resume" and the pre-fill as "onboarding.prefill", and, until the answers are first
+    saved, fills the empty answers from it (_fill_from_resume). do_prefill=False skips the AI call (the dashboard does
+    that when it replaces a resume after setup, because the answers are already saved). Returns {"resume": file
+    details, "prefill": answers found, "filled": the ids of the answers it filled}. Raises extract.ExtractError when no
+    text can be read or pasted text is too short. It doesn't rebuild the profile; the caller decides when to."""
     if text is None:
-        text = extract.extract_text(filename, data or b"")
+        # In a worker thread: a long PDF or a .doc (through LibreOffice) can take seconds, and the server must keep answering.
+        text = await asyncio.to_thread(extract.extract_text, filename, data or b"")
     elif len(text.strip()) < extract.MIN_CHARS:
         raise extract.ExtractError("that's too short to be a resume. Paste the whole thing.")
     raw = data if data is not None else text.encode("utf-8")
     RESUME_DIR.mkdir(parents=True, exist_ok=True)
-    # A file name with no folder parts and no characters Windows forbids, dated so imports on different days stay apart.
-    safe_name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", Path(filename or "resume.txt").name).strip() or "resume.txt"
+    safe_name = osutil.storable_name(filename, "resume.txt")  # dated below, so imports on different days stay apart
     stored = RESUME_DIR / f"{date.today().isoformat()} {safe_name}"
     stored.write_bytes(raw)
     text = text.strip()
@@ -310,7 +316,7 @@ def _clean_answers(raw: dict) -> dict:
             value = [str(x).strip() for x in (value or []) if str(x).strip()]
             if key == "industries":  # names from before v0.3.0 became new ones (genres.OLD_INDUSTRIES)
                 value = [OLD_INDUSTRIES.get(x, x) for x in value]
-                value = [x for i, x in enumerate(value) if x not in value[:i]]
+                value = unique(value)
             if field["type"] == "multi":
                 known = {option_id for option_id, _ in field.get("options", [])}
                 value = [x for x in value if x in known]
@@ -386,18 +392,22 @@ def allowed_locations(a: dict) -> list[str]:
     """The search area the location questions describe, as the list kept in settings locations.allowed.
 
     Each entry is a state, a city, "Remote" or "Anywhere in the US". core/textutil.LocationMatcher checks job locations
-    against the list, and the Search area editor (Leads and Settings pages) changes it later.
+    against the list, and the search area editor (Home's "Where to search", and Settings, Search) changes it later.
     - The states and cities listed under "Where you can work" come first.
     - Answering yes to "Open to jobs anywhere in the United States?" puts "Anywhere in the US" in front.
-    - Picking Remote under "Work arrangement" adds "Remote".
-    - With none of those, the search covers the home state from the contact details, or the whole US without one."""
+    - With neither of those, on-site and hybrid jobs are searched near home: the home state from the contact details, or
+      the whole US without one. That holds when Remote is picked too (the default picks all three arrangements), so
+      skipping the optional places question never leaves a remote-only search. Only a user who picked nothing but Remote
+      gets no home area.
+    - Picking Remote under "Work arrangement" adds "Remote"."""
     allowed = list(a.get("locations") or [])
+    modes = a.get("work_modes") or []
     if a.get("anywhere_us") == "yes":
         allowed.insert(0, "Anywhere in the US")
-    if "remote" in (a.get("work_modes") or []):
+    elif not allowed and (not modes or {"onsite", "hybrid"} & set(modes)):
+        allowed.append(a["state"] if a.get("state") else "Anywhere in the US")
+    if "remote" in modes:
         allowed.append("Remote")
-    if not allowed:
-        allowed = [a["state"]] if a.get("state") else ["Anywhere in the US"]
     return allowed
 
 
@@ -420,14 +430,15 @@ def _apply_list_change(current: list[str], old: list[str], new: list[str]) -> li
 def apply_to_settings(a: dict, previous: dict | None = None) -> dict:
     """Point the search at the standard answers. Saves the settings and returns them.
 
-    `previous` is the answers as they were before this save. Each setting changes only when the answers it comes from
-    changed (or on the first save), so an edit made on another page (the search area on the Leads page, the Dream list,
-    the title filters in Settings) survives saving the answers again for an unrelated fix.
+    `previous` is the answers as they were last saved (see _last_saved), or None for the first save. Each setting changes
+    only when the answers it comes from changed, or on the first save, so an edit made somewhere else (the search area
+    editor, the Dream list, the title filters in Settings, Search) survives saving the answers again for an unrelated
+    fix.
     - search.levels: the experience levels to search. They also set the job-title filters (core/levels.title_filters),
       and the target roles always pass those filters.
     - locations.allowed: the search area (see allowed_locations()).
     - dream_companies: companies added to the answers join the Dream list, and ones removed from the answers leave it.
-      Companies added on the Dream list page stay.
+      Companies added to the Dream list in Settings stay.
     - filters.exclude_keywords: without an active clearance, postings that require one on day one are filtered out.
       Excluded keywords the user added are left alone."""
     previous = previous or {}
@@ -468,7 +479,7 @@ def save_answers(raw: dict) -> dict:
     missing = missing_required(answers)
     if missing:
         raise ValueError("Please answer: " + "; ".join(missing))
-    previous = db.kv_get("profile.answers", {})
+    previous = _last_saved(profile_mod.standard_answers())
     answers["_saved_at"] = db.now()
     db.kv_set("profile.answers", answers)
     apply_to_profile(answers)
@@ -481,6 +492,15 @@ def save_answers(raw: dict) -> dict:
 def _plain(answers: dict) -> dict:
     """The answers without the "_" keys (notes like "_saved_at" that aren't answers)."""
     return {key: value for key, value in answers.items() if not key.startswith("_")}
+
+
+def _last_saved(stored: dict) -> dict | None:
+    """The stored answers as the settings last saw them, for apply_to_settings(), or None before the first save.
+
+    Answers can be stored before the answers count as saved: the resume fills in empty ones (_fill_from_resume), and Home
+    saves each one as it's answered (merge_answers). Those never reached the settings, so the first save must apply all
+    of them, not only the ones that differ from what was stored."""
+    return _plain(stored) if stored.get("_saved_at") else None
 
 
 def merge_answers(partial: dict) -> dict:
@@ -509,7 +529,7 @@ def merge_answers(partial: dict) -> dict:
     db.kv_set("profile.answers", {**answers, **meta})
     if complete or was_saved:
         apply_to_profile(answers)
-        apply_to_settings(answers, _plain(current))
+        apply_to_settings(answers, _last_saved(current))
         if was_saved:
             db.kv_set("profile.answers_changed_at", time.time())
         bus.publish("profile", {"ts": db.now(), "mode": "answers"})
@@ -519,9 +539,10 @@ def merge_answers(partial: dict) -> dict:
 
 
 def state() -> dict:
-    """Everything the setup page needs (the Profile page's Resume and Standard answers tabs use it too): the questions, the
-    saved answers over the defaults, the required ids, the resume's details and the first 4,000 characters of its text,
-    the latest pre-fill, the progress flags, the profile status, the file types an upload accepts, and the extra documents."""
+    """Everything setup needs (Home asks the questions, and Settings, Profile shows the answers and the resume): the
+    questions, the saved answers over the defaults, the required ids still empty, the answers filled in from the resume
+    and not checked yet, the resume's details and the first 4,000 characters of its text, the latest pre-fill, the
+    progress flags, the profile status, the file types an upload accepts, and the extra documents."""
     imported = profile_mod.resume()
     answers = profile_mod.standard_answers()
     built = profile_mod.is_built()

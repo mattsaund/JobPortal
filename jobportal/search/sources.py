@@ -1,4 +1,4 @@
-"""The two checks on the Sources page (web/routes/search.py calls them). Neither one saves anything.
+"""The two checks in the Sources dialog on Leads (web/routes/search.py calls them). Neither one saves anything.
 
 detect_board finds the company job board behind a careers page address, so the user can add a company by pasting a link. It
 uses collectors/ats.py to recognize the board and read it once. test_collector runs one source by itself, with the current
@@ -22,15 +22,24 @@ def _quiet(*_args, **_kwargs) -> None:
 
 
 async def _board_linked_from(url: str) -> dict | None:
-    """Fetch a careers page and look for a supported job board linked from it."""
+    """Fetch a careers page and return the first supported job board linked from it, or None. Every link to a supported
+    system is tried in page order: the first is often no board at all (a preconnect hint, the vendor's own website in a
+    footer), with the real embed further down."""
     ctx = Ctx(settings.get(), _quiet)
     try:
-        link = BOARD_LINK.search(await ctx.get_text(url))
-        return ats.detect(link.group(1)) if link else None
+        page = await ctx.get_text(url)
     except Exception:  # noqa: BLE001 (an unreachable page just means no board was found)
         return None
     finally:
         await ctx.close()
+    return next((board for link in BOARD_LINK.finditer(page) if (board := ats.detect(link.group(1)))), None)
+
+
+def _reason(e: Exception) -> str:
+    """An exception as a short reason for the Sources dialog. Some, like a timeout, have no message of their own."""
+    if isinstance(e, TimeoutError):
+        return "no answer in time"
+    return str(e) or type(e).__name__
 
 
 async def detect_board(url: str, name: str = "") -> dict:
@@ -43,10 +52,11 @@ async def detect_board(url: str, name: str = "") -> dict:
     board = {"name": name, **found}
     ctx = Ctx(settings.get(), _quiet)
     try:
-        jobs = await ats.HANDLERS[board["ats"]](ctx, {**board, "name": board["name"] or "test"})
+        jobs = await asyncio.wait_for(ats.HANDLERS[board["ats"]](ctx, {**board, "name": board["name"] or "test"}),
+                                      timeout=ats.BOARD_TIMEOUT)
         return {"ok": True, "board": board, "count": len(jobs), "sample": [j.title for j in jobs[:8]]}
     except Exception as e:  # noqa: BLE001 (the board was recognized but the site refused or changed)
-        return {"ok": False, "board": board, "message": f"Detected {board['ats']} but fetching failed: {e}"}
+        return {"ok": False, "board": board, "message": f"Detected {board['ats']} but fetching failed: {_reason(e)}"}
     finally:
         await ctx.close()
 
@@ -61,8 +71,8 @@ async def test_collector(key: str) -> dict:
     ctx = Ctx(cfg, lambda _source, msg, level="info": logs.append(f"[{level}] {msg}"))
     try:
         jobs = await asyncio.wait_for(COLLECTORS[key][1](ctx), timeout=300)
-    except Exception as e:  # noqa: BLE001 (report any failure, including a timeout, on the Sources page)
-        return {"ok": False, "error": str(e), "logs": logs}
+    except Exception as e:  # noqa: BLE001 (report any failure, including a timeout, in the Sources dialog)
+        return {"ok": False, "error": _reason(e), "logs": logs}
     finally:
         await ctx.close()
     filters = RuleFilters(cfg)

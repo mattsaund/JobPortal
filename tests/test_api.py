@@ -1,3 +1,5 @@
+"""The HTTP API through FastAPI's test client: setup, documents, downloads, leads, the Tracker, the Dream list, sources,
+the security checks and Quit. No network: the AI is the fake_ai fixture."""
 import copy
 import json
 import time
@@ -9,6 +11,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client():
+    """A test client for the dashboard's server, with its startup and shutdown run around the test."""
     from jobportal.web.server import app
     with TestClient(app) as c:
         yield c
@@ -142,6 +145,91 @@ def test_lead_downloads(client):
     assert "Subject: Internship" in get("email-0.eml").text
     assert get("interview_prep.docx").content[:2] == b"PK"  # a Word file is a zip
     assert get("email-5.eml").status_code == 404 and get("cover_letter.md").status_code == 404 and get("resume.exe").status_code == 404
+
+
+def test_any_email_draft_downloads(client):
+    import io
+    import zipfile
+
+    from jobportal.core import db
+    lead_id = _lead_with_documents()
+    # The AI names each draft's kind in free text, and may leave a field out.
+    db.update_lead(lead_id, package={"emails": [{"kind": "follow-up → hiring manager 你好", "to_addr": "hr@example.com"}]})
+    one = client.get(f"/api/leads/{lead_id}/export/email-0.eml")
+    assert one.status_code == 200 and "filename*=utf-8''" in one.headers["content-disposition"]
+    package = client.get(f"/api/leads/{lead_id}/export/package.zip")
+    names = zipfile.ZipFile(io.BytesIO(package.content)).namelist()
+    assert package.status_code == 200 and any(name.startswith("email-1-follow-up") for name in names)
+
+
+def test_a_cover_letter_rendered_on_an_earlier_day_is_made_again(client):
+    import os
+    from datetime import date
+
+    from docx import Document
+
+    from jobportal.core import db
+    from jobportal.core.config import LEADS_DIR
+    from jobportal.documents import render
+    lead_id = _lead_with_documents()
+    db.update_lead(lead_id, cover_md="Dear Hiring Team,\n\nI'd like to help.\n\nSincerely,\nJordan Rivera")
+    assert client.get(f"/api/leads/{lead_id}/export/cover_letter.docx").status_code == 200
+    rendered = LEADS_DIR / str(lead_id) / "cover_letter.docx"
+    a_week_ago = rendered.stat().st_mtime - 7 * 86400
+    os.utime(rendered, (a_week_ago, a_week_ago))  # rendered when the package was built, last week
+    assert client.get(f"/api/leads/{lead_id}/export/cover_letter.docx").status_code == 200
+    assert date.fromtimestamp(rendered.stat().st_mtime) == date.today()
+    assert render.long_date() in [p.text for p in Document(str(rendered)).paragraphs]  # dated today, not last week
+
+
+def test_without_a_pdf_engine_downloads_say_what_to_install(client, monkeypatch):
+    from jobportal.core import osutil
+    monkeypatch.setattr(osutil, "find_pdf_engine", lambda: None)
+    lead_id = _lead_with_documents()
+    for response in (client.get(f"/api/leads/{lead_id}/export/resume.pdf"), client.post(f"/api/leads/{lead_id}/resume-check")):
+        assert response.status_code == 503 and "needs Google Chrome" in response.json()["detail"]  # not a bare 500
+
+
+def test_imported_files_are_read_away_from_the_server_loop(client, monkeypatch, sample_resume):
+    import asyncio
+
+    from jobportal.documents import extract
+    real, where = extract.extract_text, []
+
+    def spy(*args, **kwargs):  # reading a .doc through LibreOffice can take seconds: the server must keep answering
+        try:
+            asyncio.get_running_loop()
+            where.append("event loop")
+        except RuntimeError:
+            where.append("worker thread")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(extract, "extract_text", spy)
+    assert client.put("/api/profile/documents?filename=cpr.txt", content=b"CPR certified by the American Heart Association, 2025").status_code == 200
+    assert client.put("/api/onboarding/resume?filename=resume.md&save_to_library=0&prefill=0", content=sample_resume.encode()).status_code == 200
+    assert client.put("/api/library/import?filename=resume.md", content=sample_resume.encode()).status_code == 200
+    assert where == ["worker thread"] * 3
+
+
+def test_requests_with_bad_values_get_a_400(client):
+    from jobportal.core import db
+    assert client.post("/api/settings/reset", json={}).status_code == 400
+    db.kv_set("profile.resume", {"text": "# Jordan Rivera", "name": "resume.md"})  # setup finished
+    db.kv_set("profile.answers", {"_saved_at": db.now()})
+    db.kv_set("profile.built_at", db.now())
+    assert client.post("/api/run", json={"mode": "backlog", "overrides": {"max_packages": "lots"}}).status_code == 400
+    assert db.q("SELECT id FROM runs") == []  # refused before a run was recorded
+
+
+def test_saved_resume_routes_refuse_what_they_cannot_do(client, fake_ai):
+    from jobportal.core import db
+    item = client.post("/api/library", json={"md": "# Jordan Rivera\n\n## Skills\n- Python", "name": "General"}).json()
+    assert client.post(f"/api/library/{item['id']}/revise", json={"instruction": "  "}).status_code == 400  # no AI call
+    assert not fake_ai.calls
+    assert client.put("/api/library/999", json={"name": "Nothing here"}).status_code == 404
+    assert client.delete("/api/library/999").status_code == 404
+    db.ex("UPDATE resume_library SET style=? WHERE id=?", ('"modern"', item["id"]))  # a style that isn't an object
+    assert client.get(f"/api/library/{item['id']}/html").status_code == 200  # read as the default layout, not a 500
 
 
 def test_manual_lead_needs_a_link_or_text(client, fake_ai):
@@ -304,3 +392,24 @@ def test_skipping_application_sent_still_records_the_date(client, fake_ai):
     assert moved["applied_at"] and not moved.get("follow_up_at")  # applied, but not waiting on a reply anymore
     quick = client.post("/api/leads/manual", json={"title": "Line Cook", "company": "Example Diner", "app_status": "accepted"}).json()
     assert quick["applied_at"]
+
+
+def test_the_other_industry_chip_and_filter_agree(client):
+    from jobportal.search import packages
+    for i, industry in enumerate([None, "", "Other", "Education", "Education"]):
+        packages.insert_lead({"fingerprint": f"ind{i}", "title": "Tutor", "company": f"Example School {i}", "industry": industry,
+                              "stage": "ready", "app_status": "new"})
+    page = client.get("/api/leads?tab=all").json()
+    assert page["industries"] == {"Other": 3, "Education": 2}  # no industry counts as Other, added up, not replaced
+    others = client.get("/api/leads?tab=all&industry=Other").json()["leads"]
+    assert sorted(lead["company"] for lead in others) == ["Example School 0", "Example School 1", "Example School 2"]
+    assert len(client.get("/api/leads?tab=all&industry=Education").json()["leads"]) == 2
+
+
+def test_a_lead_never_gets_an_empty_status_or_an_unknown_kind(client):
+    lead = client.post("/api/leads/manual", json={"title": "Barista", "company": "Example Cafe", "app_status": "ready"}).json()
+    for empty in (None, ""):  # a lead with no status would be on no tab and no Tracker column
+        assert client.patch(f"/api/leads/{lead['id']}", json={"app_status": empty}).status_code == 400
+    assert client.get(f"/api/leads/{lead['id']}").json()["app_status"] == "ready"
+    assert client.post("/api/leads/manual", json={"title": "Chef", "company": "Example Bistro", "kind": "gig"}).status_code == 400
+    assert client.post("/api/leads/manual", json={"title": "Chef", "company": "Example Bistro", "kind": "event"}).json()["kind"] == "event"

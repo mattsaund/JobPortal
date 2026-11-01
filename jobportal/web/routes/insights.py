@@ -53,8 +53,8 @@ def restore_analysis_role(body: dict):
 
 @router.get("/api/dreams")
 def get_dreams():
-    """The Dream list page. Companies come from two places: the ones the user added, and the ones the profile's search plan
-    suggested (minus any the user removed)."""
+    """The Dream list (in Settings, Search). Companies come from two places: the ones the user added, and the ones the
+    profile's search plan suggested (minus any the user removed)."""
     cfg = settings.get()
     suggested = (profile.get("search_plan") or {}).get("dream_companies", [])
     removed = cfg.get("dream_exclude", [])
@@ -89,10 +89,10 @@ def recheck_dreams():
     """Re-flag every lead against the current Dream list. Leads the user starred or unstarred by hand are left alone."""
     cfg = settings.get()
     companies, jobs = plan.all_dreams(cfg), cfg.get("dream_jobs", [])
-    changed = 0
+    now, changes = db.now(), []
     for row in db.q("SELECT id, company, title, dream FROM leads WHERE dream_manual IS NULL"):
         dream = 1 if (pipeline.is_dream(row["company"], companies) or pipeline.is_dream_job(row["title"], jobs)) else 0
         if dream != (row["dream"] or 0):
-            db.update_lead(row["id"], dream=dream)
-            changed += 1
-    return {"changed": changed, **get_dreams()}
+            changes.append((dream, now, row["id"]))
+    db.ex_many("UPDATE leads SET dream=?, updated_at=? WHERE id=?", changes)  # one transaction, however many leads change
+    return {"changed": len(changes), **get_dreams()}

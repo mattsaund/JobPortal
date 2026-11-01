@@ -1,4 +1,5 @@
-"""The Resumes page: resume versions the user keeps, edits, downloads and applies to leads.
+"""Saved resumes (Settings, Resumes): resume versions the user keeps, edits, downloads and applies to leads. The work happens
+in candidate/library.py, documents/ (rendering, downloads, AI edits) and search/packages.py (putting one on a lead).
 
 Saved resumes are storage. They're never used as a template and never feed the profile: every tailored resume is written
 from the profile."""
@@ -15,6 +16,7 @@ router = APIRouter()
 
 
 def _item_or_404(item_id: int) -> dict:
+    """The saved resume with that id, or a 404 for the dashboard."""
     item = library.get(item_id)
     if not item:
         raise HTTPException(404)
@@ -23,6 +25,7 @@ def _item_or_404(item_id: int) -> dict:
 
 @router.get("/api/library")
 def list_resumes():
+    """Every saved resume, most recently changed first, each with a short preview instead of its full text."""
     return library.list_items()
 
 
@@ -56,16 +59,21 @@ async def import_resume(request: Request, filename: str, name: str = ""):
 
 @router.get("/api/library/{item_id}")
 def get_resume(item_id: int):
+    """One saved resume with its full Markdown, style, tags and notes."""
     return _item_or_404(item_id)
 
 
 @router.put("/api/library/{item_id}")
 def update_resume(item_id: int, body: dict):
+    """Change a saved resume's name, Markdown, style, tags or notes (other keys are ignored). Returns the item."""
+    _item_or_404(item_id)
     return library.update(item_id, body)
 
 
 @router.delete("/api/library/{item_id}")
 def delete_resume(item_id: int):
+    """Delete a saved resume and its rendered downloads."""
+    _item_or_404(item_id)
     library.delete(item_id)
     return {"ok": True}
 
@@ -81,8 +89,11 @@ def resume_preview(item_id: int):
 async def revise_resume(item_id: int, body: dict):
     """Ask the AI to edit a saved resume by instruction. Returns the new text; nothing is saved."""
     item = _item_or_404(item_id)
+    instruction = str(body.get("instruction") or "").strip()
+    if not instruction:  # as for a lead's documents: no instruction, no AI call
+        raise HTTPException(400, "instruction required")
     try:
-        return await revise.revise_saved_resume(item, body.get("instruction", ""), body.get("text") or "")
+        return await revise.revise_saved_resume(item, instruction, body.get("text") or "")
     except ai.AIError as e:
         raise ai_error(e)
 
@@ -95,6 +106,8 @@ async def export_resume(item_id: int, fmt: str):
         path, filename = await exports.library_file(item, fmt)
     except exports.NotAvailable:
         raise HTTPException(404)
+    except render.PDFError as e:  # no PDF engine, or it timed out: say so instead of a bare 500
+        raise HTTPException(503, str(e))
     return FileResponse(path, filename=filename)
 
 

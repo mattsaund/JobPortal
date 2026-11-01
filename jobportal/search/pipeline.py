@@ -240,10 +240,23 @@ def _qualifies(result: dict, min_score: int) -> bool:
 
 
 async def _ask_triage(items: list[dict], system: str, *, purpose: str, label: str, run_id: int | None = None) -> tuple[dict[str, dict], int]:
-    """Send one batch to the triage AI (stage "triage"). Returns (results by item id, AI tokens used). Raises ai.AIError."""
+    """Send one batch to the triage AI (stage "triage"). Returns (results by item id, AI tokens used). Raises ai.AIError.
+
+    ai.run() only makes sure the answer has its "results" list, not that each result is complete, so a result the run
+    can't use is left out here: one without a verdict or an eligibility, or without a score that reads as a number. Its
+    job then counts as one the AI skipped, instead of a KeyError ending the whole batch. Scores are held to 0..100."""
     out = await ai.run(json.dumps(items, indent=1), system=system, schema=prompts.TRIAGE_SCHEMA, stage="triage", purpose=purpose,
                        run_id=run_id, label=label, timeout=600)
-    return {r["id"]: r for r in out.get("results", [])}, int(out.get("_tokens", 0))
+    results = {}
+    for result in out.get("results") or []:
+        if not isinstance(result, dict) or not result.get("verdict") or not result.get("eligibility"):
+            continue
+        try:
+            score = max(0, min(100, int(result.get("score"))))
+        except (TypeError, ValueError):  # missing, or text that isn't a whole number
+            continue
+        results[str(result.get("id"))] = {**result, "score": score}
+    return results, int(out.get("_tokens", 0))
 
 
 # ---------------------------------------------------------------- dedupe helpers
@@ -306,7 +319,7 @@ class Pipeline:
 
     # ------------------------------------------------------------ logging and live counters
     def log(self, source: str, msg: str, level: str = "info") -> None:
-        """Add a line to this run's log (the run_log table, shown on the Runs page) and to the live console."""
+        """Add a line to this run's log (the run_log table, shown in Settings, History) and to the live console."""
         ts = db.now()
         db.ex("INSERT INTO run_log(run_id, ts, level, source, msg) VALUES(?,?,?,?,?)", (self.run_id, ts, level, source, msg))
         bus.publish("log", {"run_id": self.run_id, "source": source, "level": level, "msg": msg, "ts": ts})
@@ -406,12 +419,10 @@ class Pipeline:
         per day of waiting (at most 20), so old ones get triaged before new finds of the same quality."""
         known_fields = {f.name for f in dataclass_fields(RawJob)}
         db.ex("DELETE FROM candidates WHERE first_seen < ?", ((date.today() - timedelta(days=BACKLOG_DAYS)).isoformat(),))
+        db.ex("DELETE FROM candidates WHERE fingerprint IN (SELECT fingerprint FROM leads)")  # became leads some other way
         loaded = 0
         for row in db.q("SELECT fingerprint, data, rule_score, first_seen FROM candidates"):
             fp = row["fingerprint"]
-            if db.one("SELECT 1 FROM leads WHERE fingerprint=?", (fp,)):
-                db.ex("DELETE FROM candidates WHERE fingerprint=?", (fp,))
-                continue
             try:
                 # Only fields RawJob still has, so a backlog saved by an older version still loads.
                 job = RawJob(**{k: v for k, v in json.loads(row["data"]).items() if k in known_fields})
@@ -428,12 +439,12 @@ class Pipeline:
         """Save every candidate still in the pool to the backlog (the candidates table) and return how many there were. Only
         the best BACKLOG_MAX by rule score are kept. A candidate keeps the date it was first seen, which load_backlog uses."""
         now = db.now()
-        for fp, (score, job) in self.pool.items():
-            # Save the candidate's own rule score, not one raised for waiting, or the waiting bonus would pile up each run.
-            rule_score = self.backlog_scores.get(fp, score)
-            db.ex("""INSERT INTO candidates(fingerprint, data, rule_score, first_seen, last_seen) VALUES(?,?,?,?,?)
-                     ON CONFLICT(fingerprint) DO UPDATE SET data=excluded.data, rule_score=excluded.rule_score, last_seen=excluded.last_seen""",
-                  (fp, json.dumps(asdict(job), default=str), rule_score, now, now))
+        # One transaction for the lot (db.ex_many): a backlog can hold thousands of candidates. Each keeps its own rule
+        # score, not one raised for waiting, or the waiting bonus would pile up each run.
+        db.ex_many("""INSERT INTO candidates(fingerprint, data, rule_score, first_seen, last_seen) VALUES(?,?,?,?,?)
+                      ON CONFLICT(fingerprint) DO UPDATE SET data=excluded.data, rule_score=excluded.rule_score, last_seen=excluded.last_seen""",
+                   [(fp, json.dumps(asdict(job), default=str), self.backlog_scores.get(fp, score), now, now)
+                    for fp, (score, job) in self.pool.items()])
         kept = len(self.pool)
         db.ex("DELETE FROM candidates WHERE fingerprint IN (SELECT fingerprint FROM candidates ORDER BY rule_score ASC "
               "LIMIT max(0, (SELECT COUNT(*) FROM candidates) - ?))", (BACKLOG_MAX,))
@@ -691,14 +702,20 @@ async def start(mode: str = "full", overrides: dict | None = None) -> int:
 
     mode is "full" (everything), "boards" (job boards only), "hunt" (AI hunt only) or "backlog" (package queue only).
     overrides holds one-off values for max_packages, max_triage or min_score; saved settings aren't touched. Raises
-    RuntimeError when a run is already going or setup isn't finished (the message says what's missing)."""
+    RuntimeError when a run is already going or setup isn't finished (the message says what's missing), and ValueError
+    when an override isn't a whole number."""
     global _current
-    if _current and bus.state.get("running"):
+    # The run's task is what counts, not bus.state["running"]: that only turns on once the task gets its first turn, so two
+    # starts in a row (a double click, or the auto-run timer at the same moment) would otherwise both get through.
+    if _current is not None and not _current.task.done():
         raise RuntimeError("a run is already in progress")
     missing = profile_mod.ready_to_search()
     if missing:
         raise RuntimeError(missing)
-    one_off = {k: int(v) for k, v in (overrides or {}).items() if k in RUN_OVERRIDES}  # a bad value fails before the run row exists
+    try:  # a bad value fails here, before the run row exists
+        one_off = {k: int(v) for k, v in dict(overrides or {}).items() if k in RUN_OVERRIDES}
+    except (TypeError, ValueError):
+        raise ValueError("run overrides must be whole numbers: " + ", ".join(RUN_OVERRIDES)) from None
     p = Pipeline(mode)
     p.cfg["run"].update(one_off)
     _current = p
@@ -733,7 +750,8 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
     package. A new answer (a skill, a project, a certification) can turn an earlier "no" into a match, or the other way.
 
     Only leads without a resume and not in the trash are checked, RETRIAGE_BATCH per AI request (stage "triage"). Each lead's
-    score, verdict, triage notes and stage are updated; a stage change is recorded in its history and shown live. Returns
+    score, verdict, triage notes and stage are updated, unless its stage changed or it got a resume while the AI was
+    working (a package build during a search). A stage change is recorded in its history and shown live. Returns
     {ok, checked, promoted, demoted}, or ok False when a re-evaluation is already running. Toasts tell the user how it went;
     an AI failure stops it early with an error toast instead of raising."""
     if _retriage_lock.locked():
@@ -765,6 +783,11 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
             for k, lead in enumerate(batch):
                 result = results.get(str(k))
                 if not result:
+                    continue
+                # The AI takes a while, and this often runs during a search (a profile update at its start spawns it). A
+                # package worker may have built this lead meanwhile, or the user moved it: then the old stage is stale.
+                now = db.one("SELECT stage, resume_md FROM leads WHERE id=?", (lead["id"],))
+                if not now or now["stage"] != lead["stage"] or now["resume_md"] is not None:
                     continue
                 checked += 1
                 qualifies = _qualifies(result, min_score)

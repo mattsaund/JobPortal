@@ -195,10 +195,15 @@ def _oauth_error(body: dict) -> tuple[str, str]:
 async def _token_request(form: dict) -> dict:
     """POST a form to OpenAI's token endpoint and return the JSON reply, which holds the new tokens. Network call.
 
-    Raises AuthError when OpenAI refuses (with OpenAI's error code in AuthError.code), or when the reply has no access
-    token."""
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(TOKEN_URL, data=form, headers={"Accept": "application/json"})
+    Raises AuthError when OpenAI refuses (with OpenAI's error code in AuthError.code), when the reply has no access token,
+    or when the sign-in server can't be reached. A network failure is an AuthError too, so the sign-in page shows it as
+    a sentence instead of an error page, and ai/client.py reports it like any other sign-in problem."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(TOKEN_URL, data=form, headers={"Accept": "application/json"})
+    except httpx.HTTPError as e:
+        raise AuthError(f"Couldn't reach OpenAI's sign-in server ({type(e).__name__}). Check your internet connection and "
+                        "try again.") from None
     try:
         body = r.json()
     except ValueError:

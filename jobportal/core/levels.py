@@ -20,6 +20,8 @@ Key ideas:
   foreman, supervisor)."""
 import re
 
+from jobportal.core.textutil import unique
+
 LEVELS = [  # (id, label shown in the standard questions)
     ("internship", "Internship, co-op or fellowship"),
     ("apprenticeship", "Apprenticeship or trainee program"),
@@ -37,7 +39,10 @@ EARLY = {"internship", "apprenticeship", "entry"}  # the early-career levels
 _NUMERAL_END = r"(?=\s*(?:$|[-,(|/:]))"
 # Numbers and numerals that name something other than a level: "Teacher - Grade 3", "Class 2 Driver", "Title IV Specialist".
 _NOT_A_LEVEL = r"(?<!grade )(?<!class )(?<!title )"
-_SENIOR_NUMERALS = [_NOT_A_LEVEL + r"\b(?:ii|iii|iv)\b", _NOT_A_LEVEL + r"\b[234]\b" + _NUMERAL_END]
+# In front of these words "IV" means intravenous, not level four: "IV Therapy RN", "IV Team Nurse".
+_INTRAVENOUS = r"(?! (?:therapy|team|infusion|access|insertion|starts?|nurse|rn)\b)"
+_SENIOR_NUMERALS = [_NOT_A_LEVEL + r"\b(?:ii|iii)\b", _NOT_A_LEVEL + r"\biv\b" + _INTRAVENOUS,
+                    _NOT_A_LEVEL + r"\b[234]\b" + _NUMERAL_END]
 # Title words that mark a posting as being at a level (case-insensitive regexes; \b marks a word edge). Mid level has none
 # on purpose, see the module docstring.
 TITLE_MARKERS = {
@@ -92,7 +97,7 @@ def title_filters(levels, roles: list[str] | None = None) -> tuple[list[str], li
     drop apprentice and trainee titles. An exclude word found in a target role is left out, so "Staff Accountant", "Lead
     Teacher" or "Associate Product Manager" still get through.
 
-    candidate/onboarding.py saves the result as the title filter settings, which the Settings page shows for editing."""
+    candidate/onboarding.py saves the result as the title filter settings, which Settings, Search shows for editing."""
     picked = set(clean(levels))
     roles = [r.strip() for r in (roles or []) if r and r.strip()]
     include: list[str] = []
@@ -109,7 +114,7 @@ def title_filters(levels, roles: list[str] | None = None) -> tuple[list[str], li
     if not picked & EARLY:
         exclude += APPRENTICE_WORDS
     exclude = [p for p in exclude if not any(re.search(p, r, re.I) for r in roles)]
-    return _unique(include), _unique(exclude)
+    return unique(include), unique(exclude)
 
 
 def ats_search_terms(levels, queries: list[str] | None = None, limit: int = 8) -> list[str]:
@@ -128,7 +133,7 @@ def ats_search_terms(levels, queries: list[str] | None = None, limit: int = 8) -
     if "entry" in picked:
         words += ["entry level", "new grad", "associate"]
     terms = words[:4] + [q for q in (queries or []) if q]
-    return _unique(terms, key=str.lower)[:limit]
+    return unique(terms, key=str.lower)[:limit]
 
 
 def linkedin_experience(levels) -> str:
@@ -148,7 +153,7 @@ def muse_levels(levels) -> list[str]:
     apprenticeships search its internship and entry levels."""
     names = {"internship": ["Internship"], "apprenticeship": ["Internship", "Entry Level"], "entry": ["Entry Level"],
              "mid": ["Mid Level"], "senior": ["Senior Level"], "lead": ["Management"]}
-    return _unique([name for k in clean(levels) for name in names[k]])
+    return unique([name for k in clean(levels) for name in names[k]])
 
 
 # Words that show a free-text post is about early-career hiring.
@@ -166,8 +171,9 @@ def posting_regex(levels, roles: list[str] | None = None) -> re.Pattern:
     keeping.
 
     Early-career searches look for early-career words. Other searches look for words from the user's target roles (3 or
-    more letters, without filler like "senior" or "remote"). There's no word edge at the end, so "nurse" also finds
-    "nursing". With no usable role words, ANY_JOB_RE is used instead: a list of job words from many fields."""
+    more letters, without filler like "senior" or "remote"). There's no word edge at the end, so a word also finds the
+    longer words it starts: "nurse" finds "nurses" and "teacher" finds "teachers" (but "nurse" doesn't find "nursing").
+    With no usable role words, ANY_JOB_RE is used instead: a list of job words from many fields."""
     if early_career(levels):
         return EARLY_POST_RE
     filler = {"and", "the", "for", "with", "level", "senior", "junior", "entry", "remote"}
@@ -178,16 +184,3 @@ def posting_regex(levels, roles: list[str] | None = None) -> re.Pattern:
     if not words:
         return ANY_JOB_RE
     return re.compile(r"\b(" + "|".join(words) + r")", re.I)
-
-
-def _unique(items: list[str], key=None) -> list[str]:
-    """`items` without repeats, keeping the first of each in order. `key` (for example str.lower) decides what counts as
-    a repeat."""
-    seen: set[str] = set()
-    out = []
-    for item in items:
-        k = key(item) if key else item
-        if k not in seen:
-            seen.add(k)
-            out.append(item)
-    return out

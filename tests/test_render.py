@@ -1,3 +1,5 @@
+"""Rendering (documents/render.py) and the resume checks (documents/resumecheck.py): HTML, Word and PDF files, links,
+the fit loop, and the rules a resume is scored by. The PDF tests need Chrome, Edge or Chromium and skip without one."""
 import asyncio
 from datetime import date
 
@@ -40,6 +42,42 @@ def test_docx_links_and_numbered_lines(tmp_path):
     assert links[1].runs[0].bold
 
 
+def test_a_heading_rule_comes_before_its_spacing_in_the_word_file(tmp_path):
+    from docx import Document
+    from docx.oxml.ns import qn
+    render.resume_docx("# Jordan Rivera\njordan.rivera@example.com\n\n## Experience\n- Helped patients", tmp_path / "r.docx")
+    heading = next(p for p in Document(str(tmp_path / "r.docx")).paragraphs if p.text == "Experience")
+    tags = [child.tag for child in heading._p.pPr]
+    assert tags.index(qn("w:pBdr")) < tags.index(qn("w:spacing"))  # the border comes first, as WordprocessingML requires
+
+
+def test_control_characters_never_break_a_word_file(tmp_path):
+    from docx import Document
+    # \x0b is the line break text pasted from Word carries; python-docx used to refuse the whole file over it.
+    render.resume_docx("# Jordan Rivera\njordan.rivera@example.com\n\n## Experience\n- Line one\x0bline two\x01", tmp_path / "r.docx")
+    assert any("Line one line two" in p.text for p in Document(str(tmp_path / "r.docx")).paragraphs)
+    render.cover_docx("Dear team,\x0b\n\nThank you.", {"name": "Jordan\x0bRivera", "links": {"site": "example.com\x02"}},
+                      "Example\x0c Co", "", tmp_path / "c.docx")
+    render.markdown_docx("## Prep\x07\n- Ask about the team\x0b", tmp_path / "p.docx", "Interview prep\x0b", "Example\x1f Co")
+    assert all((tmp_path / name).stat().st_size > 1000 for name in ("r.docx", "c.docx", "p.docx"))
+    assert b"Subject: Following up on the Data Intern role" in render.eml("hr@example.com", "Following up\non the Data Intern role", "Hi")
+
+
+def test_the_fit_loop_never_leaves_an_overflowing_try_in_place(tmp_path, monkeypatch):
+    out, tries = tmp_path / "resume.pdf", []
+
+    async def fake_print(html_text, path):
+        assert not out.exists()  # a download during the loop must not find a try that runs to two pages
+        path.write_bytes(b"%PDF-1.4 try")
+        tries.append(path)
+        return 2 if len(tries) < 3 else 1  # the third scale fits on one page
+
+    monkeypatch.setattr(render, "html_to_pdf", fake_print)
+    info = asyncio.run(render.resume_pdf("# Jordan Rivera", out))
+    assert info["pages"] == 1 and info["scale"] == render.FIT_SCALES[2] and render.fit_scale(out) == render.FIT_SCALES[2]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["resume.fit", "resume.pdf"]  # no drafts left behind
+
+
 def test_long_date_is_portable():
     assert render.long_date(date(2026, 3, 5)) == "March 5, 2026"
 
@@ -60,11 +98,27 @@ def test_resume_check(sample_resume):
     assert "2 pages" in texts and "Non-standard heading" in texts and "first person" in texts
 
 
+def test_short_inventory_skills_only_vouch_for_themselves():
+    def unverified(skills_line: str, inventory: list[str]) -> list[str]:
+        md = f"# Jordan Rivera\njordan.rivera@example.com\n\n## Skills\n{skills_line}"
+        return resumecheck.check(md, inventory=[{"skill": s, "level": "strong"} for s in inventory])["unverified_skills"]
+
+    # Before: R vouched for Docker, Go for Django and Google Cloud, Java for JavaScript, Git for Digital Marketing.
+    assert unverified("Docker, Django, Google Cloud, JavaScript, Digital Marketing", ["R", "Go", "Java", "Git", "C"]) == [
+        "Docker", "Django", "Google Cloud", "JavaScript", "Digital Marketing"]
+    assert unverified("R, Go, React Native, Microsoft Excel, Python (pandas, NumPy)", ["R", "Go", "React", "Excel", "Python"]) == []
+    assert unverified("Excel", ["Microsoft Excel"]) == []  # a longer name still covers its last word
+
+
 def test_roman_numerals_are_not_first_person(sample_resume):
     courses = sample_resume.replace("Operating Systems", "Calculus I, Physics I and II, File I/O")
     assert not any("first person" in i["text"] for i in resumecheck.check(courses)["issues"])
     pronoun = sample_resume.replace("- Resolved", "- I resolved")
     assert any("first person" in i["text"] for i in resumecheck.check(pronoun)["issues"])
+    numerals = sample_resume.replace("- Resolved", "- Taught at a Title I school; ran Phase I trials at a Level I trauma center. Resolved")
+    addresses = sample_resume.replace("- Resolved", "- Portfolio at about.me/jordan-example, mail hire.me@example.com. Resolved")
+    for text in (numerals, addresses):
+        assert not any("first person" in i["text"] for i in resumecheck.check(text)["issues"])
 
 
 @pytest.mark.skipif(not osutil.find_pdf_engine(), reason="needs Chrome, Edge or Chromium")

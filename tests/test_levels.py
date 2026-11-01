@@ -7,7 +7,7 @@ from jobportal.core import levels
 
 def passes(title: str, lv, roles=None) -> bool:
     """Whether a title gets through the title filters for these levels and roles. An empty include list lets any title
-    through, as the Settings page promises ("blank = any title")."""
+    through, as Settings, Search promises ("leave empty for any title")."""
     inc, exc = levels.title_filters(lv, roles)
     t = title.lower()
     ok_inc = not inc or re.search("|".join(f"(?:{p})" for p in inc), t, re.I)
@@ -84,6 +84,13 @@ def test_ats_terms_are_capped():
     terms = levels.ats_search_terms(["internship", "entry", "mid"], ["Intern"] + queries)
     assert len(terms) == 8 and terms[:3] == ["intern", "co-op", "student"]  # level words first, "Intern" is a repeat
     assert levels.ats_search_terms(["senior"], queries) == queries[:8]
+
+
+def test_iv_in_a_nursing_title_is_not_level_four():
+    _, exclude = levels.title_filters(["entry"], ["Registered Nurse"])
+    blocked = lambda title: any(re.search(p, title.lower()) for p in exclude)  # noqa: E731
+    assert not blocked("IV Therapy Registered Nurse") and not blocked("IV Team RN")  # intravenous
+    assert blocked("Registered Nurse IV") and blocked("Registered Nurse II - ICU")  # levels above entry
 
 
 def test_posting_regex():

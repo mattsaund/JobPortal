@@ -21,8 +21,10 @@ and mail links are kept (safe_href). python-docx is imported inside the DOCX fun
 import asyncio
 import html
 import json
+import os
 import re
 import tempfile
+import uuid
 from datetime import date
 from email.message import EmailMessage
 from itertools import groupby
@@ -200,6 +202,8 @@ h2 { font-size: calc(12pt * var(--s, 1)); font-variant: small-caps; letter-spaci
 """,
 }
 THEMES = list(RESUME_THEMES)
+# A resume's layout and page limit when nothing chose them: a package's resume_style, a saved resume's style.
+DEFAULT_STYLE = {"theme": "classic", "max_pages": 1}
 
 # The text scales the fit loop tries, largest first. lead.js mirrors this list for the editor preview.
 FIT_SCALES = (1.0, 0.97, 0.94, 0.91, 0.88, 0.86)
@@ -318,16 +322,20 @@ _PRINT_FLAGS = (
 )
 
 
+class PDFError(RuntimeError):
+    """Printing a PDF failed. The message is written for the user: the web routes show it as it is (a 503)."""
+
+
 async def html_to_pdf(html_text: str, out: Path) -> int:
     """Print an HTML page to the PDF file out and return its page count.
 
     The printer is osutil.find_pdf_engine(): JOBPORTAL_CHROME when set, else the engine bundled with the app, else an
-    installed Chrome, Edge, Chromium or Brave. It runs as a headless subprocess. Raises RuntimeError when there is no such
+    installed Chrome, Edge, Chromium or Brave. It runs as a headless subprocess. Raises PDFError when there is no such
     browser, when it takes longer than PDF_TIMEOUT, or when it doesn't write a readable PDF."""
     browser = osutil.find_pdf_engine()
     if not browser:
-        raise RuntimeError("PDF export needs Google Chrome, Microsoft Edge or Chromium. Install one, or set JOBPORTAL_CHROME "
-                           "to the browser's full path.")
+        raise PDFError("PDF export needs Google Chrome, Microsoft Edge or Chromium. Install one, or set JOBPORTAL_CHROME "
+                       "to the browser's full path.")
     CACHE.mkdir(parents=True, exist_ok=True)
     out = Path(out).resolve()  # the browser runs in its own process, so give it a full path
     out.unlink(missing_ok=True)  # an old file must never pass for a new one
@@ -345,26 +353,52 @@ async def html_to_pdf(html_text: str, out: Path) -> int:
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            raise RuntimeError("PDF export timed out") from None
+            raise PDFError("PDF export timed out") from None
+        except asyncio.CancelledError:
+            proc.kill()  # Stop, or JobPortal shutting down: don't leave the browser printing on its own
+            raise
     pages = pdf_page_count(out) if out.exists() else 0
     if not pages:
-        raise RuntimeError(f"the browser at {browser} didn't write a PDF")
+        raise PDFError(f"the browser at {browser} didn't write a PDF")
     return pages
+
+
+async def _print_to_fit(make_html, scales: tuple[float, ...], max_pages: int, out: Path, before_publish=None) -> tuple[int, float]:
+    """The fit loop: print make_html(scale) at each scale in turn, stopping at the first that fits max_pages (the last one
+    is kept when none does), then move the result into place as out. Returns (pages, scale).
+
+    Every try goes to a draft file beside out, and the finished PDF replaces out in one step. Downloads reuse a rendered
+    file whenever it exists (documents/exports.py), so out must never hold a try that overflows, and two renders of the
+    same file must not delete each other's work. before_publish(pages, scale) runs just before the move (resume_pdf writes
+    the .fit file there, so a PDF never appears without the scale it was printed at)."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    draft = out.with_name(f".{out.stem}-{uuid.uuid4().hex[:8]}.draft{out.suffix}")
+    try:
+        for scale in scales:
+            pages = await html_to_pdf(make_html(scale), draft)
+            if pages <= max_pages:
+                break
+        if before_publish:
+            before_publish(pages, scale)
+        os.replace(draft, out)
+    finally:
+        draft.unlink(missing_ok=True)  # only still there when printing failed or was canceled
+    return pages, scale
 
 
 async def resume_pdf(md: str, out: Path, theme: str = "classic", max_pages: int = 1) -> dict:
     """Print a resume to the PDF file out, shrinking it until it fits max_pages (1, or 2 for federal resumes).
 
-    The fit loop prints at each scale in FIT_SCALES and stops at the first one that fits. When even 86% is too long, the
-    86% version is kept (resumecheck reports the overflow). Returns {"pages", "scale", "theme", "max_pages"} and saves the
-    same facts next to the PDF (resume.pdf gets resume.fit), so resume_docx can later use the same scale (fit_scale)."""
-    out.parent.mkdir(parents=True, exist_ok=True)
-    for scale in FIT_SCALES:
-        pages = await html_to_pdf(resume_html(md, scale, theme), out)
-        if pages <= max_pages:
-            break
-    info = {"pages": pages, "scale": scale, "theme": theme, "max_pages": max_pages}
-    out.with_suffix(".fit").write_text(json.dumps(info), encoding="utf-8")
+    The fit loop (_print_to_fit) prints at each scale in FIT_SCALES and stops at the first one that fits. When even 86% is
+    too long, the 86% version is kept (resumecheck reports the overflow). Returns {"pages", "scale", "theme", "max_pages"}
+    and saves the same facts next to the PDF (resume.pdf gets resume.fit), so resume_docx can later use the same scale
+    (fit_scale)."""
+    def save_fit(pages: int, scale: float) -> None:
+        info.update(pages=pages, scale=scale)
+        out.with_suffix(".fit").write_text(json.dumps(info), encoding="utf-8")
+
+    info = {"pages": 0, "scale": 1.0, "theme": theme, "max_pages": max_pages}
+    await _print_to_fit(lambda scale: resume_html(md, scale, theme), FIT_SCALES, max_pages, out, save_fit)
     return info
 
 
@@ -380,18 +414,31 @@ COVER_SCALES = (1.0, 0.95, 0.9)  # a cover letter shrinks less than a resume bef
 
 
 async def cover_pdf(md: str, facts: dict, company: str, location: str, out: Path) -> dict:
-    """Print a cover letter to the PDF file out, shrinking the text a little when it runs past one page. Returns {"pages"}."""
-    out.parent.mkdir(parents=True, exist_ok=True)
-    for scale in COVER_SCALES:
-        pages = await html_to_pdf(cover_html(md, facts, company, location, scale), out)
-        if pages <= 1:
-            break
+    """Print a cover letter to the PDF file out, shrinking the text a little when it runs past one page (the same fit loop
+    as a resume, _print_to_fit). Returns {"pages"}."""
+    pages, _ = await _print_to_fit(lambda scale: cover_html(md, facts, company, location, scale), COVER_SCALES, 1, out)
     return {"pages": pages}
 
 
 # ---------------------------------------------------------------- DOCX building blocks
 
+# Characters XML (and so a Word file) can't hold. python-docx refuses a whole document over one of them, and they do turn
+# up: text pasted from Word carries \x0b for a manual line break, and PDF text can carry stray control codes.
+_NOT_XML_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _xml_safe(value):
+    """`value` with characters Word can't store turned into spaces, so one stray control character can't make every Word
+    download fail. Strings inside a dict (the facts, and their links) are cleaned too; anything else comes back as it is."""
+    if isinstance(value, str):
+        return _NOT_XML_RE.sub(" ", value)
+    if isinstance(value, dict):
+        return {key: _xml_safe(item) for key, item in value.items()}
+    return value
+
+
 def _save(doc, out: Path) -> None:
+    """Save a python-docx document at out, making its folder first."""
     out.parent.mkdir(parents=True, exist_ok=True)
     doc.save(out)
 
@@ -454,8 +501,17 @@ def _docx_runs(paragraph, text: str, size_pt: float | None = None, link_color: s
             _add_run(paragraph, piece, **run_style)
 
 
+# The paragraph properties that come after <w:pBdr> inside <w:pPr>. WordprocessingML fixes their order (python-docx's
+# CT_PPr lists it), and Word may call a file with them out of order damaged.
+_AFTER_PBDR = ("w:shd", "w:tabs", "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap", "w:overflowPunct", "w:topLinePunct",
+               "w:autoSpaceDE", "w:autoSpaceDN", "w:bidi", "w:adjustRightInd", "w:snapToGrid", "w:spacing", "w:ind",
+               "w:contextualSpacing", "w:mirrorIndents", "w:suppressOverlap", "w:jc", "w:textDirection", "w:textAlignment",
+               "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange")
+
+
 def _bottom_border(paragraph) -> None:
-    """Rule a thin line under a paragraph, Word's version of the CSS border-bottom under headings."""
+    """Rule a thin line under a paragraph, Word's version of the CSS border-bottom under headings. The border goes in its
+    place among the paragraph's properties, ahead of any spacing already set (a resume heading sets its spacing first)."""
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     border = OxmlElement("w:bottom")
@@ -463,7 +519,7 @@ def _bottom_border(paragraph) -> None:
         border.set(qn(key), value)
     borders = OxmlElement("w:pBdr")
     borders.append(border)
-    paragraph._p.get_or_add_pPr().append(borders)
+    paragraph._p.get_or_add_pPr().insert_element_before(borders, *_AFTER_PBDR)
 
 
 # ---------------------------------------------------------------- resume DOCX
@@ -495,7 +551,7 @@ def resume_docx(md: str, out: Path, scale: float = 1.0, theme: str = "classic") 
     from docx.shared import Inches, Pt
     style = {**_DOCX_BASE, **_DOCX_THEMES.get(theme, {})}
     links = {"link_color": style["link_color"], "underline_links": style["link_underline"]}
-    resume = parse_resume(md)
+    resume = parse_resume(_xml_safe(md))
     top, side = _resume_margins(scale)
     doc = _new_docx(top, side, RESUME_BOTTOM_MARGIN, style["body"] * scale, style["font"])
     align = WD_ALIGN_PARAGRAPH.LEFT if style["align"] == "left" else WD_ALIGN_PARAGRAPH.CENTER
@@ -547,6 +603,7 @@ def cover_docx(md: str, facts: dict, company: str, location: str, out: Path) -> 
     """Write a cover letter as a Word file at out, laid out like cover_html: name, contact line over a rule, date,
     recipient, then the paragraphs with their line breaks kept."""
     from docx.shared import Pt
+    md, facts, company, location = _xml_safe(md), _xml_safe(facts), _xml_safe(company), _xml_safe(location)
     doc = _new_docx(top=0.9, side=1.0, bottom=0.9, font_pt=11)
     run = doc.add_paragraph().add_run(facts.get("name", ""))
     run.bold, run.font.size = True, Pt(18)
@@ -644,6 +701,7 @@ def markdown_docx(md: str, out: Path, title: str = "", subtitle: str = "") -> No
     """Write a generic document as a Word file at out, laid out like markdown_doc_html (same margins, heading sizes and
     lists). Heading text drops its ** markers and is set in bold."""
     from docx.shared import Pt
+    md, title, subtitle = _xml_safe(md), _xml_safe(title), _xml_safe(subtitle)
     doc = _new_docx(top=0.75, side=0.85, bottom=0.75, font_pt=10.5)
     if title:
         run = doc.add_paragraph().add_run(title)
@@ -673,12 +731,16 @@ def markdown_docx(md: str, out: Path, title: str = "", subtitle: str = "") -> No
 
 def eml(to: str, subject: str, body: str, sender: str = "") -> bytes:
     """An outreach email as the bytes of an .eml file. The X-Unsent header makes Outlook, Thunderbird and Apple Mail open it
-    as an editable draft instead of a received message."""
+    as an editable draft instead of a received message. Header values are made one line (the AI writes the subject, and
+    a line break in a header makes the email library refuse the whole message)."""
+    def one_line(value: str) -> str:
+        return " ".join((value or "").split())
+
     msg = EmailMessage()
     if sender:
-        msg["From"] = sender
-    msg["To"] = to or ""
-    msg["Subject"] = subject or ""
+        msg["From"] = one_line(sender)
+    msg["To"] = one_line(to)
+    msg["Subject"] = one_line(subject)
     msg["X-Unsent"] = "1"
     msg.set_content(body or "")
     return bytes(msg)

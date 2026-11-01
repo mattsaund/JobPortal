@@ -9,6 +9,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from jobportal.core import bus, config, db, genres, osutil, settings, textutil
 from jobportal.core.textutil import LocationMatcher
 
@@ -188,6 +190,7 @@ CREATE TABLE ai_calls (id INTEGER PRIMARY KEY, ts TEXT, run_id INTEGER, lead_id 
 
 
 def columns(table: str) -> set[str]:
+    """The column names of a database table."""
     return {r["name"] for r in db.q(f"PRAGMA table_info({table})")}
 
 
@@ -233,6 +236,17 @@ def test_lead_helpers():
     assert db.kv_get("missing", "fallback") == "fallback"
 
 
+def test_many_rows_are_written_in_one_transaction():
+    insert = "INSERT INTO leads(fingerprint, title, company) VALUES(?, ?, ?)"
+    db.ex_many(insert, [(f"fp{i}", "Medical Assistant", "Example Health") for i in range(3)])
+    assert db.one("SELECT COUNT(*) n FROM leads")["n"] == 3
+    with pytest.raises(sqlite3.IntegrityError):  # the second row repeats a fingerprint, which leads keeps unique
+        db.ex_many(insert, [("fp9", "Cook", "Example Bistro"), ("fp0", "Cook", "Example Bistro")])
+    assert db.one("SELECT COUNT(*) n FROM leads")["n"] == 3  # all or nothing: the first row of the failed batch isn't kept
+    db.ex(insert, ("fp10", "Barista", "Example Cafe"))  # the connection is back in autocommit afterwards
+    assert db.one("SELECT COUNT(*) n FROM leads")["n"] == 4
+
+
 # ---------------------------------------------------------------- settings
 
 def test_settings_merge_over_defaults():
@@ -245,6 +259,18 @@ def test_settings_merge_over_defaults():
     assert settings.reset_section("run")["run"]["min_score"] == config.DEFAULT_SETTINGS["run"]["min_score"]
     assert settings.resume_playbook({"resume_playbook": "  My rules  "}) == "My rules"
     assert settings.resume_playbook({"resume_playbook": ""}) == settings.default_playbook()
+
+
+def test_a_broken_save_reads_as_the_defaults_for_what_it_broke():
+    # A section or list saved as something else (null, text) would break every reader that expects its shape.
+    settings.save({"run": None, "sources": {"linkedin": "off"}, "industries": "Healthcare", "filters": {"exclude_keywords": ["night shift"]}})
+    cfg = settings.get()
+    assert cfg["run"] == config.DEFAULT_SETTINGS["run"] and cfg["sources"]["linkedin"]["enabled"] is True
+    assert cfg["industries"] == genres.DEFAULT_INDUSTRIES
+    assert cfg["filters"]["exclude_keywords"] == ["night shift"]  # what was saved properly still counts
+    assert db.kv_get("settings")["run"] is None  # nothing stored is changed by reading it
+    settings.save({"industries": ["Education"]})
+    assert settings.reset_section("industries.extra")["industries"] == ["Education"]  # a path through a list changes nothing
 
 
 def test_new_default_boards_are_offered_once(monkeypatch):
@@ -379,9 +405,29 @@ def test_a_missing_chrome_override_falls_back_to_the_bundled_engine(tmp_path, mo
     assert Path(osutil.find_pdf_engine()).resolve() == engine.resolve()
 
 
-def test_quoting_for_notifications():
-    assert osutil._ps_str("Jordan's offer") == "'Jordan''s offer'"
-    assert osutil._applescript_str('Say "hi" \\ bye') == '"Say \\"hi\\" \\\\ bye"'
+def test_upload_names_are_safe_to_store():
+    assert osutil.storable_name("../../uploads/Jordan Rivera: Resume|v2.pdf", "resume.txt") == "Jordan Rivera- Resume-v2.pdf"
+    assert osutil.storable_name("  ", "document.txt") == "document.txt" and osutil.storable_name(None, "resume.txt") == "resume.txt"
+
+
+def test_notification_text_never_becomes_part_of_a_script(monkeypatch):
+    started = []
+    monkeypatch.setattr(osutil.subprocess, "Popen", lambda cmd, **kw: started.append((cmd, kw.get("env"))))
+    monkeypatch.setattr(osutil, "popen_flags", lambda: {})  # CREATE_NO_WINDOW only exists on Windows
+    monkeypatch.setattr(osutil.shutil, "which", lambda name: f"/usr/bin/{name}")
+    # A posting title from the web. PowerShell ends a quoted string at a curly quote (’) too.
+    title, body = "Analyst’; Start-Process calc; ’", 'Example Health \\ "Children’s"'
+    for system in ("IS_WIN", "IS_MAC"):
+        for flag in ("IS_WIN", "IS_MAC", "IS_LINUX"):
+            monkeypatch.setattr(osutil, flag, flag == system)
+        assert osutil.notify(title, body)
+        cmd, env = started[-1]
+        script = cmd if system == "IS_WIN" else cmd[:-2]
+        assert not any(title in part or body in part for part in script), system
+        if system == "IS_WIN":
+            assert env["JOBPORTAL_TOAST_TITLE"] == title and env["JOBPORTAL_TOAST_BODY"] == body
+        else:
+            assert cmd[-2:] == [title, body]  # handed to the AppleScript run handler as argv
 
 
 def test_location_edge_cases_that_used_to_drop_good_jobs():
@@ -393,3 +439,9 @@ def test_location_edge_cases_that_used_to_drop_good_jobs():
     assert LocationMatcher(["Remote"]).match_one("Remote, Canada") is False
     assert state_of("Columbus, OH, on-site") == "OH" and LocationMatcher(["Ohio"]).match_one("Columbus, OH, on-site") is True
     assert state_of("Toronto, ON") == "FOREIGN"  # real province codes are still foreign
+    # Cities named after another state: the state after the comma wins in the filter. state_of() keeps its old answer,
+    # because saved leads' fingerprints were built from it.
+    for place, state in (("Kansas City, Missouri", "Missouri"), ("Delaware, Ohio", "Ohio"), ("Missouri City, Texas", "TX")):
+        assert LocationMatcher([state]).match_one(place) is True, place
+    assert LocationMatcher(["Kansas"]).match_one("Kansas City, Missouri") is False
+    assert state_of("Kansas City, Missouri") == "KS"

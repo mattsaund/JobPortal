@@ -1,11 +1,13 @@
 """Text helpers for the search, the documents and the dashboard routes.
 
 What's here:
-- Cleaning text: html_to_text() turns a posting's HTML into plain text, and clean() collapses whitespace.
+- Cleaning text: html_to_text() turns a posting's HTML into plain text, clean() collapses whitespace, and unique() drops
+  repeats from a list.
 - Spotting duplicates: fingerprint() and url_key() give the same answer for the same job found on two sites.
 - Dates: parse_date() reads the many date formats job boards use, and age_days() says how old a date is.
 - Locations: state_of() works out where a location string is, and LocationMatcher checks a job's locations against the
-  user's search area. search/pipeline.py drops jobs outside the area before any AI sees them.
+  user's search area. search/pipeline.py drops jobs outside the area before any AI sees them. NATIONWIDE_RE tells which
+  search area entries mean the whole country, for the matcher and the collectors alike.
 - Keywords: extract_terms() finds the skills, tools, certifications and licenses a posting (or any document) names, for
   any field, and coverage() measures how many of a job's keywords a resume contains, roughly the way applicant tracking
   systems scan resumes.
@@ -120,9 +122,10 @@ _US_RE = re.compile(r"\b(US|USA|United States)\b")
 _US_OR_DOTTED_RE = re.compile(r"\b(?:US|USA|United States)\b|\bU\.S\.(?:A\.)?")
 # A hybrid listing: part remote, part on-site at the place it names.
 _HYBRID_RE = re.compile(r"\bhybrid\b", re.I)
-# An allowed-location entry that means "anywhere in the US", matched against the whole entry in lowercase. Keep it in
-# step with NATIONWIDE_RE in web/static/js/components/search-area.js, which reads the same entries.
-_NATIONWIDE_RE = re.compile(r"(anywhere( in the)?( us| usa| united states)?|nationwide|united states|usa|us)")
+# An allowed-location entry that means "anywhere in the US": use fullmatch() on the whole entry, lowercased and stripped.
+# The collectors use it too (as collectors/base.NATIONWIDE). Keep it in step with NATIONWIDE_RE in
+# web/static/js/components/search-area.js, which reads the same entries.
+NATIONWIDE_RE = re.compile(r"(anywhere( in the)?( us| usa| united states)?|nationwide|united states|usa|us)")
 # Vague location text (see UNKNOWN_LOC) that still says the job is in the US.
 _SAYS_US_RE = re.compile(r"united states|\bus\b|usa|nationwide", re.I)
 # What separates the locations of a job that lists several: ";", "|", "/", " or " and line breaks.
@@ -154,6 +157,19 @@ def html_to_text(h: str | None) -> str:
 def clean(s) -> str:
     """`s` as text, with every run of whitespace (spaces, tabs, line breaks) made one space, and trimmed. None gives ""."""
     return re.sub(r"\s+", " ", str(s or "")).strip()
+
+
+def unique(items, key=None) -> list:
+    """`items` without repeats, each kept where it first appears. `key` (for example str.lower) decides what counts as a
+    repeat: an item whose key an earlier item already had is dropped. Lists of names, words and patterns all over
+    JobPortal use it."""
+    seen, out = set(), []
+    for item in items:
+        k = key(item) if key else item
+        if k not in seen:
+            seen.add(k)
+            out.append(item)
+    return out
 
 
 # ---------------------------------------------------------------- spotting duplicates
@@ -194,19 +210,28 @@ def state_of(loc: str) -> str | None:
         return "DC"
     if _names_foreign_place(loc):
         return "FOREIGN"
-    code = (re.search(r"\bUSA?\s*-\s*([A-Z]{2})\b", loc) or re.search(r",\s*([A-Z]{2})\b", loc)
-            or re.search(r"\b([A-Z]{2})\s*(?:\d{5})?\s*$", loc))
+    code = _CODE_AFTER_US_RE.search(loc) or _CODE_AFTER_COMMA_RE.search(loc) or _CODE_AT_END_RE.search(loc)
     if code and code.group(1) in STATES:
         return code.group(1)
     low = loc.lower()
-    for name, abbr in NAME_TO_ABBR.items():
-        # "virginia" comes before "west virginia" in this dict, so the lookbehind stops it from claiming West Virginia.
-        if re.search(rf"(?<!west )\b{re.escape(name)}\b", low):
+    for pattern, abbr in _STATE_NAME_PATTERNS:  # in STATES order, the first match wins
+        if pattern.search(low):
             return abbr
-    for city, abbr in CITY_STATE.items():
-        if re.search(rf"\b{re.escape(city)}\b", low):
+    for pattern, abbr in _CITY_PATTERNS:  # in CITY_STATE order
+        if pattern.search(low):
             return abbr
     return None
+
+
+# state_of()'s patterns, compiled once: the search runs it several times for every job it reads (the location filter,
+# the fingerprint), and about 220 patterns rebuilt from text each time cost far more than the matching. The order and the
+# patterns are exactly those of the tables above, which keeps every answer (and so every fingerprint) the same.
+_CODE_AFTER_US_RE = re.compile(r"\bUSA?\s*-\s*([A-Z]{2})\b")  # "USA - TX"
+_CODE_AFTER_COMMA_RE = re.compile(r",\s*([A-Z]{2})\b")  # "Austin, TX"
+_CODE_AT_END_RE = re.compile(r"\b([A-Z]{2})\s*(?:\d{5})?\s*$")  # "Austin TX 78701"
+# "virginia" comes before "west virginia" in NAME_TO_ABBR, so the lookbehind stops it from claiming West Virginia.
+_STATE_NAME_PATTERNS = [(re.compile(rf"(?<!west )\b{re.escape(name)}\b"), abbr) for name, abbr in NAME_TO_ABBR.items()]
+_CITY_PATTERNS = [(re.compile(rf"\b{re.escape(city)}\b"), abbr) for city, abbr in CITY_STATE.items()]
 
 
 def _names_foreign_place(loc: str, us_pattern: re.Pattern = _US_RE) -> bool:
@@ -333,7 +358,7 @@ class LocationMatcher:
             entry = entry.strip()
             if not entry:
                 continue
-            if _NATIONWIDE_RE.fullmatch(entry.lower()):  # checked before remote, since "anywhere" is also a remote word
+            if NATIONWIDE_RE.fullmatch(entry.lower()):  # checked before remote, since "anywhere" is also a remote word
                 self.anywhere_us = True
             elif REMOTE_RE.search(entry):
                 self.allow_remote = True
@@ -376,7 +401,7 @@ class LocationMatcher:
             return True
 
         # 5. The state, read with the remote words taken out, so "Remote, OH" counts as Ohio.
-        where = state_of(REMOTE_RE.sub("", loc))
+        where = _named_state(REMOTE_RE.sub("", loc))
         if where and where in self.states:
             return True
         # A known place that isn't chosen (another state, or FOREIGN), or a remote job Remote didn't allow, is outside.
@@ -398,6 +423,17 @@ class LocationMatcher:
         if all(r is False for r in results):
             return False
         return None
+
+
+def _named_state(loc: str) -> str | None:
+    """state_of(), except that a state named after the last comma wins: "Kansas City, Missouri" is in Missouri, and so are
+    "Delaware, Ohio" (Ohio) and "Missouri City, Texas" (Texas). state_of() reads state names in table order, so the
+    city's own state word comes first there, and it can't change, because job fingerprints are built from its answers.
+    The location filter reads places with this instead. A code must be written in capitals, as state_of() requires."""
+    tail = loc.rsplit(",", 1)[1].strip() if "," in loc else ""
+    if tail in STATES:
+        return tail
+    return NAME_TO_ABBR.get(tail.lower()) or state_of(loc)
 
 
 def _state_code(entry: str) -> str | None:
@@ -614,12 +650,15 @@ def extract_terms(text: str, limit: int = 25) -> list[str]:
     text = text or ""
     low = text.lower()
     found: list[str] = []
+    tech_hits = 0
     for field, patterns in _VOCAB:
         hits = [term for term, pattern in patterns if pattern.search(low)]
         found += hits
         if field == "credentials":
             found += _credential_phrases(text)
-    if sum(1 for term, pattern in dict(_VOCAB)["tech"] if pattern.search(low)) >= 2:
+        elif field == "tech":
+            tech_hits = len(hits)  # counted here, rather than searching the tech terms a second time
+    if tech_hits >= 2:
         found += [term for term, pattern in _TECH_WEAK if pattern.search(low)]
     found += _asked_phrases(text)
     out: list[str] = []

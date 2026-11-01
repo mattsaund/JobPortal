@@ -13,11 +13,13 @@ from jobportal.core import bus, db
 
 
 def jwt(claims: dict) -> str:
+    """An unsigned JWT holding these claims, as the fake token endpoint hands out."""
     enc = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()  # noqa: E731
     return f"{enc({'alg': 'none'})}.{enc(claims)}.sig"
 
 
 def query(url: str) -> dict:
+    """The query parameters of a URL as a plain dict (first value of each)."""
     return {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
 
 
@@ -120,15 +122,35 @@ def test_a_refused_refresh(monkeypatch, reply, ends_sign_in):
     assert signin._load()["client_id"] == "oaiapp_test"  # the registration is kept for the next sign-in
 
 
+def offline(request: httpx.Request) -> httpx.Response:
+    """A mock_http handler for a computer with no connection."""
+    raise httpx.ConnectError("offline", request=request)
+
+
 def test_sign_out_forgets_the_tokens_even_when_offline(monkeypatch):
     sign_in(monkeypatch)
-
-    def offline(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("offline", request=request)
     mock_http(monkeypatch, offline)
     out = asyncio.run(signin.sign_out())
     assert not out["signed_in"] and "Couldn't reach OpenAI" in out["note"]
     assert "refresh_token" not in signin._load()
+
+
+def test_a_sign_in_without_a_connection_is_a_clear_error(monkeypatch):
+    params = query(signin.start(8788))
+    mock_http(monkeypatch, offline)
+    # An AuthError, not a raw network error: the sign-in page shows its message instead of an Internal Server Error.
+    with pytest.raises(signin.AuthError, match="Couldn't reach OpenAI's sign-in server"):
+        asyncio.run(signin.finish({"code": "abc", "state": params["state"], "client_id": "oaiapp_test"}))
+
+
+def test_the_model_list_without_a_connection_is_an_ai_error(monkeypatch):
+    async def token():
+        return "test-token"
+
+    monkeypatch.setattr(signin, "access_token", token)
+    mock_http(monkeypatch, offline)
+    with pytest.raises(ai.AIError, match="network problem"):  # the Settings route turns it into a 502, not a 500
+        asyncio.run(ai.models(force=True))
 
 
 def test_not_signed_in_is_a_clear_error():
@@ -139,14 +161,17 @@ def test_not_signed_in_is_a_clear_error():
 # ---------------------------------------------------------------- the Responses loop
 
 def sse(*events) -> bytes:
+    """Events as the body of a streamed Responses API reply: an "event:" line and a "data:" line for each."""
     return "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
 
 
 def done(tokens=50):
+    """The event that ends a streamed reply, with its token count."""
     return {"type": "response.completed", "response": {"usage": {"total_tokens": tokens}, "output": []}}
 
 
 def item(i):
+    """The event that hands over one finished output item."""
     return {"type": "response.output_item.done", "item": i}
 
 
@@ -177,6 +202,7 @@ SCHEMA = {"type": "object", "properties": {"score": {"type": "integer"}}, "requi
 
 
 def call(name, args, call_id="c1"):
+    """The event for the model calling one of JobPortal's tools with these arguments."""
     return item({"type": "function_call", "id": "fc_1", "call_id": call_id, "name": name, "arguments": json.dumps(args), "namespace": "jobportal"})
 
 

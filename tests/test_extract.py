@@ -1,3 +1,5 @@
+"""Reading imported files (documents/extract.py): PDF, DOCX, ODT, RTF, plain text in several encodings, old formats
+through LibreOffice, and the files it must refuse. The test files are built by hand, so no tools are needed."""
 import io
 import zipfile
 
@@ -128,3 +130,34 @@ def test_rejects_empty_and_unknown_files():
         extract.extract_text("r.txt", b"too short")
     with pytest.raises(extract.ExtractError):
         extract.extract_text("photo.png", b"\x89PNG" + b"0" * 200)
+
+
+def test_a_protected_pdf_gets_a_message_the_user_can_act_on():
+    from pypdf import PdfReader, PdfWriter
+    writer = PdfWriter()
+    writer.append(PdfReader(io.BytesIO(make_pdf(LINES))))
+    writer.encrypt(user_password="secret", algorithm="RC4-128")  # RC4 needs no extra packages to write
+    locked = io.BytesIO()
+    writer.write(locked)
+    with pytest.raises(extract.ExtractError, match="PDF is protected"):  # not "FileNotDecryptedError: ..."
+        extract.extract_text("resume.pdf", locked.getvalue())
+
+
+@pytest.mark.parametrize("exit_code, written", [
+    # What LibreOffice writes for a damaged .doc it opens as plain text: the raw bytes, with control bytes shown as "#".
+    (0, ("ÐÏ#à¡±#á" + "#" * 16 + ";###þ?\t" + "#" * 30).encode() * 20),
+    (1, None),  # the conversion failed and wrote nothing
+])
+def test_a_doc_libreoffice_cannot_read_is_refused(monkeypatch, exit_code, written):
+    import subprocess
+    from pathlib import Path
+
+    def fake_soffice(cmd, **kwargs):
+        if written is not None:
+            (Path(cmd[cmd.index("--outdir") + 1]) / "resume.txt").write_bytes(written)
+        return subprocess.CompletedProcess(cmd, exit_code, b"", b"")
+
+    monkeypatch.setattr(extract.osutil, "find_soffice", lambda: "soffice")
+    monkeypatch.setattr(extract.subprocess, "run", fake_soffice)
+    with pytest.raises(extract.ExtractError, match="LibreOffice couldn't read old.doc"):
+        extract.extract_text("old.doc", b"\xd0\xcf\x11\xe0" + b"\x00" * 600)

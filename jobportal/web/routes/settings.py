@@ -1,6 +1,6 @@
 """The Settings page: every setting, the resume playbook and layouts, and the built-in AI prompts (shown grayed out as
 placeholders until the user overrides one)."""
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from jobportal.ai import prompts
 from jobportal.core import settings
@@ -11,18 +11,23 @@ router = APIRouter()
 
 @router.get("/api/settings")
 def get_settings():
+    """Every setting: what the user saved, merged over the defaults (core/settings.get)."""
     return settings.get()
 
 
 @router.put("/api/settings")
 def save_settings(body: dict):
+    """Store the whole settings document the dashboard sends, replacing what was saved, and return the result."""
     return settings.save(body)
 
 
 @router.post("/api/settings/reset")
 def reset_settings(body: dict):
-    """Put one section back to its default, for example {"path": "sources.ats_boards"}."""
-    return settings.reset_section(body["path"])
+    """Put one section back to its default, for example {"path": "sources.ats_boards"}. Returns the settings."""
+    path = body.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise HTTPException(400, "path required")
+    return settings.reset_section(path.strip())
 
 
 @router.get("/api/resume-playbook")
@@ -34,6 +39,7 @@ def resume_playbook():
 
 @router.get("/api/prompts/defaults")
 def prompt_defaults():
+    """The built-in system prompts by name, which Settings, AI shows as placeholders until the user overrides one."""
     return {"triage": prompts.TRIAGE_SYSTEM, "hunt": prompts.HUNT_SYSTEM, "package": prompts.PACKAGE_SYSTEM,
             "revise": prompts.REVISE_SYSTEM, "profile": prompts.PROFILE_SYSTEM, "analysis": prompts.ANALYSIS_SYSTEM,
             "resume_review": prompts.RESUME_REVIEW_SYSTEM, "documents": prompts.DOCUMENT_SYSTEM}

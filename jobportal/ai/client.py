@@ -86,8 +86,9 @@ def usage_high() -> bool:
 
 
 def _semaphore(n: int) -> asyncio.Semaphore:
-    """The shared limit on how many AI tasks run at once (Settings, max_parallel). When the setting changes, a new
-    semaphore replaces the old one, and tasks that already hold the old one simply finish under it."""
+    """The shared limit on how many AI tasks run at once (ai.max_parallel: Settings, AI, "AI tasks at the same time").
+    When the setting changes, a new semaphore replaces the old one, and tasks that already hold the old one simply finish
+    under it."""
     global _sem, _sem_size
     if _sem is None or _sem_size != n:
         _sem, _sem_size = asyncio.Semaphore(n), n
@@ -145,21 +146,24 @@ def _json_object(text: str) -> dict | None:
 async def models(force: bool = False) -> list[str]:
     """The ids of the models the signed-in account may use, in the order OpenAI lists them.
 
-    The Settings page fills its model menus from this list, and run() uses the first id when Settings names no model.
+    Settings, AI fills its model menus from this list, and run() uses the first id when Settings names no model.
     The list is cached for MODELS_CACHE_SECONDS, and force=True fetches it again. Network call on a cache miss.
-    Raises NotSignedIn or AIError."""
+    Raises NotSignedIn or AIError (also when OpenAI can't be reached or answers with something other than a JSON object)."""
     if not force and _models["ids"] and time.time() - _models["at"] < MODELS_CACHE_SECONDS:
         return list(_models["ids"])
     token = await _token()
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{API}/models", headers={"Authorization": f"Bearer {token}"})
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(f"{API}/models", headers={"Authorization": f"Bearer {token}"})
+    except httpx.HTTPError as e:  # run() turns these into AIError the same way
+        raise AIError(f"network problem talking to OpenAI: {type(e).__name__}") from None
     if r.status_code != 200:
         err = _error_body(r.text)
         raise _error(err.get("code"), err.get("message"), r.status_code)
-    # Skip models whose visibility is anything but "list" (for example "hide").
-    body = r.json()
-    entries = body.get("data")
-    if entries is None:
+    # The list comes as {"data": [...]} (the API's usual shape) or {"models": [...]}.
+    body = _json_object(r.text)
+    entries = body.get("data") if body is not None else None
+    if entries is None and body is not None:
         entries = body.get("models", [])
     if not isinstance(entries, list):
         raise AIError("OpenAI returned an unexpected model list format.")
@@ -168,7 +172,7 @@ async def models(force: bool = False) -> list[str]:
     for model in entries:
         if not isinstance(model, dict):
             continue
-        if model.get("visibility", "list") != "list":
+        if model.get("visibility", "list") != "list":  # skip models listed as anything else, for example "hide"
             continue
         model_id = model.get("id") or model.get("slug")
         if isinstance(model_id, str) and model_id.strip():

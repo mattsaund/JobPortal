@@ -1,5 +1,8 @@
+"""The profile (candidate/profile.py) and its inputs: building and updating it, the questions asked along the way,
+the background sync of documents and answers, the extra documents, and that only the user's own material feeds it."""
 import asyncio
 import copy
+import time
 
 from conftest import PROFILE_OUT, STANDARD_ANSWERS
 
@@ -52,6 +55,23 @@ def test_answers_update_only_what_changes(fake_ai, sample_resume):
     q = profile.questions()[0]
     assert q["status"] == "answered" and q["synced"]
     assert "300 students" in profile.full_context()
+
+
+def test_a_failed_sync_waits_before_trying_again(fake_ai, sample_resume, monkeypatch):
+    _setup(fake_ai, sample_resume)
+    asyncio.run(profile.build("test"))
+    db.kv_set("profile.documents_changed_at", time.time() - 120)  # a document added two minutes ago
+    del fake_ai.responses["profile-build"]  # and now every build fails, as when the ChatGPT sign-in has ended
+    options = {"sync_delay_sec": 60}
+    assert asyncio.run(profile.sync_once(options)) == "failed"
+    assert asyncio.run(profile.sync_once(options)) == "waiting"  # not one failing AI call (and error toast) per tick
+    assert sum(c["purpose"] == "profile-build" for c in fake_ai.calls) == 2  # the first build, then one failed try
+    db.kv_set("profile.documents_changed_at", time.time() - 90)  # another document: worth a new try right away
+    assert asyncio.run(profile.sync_once(options)) == "failed"
+    fake_ai.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
+    monkeypatch.setattr(profile, "RETRY_AFTER_FAILURE_SEC", 0)  # the wait is over
+    assert asyncio.run(profile.sync_once(options)) == "done"
+    assert asyncio.run(profile.sync_once(options)) == ""  # the documents are in the profile now
 
 
 def test_answers_given_during_an_update_wait_for_the_next_one(fake_ai, sample_resume):
@@ -159,6 +179,21 @@ def test_document_kinds_cover_british_spelling_and_resumes():
     resume_text = "Jordan Rivera\n## Experience\nCashier\n## Education\nExample High School\nFood handler certification"
     assert documents._kind("Jordan Rivera.md", resume_text) == "resume"  # a resume that mentions a certificate is a resume
     assert documents.recipients("This certifies that\nJordan Rivera\nhas completed CPR") == ["Jordan Rivera"]
+
+
+def test_a_word_that_ends_like_a_month_is_not_a_date():
+    from jobportal.candidate import documents
+    text = "Certificate of Completion\nAdvanced Grammar 2025\nExample Learning Center"
+    assert documents._rule_dates(text, "certificate") == ("2025", "")  # not March 2025
+    assert documents._rule_dates("Issued: Mar. 3, 2025\nExpires Dec 2027", "certificate") == ("2025-03", "2027-12")
+
+
+def test_a_document_without_a_stored_copy_can_still_be_removed():
+    from jobportal.candidate import documents
+    documents.DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    db.kv_set("profile.documents", [{"id": "d1", "name": "CPR card.txt", "kind": "certificate", "text": "CPR certified, 2025",
+                                     "chars": 19, "added_at": db.now(), "sha1": "x", "parsed": {"kind": "certificate"}}])
+    assert documents.remove("d1") and documents.all_documents() == [] and documents.DOCS_DIR.is_dir()
 
 
 def test_answers_used_in_a_resume_are_marked_applied():

@@ -1,15 +1,15 @@
 """The AI hunt: web-search agents that dig for leads no job board API exposes, such as comment-thread mentions, recruiter
 posts, unadvertised programs and hiring signals.
 
-Each mission (Settings, Sources, AI hunt; the defaults are prompts.DEFAULT_MISSIONS) is one AI agent with web search and page
-reading (ai.run with web=True). It gets the candidate's profile digest, the allowed locations, the dream companies and the
-leads JobPortal already knows, and returns leads with evidence (prompts.HUNT_SCHEMA). The search run (pipeline.py) starts
-collect(), which runs the missions at the same time and hands each mission's leads over as soon as it finishes, so triage can
-start before the slowest mission is done.
+Each mission (the Sources dialog, AI hunt; the defaults are prompts.DEFAULT_MISSIONS) is one AI agent with web search
+and page reading (ai.run with web=True). It gets the candidate's profile digest, the allowed locations, the dream
+companies and the leads JobPortal already knows, and returns leads with evidence (prompts.HUNT_SCHEMA). The search run
+(pipeline.py) starts collect(), which runs the missions at the same time and hands each mission's leads over as soon as
+it finishes, so triage can start before the slowest mission is done.
 
-Keeping usage in check: an "Everything" run only runs missions_per_run missions, rotating through the list so each one still
-runs every few searches (pick_missions). "AI hunt only" runs them all. The depth setting (quick, standard, deep) sets how many
-searches and page reads each agent may use.
+Keeping usage in check: an "Everything" run only runs missions_per_run missions, rotating through the list so each one
+still runs every few searches (pick_missions). "AI hunt only" runs them all. The depth setting ("How deep": quick,
+standard, deep) sets how many searches and page reads each agent may use.
 
 Side effects: AI calls on the user's ChatGPT plan, and the rotation position saved in the kv table (hunt.rotation)."""
 import asyncio

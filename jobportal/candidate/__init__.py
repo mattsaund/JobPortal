@@ -1,3 +1,4 @@
-"""Everything about the user: the profile (profile.py), the setup questions that start it (onboarding.py) and the resume
-library (library.py). Only the imported resume, the standard answers and questions asked along the way feed the profile.
-The library is storage."""
+"""Everything about the user: the profile (profile.py), the setup that starts it, with the resume import and the
+standard questions (onboarding.py), the extra documents (documents.py: certificates, licenses, other resumes, awards) and
+the saved resumes (library.py). Only the imported resume, the extra documents, the standard answers and the questions
+asked along the way feed the profile. Saved resumes are storage."""

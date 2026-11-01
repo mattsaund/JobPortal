@@ -1,5 +1,5 @@
 ; Windows installer, built by the Release workflow after PyInstaller:
-;   iscc /DAppVersion=0.2.0 packaging\windows\jobportal.iss
+;   iscc /DAppVersion=0.3.0 packaging\windows\jobportal.iss
 ; One click: no questions and no admin rights. It installs dist\JobPortal for the current user, adds Start menu and
 ; desktop shortcuts, and opens JobPortal when it's done. Uninstall it from Settings, Apps.
 #ifndef AppVersion

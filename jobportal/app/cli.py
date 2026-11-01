@@ -12,14 +12,15 @@
 jobportal.core.config reads once, the first time anything imports it. That is why this module imports the rest of
 JobPortal inside its functions, after main() has set those variables.
 
-The server modes keep a PID file (the server's process number) in the cache folder, so --stop knows what to stop."""
+The server modes keep a PID file (the server's process number) in the cache folder. It marks a server that --stop may
+end; --stop asks that server to quit through its own Quit endpoint rather than signaling the number in the file."""
 import argparse
 import contextlib
 import os
-import signal
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 from jobportal import __version__
@@ -49,17 +50,23 @@ def _pid_file() -> Path:
 
 def serve() -> int:
     """--server: run the server in this process until Ctrl+C, --stop or the dashboard's Quit button. Writes the PID file
-    while it runs."""
-    from jobportal.app.desktop import make_server
+    while it runs. Returns 1 without touching the PID file when a server already answers on the port, so a second
+    --server can't take over (and then delete) the file of the one that's running."""
+    from jobportal.app.desktop import make_server, up
     from jobportal.core.config import CACHE, HOST, PORT
+    if up():
+        print(f"JobPortal is already running at http://{HOST}:{PORT}. Stop it first (jobportal --stop), or pick another --port.")
+        return 1
     CACHE.mkdir(parents=True, exist_ok=True)
-    pid = _pid_file()
-    pid.write_text(str(os.getpid()), encoding="utf-8")
+    pid, me = _pid_file(), str(os.getpid())
+    pid.write_text(me, encoding="utf-8")
     print(f"JobPortal server on http://{HOST}:{PORT} (Ctrl+C stops it)")
     try:
         make_server().run()  # uvicorn shuts down cleanly on Ctrl+C or SIGTERM
     finally:
-        pid.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            if pid.read_text(encoding="utf-8").strip() == me:  # only this server's own file
+                pid.unlink()
     return 0
 
 
@@ -99,38 +106,44 @@ def background() -> int:
     return 1
 
 
+def _request_quit() -> bool:
+    """Ask the server on the port to shut itself down through its own Quit endpoint (POST /api/quit). Returns whether it
+    agreed. A request from here carries no Origin header, so the server's check against other sites' pages lets it in."""
+    from jobportal.app.desktop import BASE
+    try:
+        with urllib.request.urlopen(urllib.request.Request(f"{BASE}/api/quit", data=b"", method="POST"), timeout=5) as reply:
+            return reply.status == 200
+    except (OSError, ValueError):  # refused (409: a server that can't be stopped this way), or no answer
+        return False
+
+
 def stop() -> int:
-    """--stop: end the server that --server or --background started for this data folder and port. Asks it to shut down
-    (SIGTERM, which on Windows ends the process at once), waits up to 15 seconds, then forces it."""
+    """--stop: end the server that --server or --background started for this data folder and port, the way the dashboard's
+    Quit button does, so it shuts down cleanly on every system (a signal ends a Windows process at once). Then the PID
+    file goes. Returns 0 when it stopped or nothing was running, 1 when the server is still up.
+
+    The process number in the PID file is never signaled. A file left by a crashed server may name another program by
+    now, and the server that answers may not be the one that wrote it, so the number can't be trusted."""
     from jobportal.app.desktop import up
     pid_path = _pid_file()
     if not up():
-        # Nothing answers, so a PID file here is stale (the server crashed, or the computer restarted). Its number may belong
-        # to another program by now, so the file is removed and nothing is signaled.
-        pid_path.unlink(missing_ok=True)
+        pid_path.unlink(missing_ok=True)  # nothing answers, so the file is stale (a crash, or a restart of the computer)
         print("Not running.")
         return 0
     if not pid_path.exists():
         print("A server is running, but it wasn't started with --server or --background, so close it there.")
         return 0
-    try:
-        pid = int(pid_path.read_text(encoding="utf-8").strip())
-        os.kill(pid, signal.SIGTERM)
-    except (ValueError, OSError):  # an unreadable file, or no such process
-        pid_path.unlink(missing_ok=True)
-        print("Not running.")
-        return 0
-    for _ in range(60):
+    if not _request_quit():
+        print("The server on this port didn't agree to stop. Close it where it runs.")
+        return 1
+    for _ in range(60):  # up to 15 seconds for a clean shutdown
         if not up():
-            break
+            pid_path.unlink(missing_ok=True)  # the server removes its own file; this covers one that couldn't
+            print("Stopped.")
+            return 0
         time.sleep(0.25)
-    else:
-        if hasattr(signal, "SIGKILL"):  # Windows has none, and doesn't need it
-            with contextlib.suppress(OSError):  # it may have exited a moment ago
-                os.kill(pid, signal.SIGKILL)
-    pid_path.unlink(missing_ok=True)
-    print(f"Stopped (pid {pid}).")
-    return 0
+    print("The server is still shutting down. Run --stop again in a moment.")
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:

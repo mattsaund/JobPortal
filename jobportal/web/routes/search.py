@@ -1,4 +1,5 @@
-"""Search runs and sources: start and stop a run, the Runs page (history, logs, AI call log), and the Sources page checks."""
+"""Search runs and sources: start and stop a run, the run history (Settings, History: runs, logs, the AI call log), and
+the Sources dialog's checks."""
 import json
 
 from fastapi import APIRouter, HTTPException
@@ -14,7 +15,8 @@ RUN_MODES = ("full", "boards", "hunt", "backlog")  # everything, job boards only
 
 @router.post("/api/run")
 async def start_run(body: dict):
-    """Start a search run. Refused (409) while one is running or before setup is finished."""
+    """Start a search run. Refused (409) while one is running or before setup is finished, and (400) for an unknown mode
+    or overrides that aren't whole numbers."""
     mode = body.get("mode", "full")
     if mode not in RUN_MODES:
         raise HTTPException(400, "bad mode")
@@ -22,17 +24,20 @@ async def start_run(body: dict):
         return {"run_id": await pipeline.start(mode, body.get("overrides"))}
     except RuntimeError as e:
         raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.post("/api/run/stop")
 async def stop_run():
+    """Stop the search in progress, if any. It saves what it has and ends as "stopped" (see pipeline.stop)."""
     await pipeline.stop()
     return {"ok": True}
 
 
 @router.get("/api/runs")
 def runs():
-    """The last 60 runs, newest first, for the Runs page."""
+    """The last 60 runs, newest first, for Settings, History."""
     rows = db.q("SELECT * FROM runs ORDER BY id DESC LIMIT 60")
     for row in rows:
         row["stats"] = json.loads(row["stats"] or "{}")
@@ -54,11 +59,15 @@ def ai_calls():
 
 @router.post("/api/sources/detect")
 async def detect_source(body: dict):
+    """Find the company job board behind a pasted careers link ({"url", "name"}) and read it once
+    (sources.detect_board)."""
     return await sources.detect_board((body.get("url") or "").strip(), body.get("name") or "")
 
 
 @router.post("/api/sources/test/{key}")
 async def test_source(key: str):
+    """Run one job source by itself and report how many of its jobs would pass the rule filters
+    (sources.test_collector)."""
     if key not in COLLECTORS:
         raise HTTPException(404)
     return await sources.test_collector(key)

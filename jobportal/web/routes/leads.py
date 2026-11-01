@@ -1,6 +1,5 @@
 """Leads: the Leads list and a lead's details, editing a lead, adding or deleting one by hand, re-scoring, and the Tracker
 board with its contacts. Downloads and AI edits of a lead's documents are in documents.py."""
-import json
 import shutil
 from datetime import date, timedelta
 
@@ -36,6 +35,10 @@ SORTS = {
 EDITABLE = {"app_status", "notes", "follow_up_at", "resume_md", "cover_md", "title", "company", "location", "deadline", "apply_url",
             "industry", "dream"}
 CONTACT_FIELDS = ("name", "title", "org", "email", "linkedin", "source_url", "why")
+# A lead's industry as the Leads page groups it: one with none (NULL or empty) counts as "Other", the list's catch-all.
+# The industry chips and the industry filter both use it, so a chip's count and the leads it shows always agree.
+INDUSTRY_GROUP = "COALESCE(NULLIF(industry, ''), 'Other')"
+LEAD_KINDS = ("posting", "program", "event", "intel")  # what a job added by hand can be (see RawJob.kind)
 
 
 @router.get("/api/leads")
@@ -44,7 +47,7 @@ def leads(tab: str = "ready", q: str = "", sort: str = "score", kind: str = "", 
     tab_where = TABS.get(tab, TABS["all"])
     where, args = [tab_where], []
     if industry:
-        where.append("industry=?")
+        where.append(f"{INDUSTRY_GROUP}=?")  # "Other" also finds leads with no industry, as its chip counts them
         args.append(industry)
     if dream:
         where.append("dream=1")
@@ -59,11 +62,12 @@ def leads(tab: str = "ready", q: str = "", sort: str = "score", kind: str = "", 
     open_questions = profile.open_counts_by_lead()
     for row in rows:
         row["open_q"] = open_questions.get(row["id"], 0)
-    # The chips count the whole tab, ignoring the search box and the other filters.
-    industries = db.q(f"SELECT industry, COUNT(*) n FROM leads WHERE {tab_where} GROUP BY industry ORDER BY n DESC")
+    # The chips count the whole tab, ignoring the search box and the other filters. Grouping by INDUSTRY_GROUP adds the
+    # leads without an industry to "Other" (keyed by the raw column, one group would replace the other's count).
+    industries = db.q(f"SELECT {INDUSTRY_GROUP} AS industry, COUNT(*) n FROM leads WHERE {tab_where} GROUP BY 1 ORDER BY n DESC")
     return {"leads": [db.lead_row(r) for r in rows],
             "counts": {t: db.one(f"SELECT COUNT(*) n FROM leads WHERE {w}")["n"] for t, w in TABS.items()},
-            "industries": {r["industry"] or "Other": r["n"] for r in industries},
+            "industries": {r["industry"]: r["n"] for r in industries},
             "dream_count": db.one(f"SELECT COUNT(*) n FROM leads WHERE {tab_where} AND dream=1")["n"]}
 
 
@@ -86,11 +90,16 @@ def _clear_rendered(folder, *names: str) -> None:
 
 @router.patch("/api/leads/{lead_id}")
 def patch_lead(lead_id: int, body: dict):
-    """Save edits from the lead page: status, notes, follow-up date, the resume and cover letter text, package details.
+    """Save edits from the lead page and the Tracker: any field in EDITABLE (status, notes, follow-up date, the resume
+    and cover letter text, title, company, location, deadline, apply link, industry, the dream star), and "package",
+    which is merged into the saved package. Returns the lead as the Leads list shows it. An app_status outside
+    config.APP_STATUSES is refused with a 400.
 
-    Side effects: moving a lead to Application sent or later (config.APPLIED_STATUSES) records the date it was applied
-    for, and Application sent also schedules a follow-up in 7 days. Editing the resume
-    recomputes its keyword coverage. Editing a document deletes its rendered files so downloads stay current."""
+    Side effects: a status change goes into the lead's history. Moving a lead to Application sent or later
+    (config.APPLIED_STATUSES) records the date it was applied for, and Application sent also schedules a follow-up in 7
+    days. Setting the dream star by hand is remembered (dream_manual), so re-checking the Dream list leaves it alone.
+    Editing the resume recomputes its keyword coverage. Editing a document deletes its rendered files so downloads stay
+    current, and a "lead" event tells open dashboards."""
     current = lead_or_404(lead_id)
     fields = {k: v for k, v in body.items() if k in EDITABLE}
     if isinstance(body.get("package"), dict):
@@ -99,9 +108,10 @@ def patch_lead(lead_id: int, body: dict):
         fields["dream"] = 1 if fields["dream"] else 0
         fields["dream_manual"] = fields["dream"]  # remembered, so re-checking the Dream list never overrides the user
     status = fields.get("app_status")
+    # Checked whenever it's sent: an empty or null status would leave the lead in no tab and on no Tracker column.
+    if "app_status" in fields and status not in APP_STATUSES:
+        raise HTTPException(400, "bad status")
     if status and status != current["app_status"]:
-        if status not in APP_STATUSES:
-            raise HTTPException(400, "bad status")
         db.add_event(lead_id, "status", f"{current['app_status']} → {status}")
         if status in APPLIED_STATUSES and not current.get("applied_at"):
             fields["applied_at"] = date.today().isoformat()
@@ -172,15 +182,17 @@ async def add_manual_lead(body: dict):
     url, text = (body.get("url") or "").strip(), (body.get("text") or "").strip()
     title, company = (body.get("title") or "").strip(), (body.get("company") or "").strip()
     location = (body.get("location") or "").strip()
-    status = body.get("app_status") or "new"
+    status, kind = body.get("app_status") or "new", body.get("kind") or "posting"
     if not url and not text and not (title and company):
         raise HTTPException(400, "paste a link or the job text, or give a job title and company")
     if status not in APP_STATUSES or status == "trashed":
         raise HTTPException(400, "bad status")
+    if kind not in LEAD_KINDS:
+        raise HTTPException(400, "bad kind")
     existing = packages.saved_manual_lead(url, text, title, company, location)
     if existing:
         return {**packages.lead_summary(existing), "existing": True}
-    lead_id = packages.add_manual_lead(url, text, title, company, location, body.get("kind", "posting"), app_status=status)
+    lead_id = packages.add_manual_lead(url, text, title, company, location, kind, app_status=status)
     if url or text:
         background.spawn(packages.build_package(lead_id), error_title="Package failed", lead_id=lead_id)
     summary = packages.lead_summary(lead_id)
@@ -245,7 +257,8 @@ def contacts():
     Contacts view."""
     out = []
     for row in db.q("SELECT id, title, company, app_status, package FROM leads WHERE app_status!='trashed' AND package!='{}'"):
-        for i, contact in enumerate(json.loads(row["package"] or "{}").get("contacts") or []):
+        package = db.lead_row(row)["package"] or {}  # lead_row: one damaged package can't break the whole list
+        for i, contact in enumerate(package.get("contacts") or []):
             out.append({**contact, "idx": i, "lead_id": row["id"], "lead_title": row["title"], "lead_company": row["company"],
                         "lead_status": row["app_status"]})
     return out

@@ -14,14 +14,15 @@ Key ideas:
 - The dashboard always saves the whole document (it loads GET /api/settings, edits it, and sends it back with PUT), so
   save() replaces what is stored instead of merging.
 
-Who calls it: almost every package reads settings with get(). web/routes/settings.py saves and resets them for the
-Settings and Sources pages, and web/server.py runs migrate_defaults() at startup."""
+Who calls it: almost every package reads settings with get(). web/routes/settings.py saves and resets them for
+Settings and the Sources dialog, and web/server.py runs migrate_defaults() at startup."""
 import copy
 import hashlib
 
 from jobportal.core import db
 from jobportal.core.config import DEFAULT_SETTINGS, RESOURCES
 from jobportal.core.genres import LEGACY_GENRE_IDS, LEGACY_INDUSTRIES, OLD_INDUSTRIES
+from jobportal.core.textutil import unique
 
 # Social-source defaults every version before v0.3.0 saved. _retire_tech_defaults() drops a stored list that still equals
 # one of these, so the job-agnostic defaults in config.py show through.
@@ -41,13 +42,19 @@ _LEGACY_MISSION_PROMPTS = {
 
 def _merge(base, over):
     """`over` laid on top of `base`. Dictionaries merge key by key, all the way down. Anything else in `over` (a list, a
-    number, a string) replaces what `base` has. Neither argument is changed, but the result can share nested values with
-    them, which is why get() passes in fresh copies."""
-    if isinstance(base, dict) and isinstance(over, dict):
+    number, a string) replaces what `base` has, except where it can't stand in for it: a section or a list stored as
+    something else (null, or text, from a broken save) is ignored and the default shows through, since every reader
+    expects the default's shape. Neither argument is changed, but the result can share nested values with them, which
+    is why get() passes in fresh copies."""
+    if isinstance(base, dict):
+        if not isinstance(over, dict):
+            return copy.deepcopy(base)
         merged = dict(base)
         for key, value in over.items():
             merged[key] = _merge(base[key], value) if key in base else value
         return merged
+    if isinstance(base, list) and not isinstance(over, list):
+        return copy.deepcopy(base)
     return copy.deepcopy(over)
 
 
@@ -55,7 +62,7 @@ def get() -> dict:
     """The current settings: what the user saved, merged over config.DEFAULT_SETTINGS.
 
     Returns a new dict on every call, so callers may change it (for example to save it back). An empty AI hunt mission
-    list is filled with the built-in missions, so the Sources page always has missions to show."""
+    list is filled with the built-in missions, so the Sources dialog always has missions to show."""
     # Imported here, not at the top of the file: ai/prompts.py imports this module, so a top-level import would be a loop.
     from jobportal.ai.prompts import DEFAULT_MISSIONS
     merged = _merge(copy.deepcopy(DEFAULT_SETTINGS), db.kv_get("settings", {}))
@@ -74,13 +81,16 @@ def save(new: dict) -> dict:
 def reset_section(path: str) -> dict:
     """Put one part of the settings back to its default and return get().
 
-    `path` is a dotted key, for example "sources.ai_hunt.missions" (the Sources page's "Reset to defaults" button). The
-    key is deleted from the stored settings, so the default shows through again. A path that isn't stored changes nothing."""
+    `path` is a dotted key, for example "sources.ai_hunt.missions" (the Sources dialog's button that puts the built-in
+    missions back). The key is deleted from the stored settings, so the default shows through again. A path that isn't
+    stored changes nothing."""
     stored = db.kv_get("settings", {})
     *parents, last = path.split(".")
     node = stored
     for key in parents:
-        node = node.get(key, {})
+        node = node.get(key)
+        if not isinstance(node, dict):  # nothing stored at that path, or not a section that holds keys
+            return get()
     node.pop(last, None)
     db.kv_set("settings", stored)
     return get()
@@ -93,7 +103,7 @@ def default_playbook() -> str:
 
 
 def resume_playbook(cfg: dict | None = None) -> str:
-    """The resume playbook in use: the user's own text from Settings, "Resumes" when they saved one, otherwise the
+    """The resume playbook in use: the user's own text from Settings, Resumes when they saved one, otherwise the
     built-in playbook. Pass the settings as `cfg` when you already have them, to skip reading them again."""
     cfg = cfg or get()
     return (cfg.get("resume_playbook") or "").strip() or default_playbook()
@@ -183,7 +193,7 @@ def _retire_tech_defaults(stored: dict) -> list[str]:
         notes.append("industries for every field")
     elif isinstance(industries, list) and any(name in OLD_INDUSTRIES for name in industries):
         renamed = [OLD_INDUSTRIES.get(name, name) for name in industries]
-        stored["industries"] = [name for i, name in enumerate(renamed) if name not in renamed[:i]]
+        stored["industries"] = unique(renamed)
         notes.append("industry names updated")
     filters = stored.get("filters") or {}
     filters.pop("tech_title", None)

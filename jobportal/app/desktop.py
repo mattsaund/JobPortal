@@ -134,7 +134,10 @@ class Bridge:
         if not picked:
             return {"ok": False, "canceled": True}
         dest = Path(picked if isinstance(picked, str) else picked[0])  # some platforms return a list of one path
-        dest.write_bytes(data)
+        try:
+            dest.write_bytes(data)
+        except OSError as e:  # a folder the user can't write to, a full disk, a file open in another program
+            return {"ok": False, "error": f"couldn't save {dest.name}: {e.strerror or e}"}
         return {"ok": True, "path": str(dest)}
 
     def notify(self, title: str, body: str = "") -> None:

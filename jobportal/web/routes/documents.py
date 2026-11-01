@@ -1,6 +1,7 @@
 """A lead's documents: downloads (PDF, DOCX, Markdown, emails, the whole package as a zip), live previews for the editor,
 AI edits by instruction, and the resume check. The work happens in jobportal/documents/."""
 import re
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -26,11 +27,14 @@ async def export_document(lead_id: int, name: str):
         email = re.fullmatch(r"email-(\d+)\.eml", name)
         if email:
             data, filename = exports.email_file(lead, int(email.group(1)))
-            return Response(data, media_type="message/rfc822", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+            # RFC 5987 form, which carries any letters (a header written as filename="..." must be plain Latin-1).
+            return Response(data, media_type="message/rfc822", headers={"Content-Disposition": f"attachment; filename*=utf-8''{quote(filename)}"})
         path, filename = await exports.lead_file(lead, name)
         return FileResponse(path, filename=filename)
     except exports.NotAvailable as e:
         raise HTTPException(404, str(e))
+    except render.PDFError as e:  # no PDF engine, or it timed out: say so instead of a bare 500
+        raise HTTPException(503, str(e))
 
 
 @router.post("/api/preview")
@@ -68,9 +72,7 @@ async def resume_check(lead_id: int):
     lead = lead_or_404(lead_id)
     if not lead.get("resume_md"):
         raise HTTPException(404, "no resume yet")
-    package = lead.get("package") or {}
-    style = package.get("resume_style") or {"theme": "classic", "max_pages": 1}
-    archetype = (package.get("resume_strategy") or {}).get("archetype", "")
-    package["resume_check"] = await packages.check_resume(lead["resume_md"], package.get("keywords") or [], style, archetype)
-    db.update_lead(lead_id, package=package)
-    return package["resume_check"]
+    try:
+        return await packages.recheck_resume(lead)
+    except render.PDFError as e:  # the page count needs a printed PDF
+        raise HTTPException(503, str(e))

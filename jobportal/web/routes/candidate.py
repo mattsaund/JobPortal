@@ -1,8 +1,10 @@
-"""The user's side: setup (import a resume and any extra documents, answer the standard questions), the Profile page, and
-the questions JobPortal asks along the way.
+"""The user's side: setup (import a resume and any extra documents, answer the standard questions), the profile
+(Settings, Profile), and the questions JobPortal asks along the way.
 
 These are the only ways JobPortal learns about the user. Nothing else feeds the profile: not saved resumes, not leads, not
 anything found on the web."""
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Request
 
 from jobportal.ai import client as ai
@@ -18,13 +20,14 @@ router = APIRouter()
 
 @router.get("/api/onboarding")
 def onboarding_state():
-    """Everything the setup page needs: the questions, the saved answers and resume, and what's still missing."""
+    """Everything setup needs (Home, and Settings, Profile): the questions, the saved answers and resume, and what's
+    still missing."""
     return onboarding.state()
 
 
 def _keep_copy_in_library(text: str, filename: str) -> None:
-    """Also keep an editable copy of the imported resume on the Resumes page. It's a convenience: the copy never feeds the
-    profile, and a failure here never affects setup."""
+    """Also keep an editable copy of the imported resume in Settings, Resumes. It's a convenience: the copy never feeds
+    the profile, and a failure here never affects setup."""
     async def save():
         item = await library.import_text(text, filename)
         bus.publish("toast", {"title": "Saved to your resume collection", "body": item.get("name", "")})
@@ -86,6 +89,7 @@ async def save_some_answers(body: dict):
 
 @router.get("/api/profile")
 def get_profile():
+    """Every profile section, keyed by name (empty sections come back with their empty value)."""
     return profile.get_all()
 
 
@@ -107,7 +111,10 @@ async def add_document(request: Request, filename: str):
     after the user stops adding."""
     data = await read_upload(request)
     try:
-        return documents.add(filename, data)
+        # Read in a worker thread so a slow file doesn't hold up the server. add() itself stays on the event loop, where
+        # it can start the AI reading.
+        text = await asyncio.to_thread(documents.read_text, filename, data)
+        return documents.add(filename, data, text)
     except ValueError as e:  # extract.ExtractError (no readable text, unsupported type) or the document limit
         raise HTTPException(400, str(e))
 
@@ -152,6 +159,7 @@ async def pick_main_resume():
 
 @router.delete("/api/profile/documents/{doc_id}")
 def remove_document(doc_id: str):
+    """Forget one extra document and delete its stored copy. The profile rebuilds once the user pauses."""
     if not documents.remove(doc_id):
         raise HTTPException(404, "no such document")
     return {"ok": True}
@@ -159,7 +167,7 @@ def remove_document(doc_id: str):
 
 @router.put("/api/profile/{key}")
 def edit_profile_section(key: str, body: dict):
-    """The user corrects a profile section by hand on the Profile page."""
+    """The user corrects a profile section by hand in Settings, Profile."""
     try:
         profile.save(key, body["value"])
     except KeyError:
@@ -170,11 +178,13 @@ def edit_profile_section(key: str, body: dict):
 
 @router.get("/api/profile/status")
 def profile_status():
+    """What the profile is doing now (a build, an update, the last error) and how far setup has come."""
     return profile.status_snapshot()
 
 
 @router.get("/api/profile/overview")
 def profile_overview():
+    """The overview in Settings, Profile: who the user is, what the profile knows and what it has made so far."""
     return profile.overview()
 
 
@@ -213,11 +223,14 @@ def profile_history(key: str):
 
 @router.get("/api/questions")
 def questions():
+    """Every question asked along the way, oldest first, with its status and answer."""
     return profile.questions()
 
 
 @router.post("/api/questions/answer")
 def answer_question(body: dict):
+    """Save the user's answer to a question ({"question", "answer"}; a new question is added as answered). Returns the
+    updated list and the profile status. The answer joins the profile on the next update."""
     if not body.get("question") or not str(body.get("answer", "")).strip():
         raise HTTPException(400, "question and answer required")
     updated = profile.answer_question(body["question"], body["answer"])
@@ -226,4 +239,5 @@ def answer_question(body: dict):
 
 @router.post("/api/questions/dismiss")
 def dismiss_question(body: dict):
+    """Mark a question as not relevant ({"question"}). Returns the updated list."""
     return profile.dismiss_question(body.get("question", ""))

@@ -6,10 +6,12 @@ the next profile build together with the resume, so the profile, and the search 
 user has done. That's how a certificate the resume never mentions can still lead to jobs that ask for it, and why more
 documents mean a wider spread of job matches.
 
-Where they're added: the setup page (the resume step) and Profile, Resume and documents. Each file is read with
-documents/extract.py and kept as text in "profile.documents", and a copy of the file goes in the data folder (documents/).
-Adding or removing one stamps "profile.documents_changed_at". profile.answers_watcher() then rebuilds the profile once the
-user has paused for a minute, so dropping ten files at once means one rebuild, not ten.
+Where they're added: on Home, by dropping files on it or through its documents card (web/static/js/components/
+documents.js). A drop of several files before there's a main resume makes the best resume among them the main one
+(best_resume, make_main). Each file is read with documents/extract.py and kept as text in "profile.documents", and a copy
+of the file goes in the data folder (documents/). Adding or removing one stamps "profile.documents_changed_at".
+profile.answers_watcher() then rebuilds the profile once the user has paused for a minute, so dropping ten files at once
+means one rebuild, not ten.
 
 Reading a document's details ("parsed"): what it is (kind), its title ("AWS Certified Cloud Practitioner", "Dean's List"),
 who issued it, when it was issued and when it expires ("YYYY-MM", "YYYY" or ""), up to eight skills or topics it shows, and
@@ -24,8 +26,8 @@ parse_pending(), which the server runs at startup and after a sign-in. Neither r
 title or an issuer. The profile build reads each document's details as a DETAILS line above its text (for_prompt), so
 licenses, certifications and awards land in the profile's record reliably.
 
-Not to be confused with saved resumes on the Resumes page (candidate/library.py): that's a collection of resume versions to
-reuse, and it never feeds the profile."""
+Not to be confused with saved resumes in Settings, Resumes (candidate/library.py): that's a collection of resume
+versions to reuse, and it never feeds the profile."""
 import asyncio
 import hashlib
 import re
@@ -35,9 +37,9 @@ import uuid
 from pathlib import Path
 
 from jobportal.ai import client as ai, prompts, signin
-from jobportal.core import background, bus, db
+from jobportal.core import background, bus, db, osutil
 from jobportal.core.config import DATA, RESUME_DIR
-from jobportal.core.textutil import clean, extract_terms
+from jobportal.core.textutil import clean, extract_terms, unique
 from jobportal.documents import extract
 
 DOCS_DIR = DATA / "documents"
@@ -96,7 +98,8 @@ def _kind(filename: str, text: str) -> str:
 # ---------------------------------------------------------------- the rule-based reading
 
 _MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
-_MONTH = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?"
+# A month name or its abbreviation. It must start a word, or the end of "Grammar 2025" would read as March 2025.
+_MONTH = r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?"
 # A date as certificates write them: "March 15, 2025", "15 March 2025", "Mar 2025", "03/15/2025", "03/2025", "2025-03-15",
 # "Fall 2025" or a lone year.
 _DATE = (rf"(?:{_MONTH}\s+(?:\d{{1,2}}(?:st|nd|rd|th)?,?\s+)?\d{{4}}|\d{{1,2}}\s+{_MONTH},?\s+\d{{4}}|\d{{1,2}}[/.-]\d{{1,2}}[/.-]\d{{4}}"
@@ -183,7 +186,7 @@ def owner_names() -> list[str]:
                   if line.strip()), "")
     if 2 <= len(first.split()) <= 4 and not re.search(r"[@\d|/:]", first):
         names.append(first)
-    return [n for i, n in enumerate(names) if n and str(n).strip() and n not in names[:i]]
+    return unique(n for n in names if n and str(n).strip())
 
 
 _RECIPIENT_INLINE_RE = re.compile(r"(?:certif(?:y|ies) that|presented to|awarded to|granted to|issued to)\s+"
@@ -199,7 +202,7 @@ def recipients(text: str) -> list[str]:
         nxt = lines[i + 1]
         if _RECIPIENT_RE.search(line) and 2 <= len(nxt.split()) <= 5 and re.fullmatch(r"[A-Za-z .,'-]+", nxt):
             names.append(nxt)
-    return [n for i, n in enumerate(names) if n not in names[:i]]
+    return unique(names)
 
 
 def _mentions_owner(value: str, owners: list[str]) -> bool:
@@ -403,11 +406,19 @@ def _save(docs: list[dict], changed: bool = True) -> None:
     _publish()
 
 
-def add(filename: str, data: bytes) -> dict:
+def read_text(filename: str, data: bytes) -> str:
+    """The text of a document file (documents/extract.py), allowing documents far shorter than a resume (MIN_CHARS). Raises
+    extract.ExtractError when no text can be read. It can take seconds (a long PDF, a .doc through LibreOffice), so async
+    callers run it in a worker thread."""
+    return extract.extract_text(filename, data, min_chars=MIN_CHARS).strip()
+
+
+def add(filename: str, data: bytes, text: str | None = None) -> dict:
     """Read one document and keep it, with its rules reading, and start its AI reading in the background when the user is
-    signed in with ChatGPT (_start_ai_reading). Returns its listing entry. The same file added again changes nothing and
-    comes back with "duplicate": True. Raises extract.ExtractError when no text can be read (a scanned image, an unsupported
-    type), and ValueError when MAX_DOCUMENTS are kept already."""
+    signed in with ChatGPT (_start_ai_reading). Returns its listing entry. `text` is the file's text when the caller already
+    read it with read_text() (the upload route does, in a worker thread); otherwise it's read here. The same file added
+    again changes nothing and comes back with "duplicate": True. Raises extract.ExtractError when no text can be read (a
+    scanned image, an unsupported type), and ValueError when MAX_DOCUMENTS are kept already."""
     with _lock:
         docs = all_documents()
         sha1 = hashlib.sha1(data).hexdigest()
@@ -416,9 +427,9 @@ def add(filename: str, data: bytes) -> dict:
             return {**_entry(same), "duplicate": True}
         if len(docs) >= MAX_DOCUMENTS:
             raise ValueError(f"You can keep up to {MAX_DOCUMENTS} documents. Remove one first.")
-        text = extract.extract_text(filename, data, min_chars=MIN_CHARS).strip()
-        # A file name with no folder parts and no characters Windows forbids.
-        name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', "-", Path(filename or "document.txt").name).strip() or "document.txt"
+        if text is None:
+            text = read_text(filename, data)
+        name = osutil.storable_name(filename, "document.txt")
         doc_id = uuid.uuid4().hex[:12]
         DOCS_DIR.mkdir(parents=True, exist_ok=True)
         stored = DOCS_DIR / f"{doc_id} {name}"
@@ -438,7 +449,8 @@ def remove(doc_id: str) -> bool:
         doc = next((d for d in docs if d["id"] == doc_id), None)
         if not doc:
             return False
-        (DOCS_DIR / doc.get("stored_as", "")).unlink(missing_ok=True)
+        if doc.get("stored_as"):  # without a name, DOCS_DIR / "" would be the documents folder itself
+            (DOCS_DIR / doc["stored_as"]).unlink(missing_ok=True)
         _save([d for d in docs if d["id"] != doc_id])
         return True
 
@@ -603,7 +615,7 @@ async def make_main(doc_id: str) -> dict:
     remove(doc_id)
     if old and old_data.strip():
         try:
-            add(old["filename"], old_data)
+            add(old["filename"], old_data, await asyncio.to_thread(read_text, old["filename"], old_data))
         except ValueError:  # extract.ExtractError is a ValueError, and so is the document limit
             pass
     return profile.resume_info()

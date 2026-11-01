@@ -1,4 +1,7 @@
+"""Setup (candidate/onboarding.py): the standard questions, importing a resume and pre-filling the answers from it,
+saving the answers in full or one at a time, and what the answers change in the profile and the settings."""
 import asyncio
+import re
 
 import pytest
 from conftest import STANDARD_ANSWERS
@@ -77,6 +80,15 @@ def test_answers_drive_settings_facts_and_kit():
 def test_anywhere_and_remote_only_locations():
     assert onboarding.allowed_locations({"anywhere_us": "yes", "work_modes": ["remote"]}) == ["Anywhere in the US", "Remote"]
     assert onboarding.allowed_locations({"state": "Ohio", "work_modes": ["onsite"]}) == ["Ohio"]
+    assert onboarding.allowed_locations({"state": "Ohio", "work_modes": ["remote"]}) == ["Remote"]  # nothing but Remote
+
+
+def test_skipping_the_places_question_still_searches_near_home():
+    # The default work arrangement is all three. Remote alone would drop every on-site job near home.
+    every_mode = onboarding.defaults()["work_modes"]
+    assert onboarding.allowed_locations({"state": "Ohio", "work_modes": every_mode}) == ["Ohio", "Remote"]
+    assert onboarding.allowed_locations({"work_modes": ["hybrid", "remote"]}) == ["Anywhere in the US", "Remote"]  # no home state
+    assert onboarding.allowed_locations({"state": "Ohio", "locations": ["Denver, CO"], "work_modes": every_mode}) == ["Denver, CO", "Remote"]
 
 
 def test_import_resume_stores_file_and_prefills(fake_ai, sample_resume):
@@ -99,7 +111,7 @@ def test_saving_answers_again_keeps_edits_made_on_other_pages():
     from jobportal.core import settings
     onboarding.save_answers(STANDARD_ANSWERS)
     cfg = settings.get()
-    cfg["dream_companies"].append("Example Labs")  # added on the Dream list page
+    cfg["dream_companies"].append("Example Labs")  # added to the Dream list in Settings
     cfg["locations"]["allowed"] = ["Ohio", "Remote"]  # changed in the search area editor
     settings.save(cfg)
     onboarding.save_answers({**STANDARD_ANSWERS, "phone": "(555) 010-0123"})  # an unrelated fix
@@ -139,3 +151,29 @@ def test_answers_saved_one_at_a_time():
     assert out["complete"] and not out["first_complete"] and out["missing"] == ["city"]
     from jobportal.core import db
     assert db.kv_get("profile.answers_changed_at")
+
+
+def test_finishing_setup_one_answer_at_a_time_points_the_search_at_every_answer():
+    # Home saves each answer as it comes. The answers given before the last required one never reached the settings, so
+    # finishing setup must apply them all, not only the last one.
+    onboarding.merge_answers({"name": "Jordan Rivera", "email": "jordan.rivera@example.com", "target_roles": ["Registered Nurse"],
+                              "levels": ["entry"], "locations": ["Columbus, OH"], "dream_companies": ["Example Health"]})
+    onboarding.merge_answers({"city": "Columbus"})
+    onboarding.merge_answers({"work_authorized": "yes"})
+    assert onboarding.merge_answers({"sponsorship": "no"})["first_complete"]
+    cfg = settings.get()
+    assert cfg["search"]["levels"] == ["entry"]
+    assert re.escape("registered nurse") in cfg["filters"]["title_include"]  # the target role always passes the title filter
+    assert cfg["locations"]["allowed"] == ["Columbus, OH", "Remote"]
+    assert cfg["dream_companies"] == ["Example Health"]
+
+
+def test_the_first_full_save_applies_answers_the_resume_filled_in(fake_ai, sample_resume):
+    fake_ai.responses["onboarding-prefill"] = {"state": "Ohio", "target_roles": ["Software Engineer"], "levels": ["internship", "entry"]}
+    asyncio.run(onboarding.import_resume("Jordan Rivera.md", data=sample_resume.encode()))
+    # The form comes back with the pre-filled answers unchanged.
+    onboarding.save_answers({**STANDARD_ANSWERS, "state": "Ohio", "locations": [], "work_modes": ["onsite"],
+                             "target_roles": ["Software Engineer"], "levels": ["internship", "entry"]})
+    cfg = settings.get()
+    assert cfg["locations"]["allowed"] == ["Ohio"]
+    assert cfg["search"]["levels"] == ["internship", "entry"] and cfg["filters"]["title_include"]
