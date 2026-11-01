@@ -702,7 +702,8 @@ async def start(mode: str = "full", overrides: dict | None = None) -> int:
 
     mode is "full" (everything), "boards" (job boards only), "hunt" (AI hunt only) or "backlog" (package queue only).
     overrides holds one-off values for max_packages, max_triage or min_score; saved settings aren't touched. Raises
-    RuntimeError when a run is already going or setup isn't finished (the message says what's missing)."""
+    RuntimeError when a run is already going or setup isn't finished (the message says what's missing), and ValueError
+    when an override isn't a whole number."""
     global _current
     # The run's task is what counts, not bus.state["running"]: that only turns on once the task gets its first turn, so two
     # starts in a row (a double click, or the auto-run timer at the same moment) would otherwise both get through.
@@ -711,7 +712,10 @@ async def start(mode: str = "full", overrides: dict | None = None) -> int:
     missing = profile_mod.ready_to_search()
     if missing:
         raise RuntimeError(missing)
-    one_off = {k: int(v) for k, v in (overrides or {}).items() if k in RUN_OVERRIDES}  # a bad value fails before the run row exists
+    try:  # a bad value fails here, before the run row exists
+        one_off = {k: int(v) for k, v in dict(overrides or {}).items() if k in RUN_OVERRIDES}
+    except (TypeError, ValueError):
+        raise ValueError("run overrides must be whole numbers: " + ", ".join(RUN_OVERRIDES)) from None
     p = Pipeline(mode)
     p.cfg["run"].update(one_off)
     _current = p

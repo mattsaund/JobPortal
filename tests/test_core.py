@@ -261,6 +261,18 @@ def test_settings_merge_over_defaults():
     assert settings.resume_playbook({"resume_playbook": ""}) == settings.default_playbook()
 
 
+def test_a_broken_save_reads_as_the_defaults_for_what_it_broke():
+    # A section or list saved as something else (null, text) would break every reader that expects its shape.
+    settings.save({"run": None, "sources": {"linkedin": "off"}, "industries": "Healthcare", "filters": {"exclude_keywords": ["night shift"]}})
+    cfg = settings.get()
+    assert cfg["run"] == config.DEFAULT_SETTINGS["run"] and cfg["sources"]["linkedin"]["enabled"] is True
+    assert cfg["industries"] == genres.DEFAULT_INDUSTRIES
+    assert cfg["filters"]["exclude_keywords"] == ["night shift"]  # what was saved properly still counts
+    assert db.kv_get("settings")["run"] is None  # nothing stored is changed by reading it
+    settings.save({"industries": ["Education"]})
+    assert settings.reset_section("industries.extra")["industries"] == ["Education"]  # a path through a list changes nothing
+
+
 def test_new_default_boards_are_offered_once(monkeypatch):
     # No company boards ship by default (each person adds their own), so pretend a later version added two.
     defaults = [{"name": "Example Health", "ats": "greenhouse", "slug": "examplehealth"},

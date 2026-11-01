@@ -42,13 +42,19 @@ _LEGACY_MISSION_PROMPTS = {
 
 def _merge(base, over):
     """`over` laid on top of `base`. Dictionaries merge key by key, all the way down. Anything else in `over` (a list, a
-    number, a string) replaces what `base` has. Neither argument is changed, but the result can share nested values with
-    them, which is why get() passes in fresh copies."""
-    if isinstance(base, dict) and isinstance(over, dict):
+    number, a string) replaces what `base` has, except where it can't stand in for it: a section or a list stored as
+    something else (null, or text, from a broken save) is ignored and the default shows through, since every reader
+    expects the default's shape. Neither argument is changed, but the result can share nested values with them, which
+    is why get() passes in fresh copies."""
+    if isinstance(base, dict):
+        if not isinstance(over, dict):
+            return copy.deepcopy(base)
         merged = dict(base)
         for key, value in over.items():
             merged[key] = _merge(base[key], value) if key in base else value
         return merged
+    if isinstance(base, list) and not isinstance(over, list):
+        return copy.deepcopy(base)
     return copy.deepcopy(over)
 
 
@@ -82,7 +88,9 @@ def reset_section(path: str) -> dict:
     *parents, last = path.split(".")
     node = stored
     for key in parents:
-        node = node.get(key, {})
+        node = node.get(key)
+        if not isinstance(node, dict):  # nothing stored at that path, or not a section that holds keys
+            return get()
     node.pop(last, None)
     db.kv_set("settings", stored)
     return get()

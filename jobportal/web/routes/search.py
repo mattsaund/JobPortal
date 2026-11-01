@@ -15,7 +15,8 @@ RUN_MODES = ("full", "boards", "hunt", "backlog")  # everything, job boards only
 
 @router.post("/api/run")
 async def start_run(body: dict):
-    """Start a search run. Refused (409) while one is running or before setup is finished."""
+    """Start a search run. Refused (409) while one is running or before setup is finished, and (400) for an unknown mode
+    or overrides that aren't whole numbers."""
     mode = body.get("mode", "full")
     if mode not in RUN_MODES:
         raise HTTPException(400, "bad mode")
@@ -23,6 +24,8 @@ async def start_run(body: dict):
         return {"run_id": await pipeline.start(mode, body.get("overrides"))}
     except RuntimeError as e:
         raise HTTPException(409, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @router.post("/api/run/stop")

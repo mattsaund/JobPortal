@@ -234,6 +234,16 @@ def test_imported_files_are_read_away_from_the_server_loop(client, monkeypatch, 
     assert where == ["worker thread"] * 3
 
 
+def test_requests_with_bad_values_get_a_400(client):
+    from jobportal.core import db
+    assert client.post("/api/settings/reset", json={}).status_code == 400
+    db.kv_set("profile.resume", {"text": "# Jordan Rivera", "name": "resume.md"})  # setup finished
+    db.kv_set("profile.answers", {"_saved_at": db.now()})
+    db.kv_set("profile.built_at", db.now())
+    assert client.post("/api/run", json={"mode": "backlog", "overrides": {"max_packages": "lots"}}).status_code == 400
+    assert db.q("SELECT id FROM runs") == []  # refused before a run was recorded
+
+
 def test_saved_resume_routes_refuse_what_they_cannot_do(client, fake_ai):
     from jobportal.core import db
     item = client.post("/api/library", json={"md": "# Jordan Rivera\n\n## Skills\n- Python", "name": "General"}).json()

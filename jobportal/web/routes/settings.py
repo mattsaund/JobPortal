@@ -1,6 +1,6 @@
 """The Settings page: every setting, the resume playbook and layouts, and the built-in AI prompts (shown grayed out as
 placeholders until the user overrides one)."""
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from jobportal.ai import prompts
 from jobportal.core import settings
@@ -23,8 +23,11 @@ def save_settings(body: dict):
 
 @router.post("/api/settings/reset")
 def reset_settings(body: dict):
-    """Put one section back to its default, for example {"path": "sources.ats_boards"}."""
-    return settings.reset_section(body["path"])
+    """Put one section back to its default, for example {"path": "sources.ats_boards"}. Returns the settings."""
+    path = body.get("path")
+    if not isinstance(path, str) or not path.strip():
+        raise HTTPException(400, "path required")
+    return settings.reset_section(path.strip())
 
 
 @router.get("/api/resume-playbook")
