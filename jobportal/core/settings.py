@@ -17,6 +17,7 @@ Key ideas:
 Who calls it: almost every package reads settings with get(). web/routes/settings.py saves and resets them for the
 Settings and Sources pages, and web/server.py runs migrate_defaults() at startup."""
 import copy
+import hashlib
 
 from jobportal.core import db
 from jobportal.core.config import DEFAULT_SETTINGS, RESOURCES
@@ -27,6 +28,15 @@ from jobportal.core.genres import LEGACY_GENRE_IDS, LEGACY_INDUSTRIES, OLD_INDUS
 _LEGACY_SUBREDDITS = ["forhire", "jobbit", "hiring", "cscareerquestions", "internships", "EngineeringStudents", "remotejs", "techjobs"]
 _LEGACY_MASTODON = {"instances": ["mastodon.social", "hachyderm.io", "fosstodon.org"],
                     "tags": ["hiring", "internship", "internships", "getfedihired", "fedihired", "techjobs", "jobs"]}
+# The start of the sha1 of each built-in AI hunt mission prompt before v0.3.0, when several leaned on tech (tech staffing
+# firms, SBIR grants, Hacker News, tech job boards). A saved mission whose prompt still hashes to its old value was never
+# edited, so _retire_tech_defaults() gives it the current wording.
+_LEGACY_MISSION_PROMPTS = {
+    "broad": "e9e89b9cb095540b", "social": "e15ad55b981676b0", "recruiters": "fde7ee780348b321", "public": "593d760f8067df11",
+    "local": "cd8ec20ffe1f5304", "research": "5ccc96b937c0a770", "intel": "8372cf89cd1d3851", "events": "5d9c4e773da80920",
+    "insiders": "8a6a971b438e8dfb", "forums": "22ef343ad9c37101", "aggregators": "187beb84ec3f4f0c", "campus": "ceeb2353fe188f01",
+    "news": "ee6face50ab21600", "dream": "5952781c44068bb4",
+}
 
 
 def _merge(base, over):
@@ -143,8 +153,25 @@ def _retire_tech_defaults(stored: dict) -> list[str]:
       gets the target-role filter that replaced it switched off too.
     - sources.reddit.subreddits and the Mastodon instances and tags: dropped when they still equal the old tech-leaning
       defaults, so the general defaults show through (the collectors add the user's fields on top).
+    - the AI hunt missions: a built-in mission whose prompt was never edited (_LEGACY_MISSION_PROMPTS) gets the current
+      prompt and level and field limits. Its name and on or off switch stay as the user left them.
     Running it again changes nothing, because nothing it leaves behind matches an old default."""
+    from jobportal.ai.prompts import DEFAULT_MISSIONS  # inside the function for the same reason as in get()
     notes = []
+    current = {m["id"]: m for m in DEFAULT_MISSIONS}
+    updated = 0
+    for mission in (stored.get("sources") or {}).get("ai_hunt", {}).get("missions") or []:
+        old_hash = _LEGACY_MISSION_PROMPTS.get(mission.get("id"))
+        new = current.get(mission.get("id"))
+        prompt = str(mission.get("prompt", ""))
+        if new and old_hash and prompt != new["prompt"] and hashlib.sha1(prompt.encode()).hexdigest()[:16] == old_hash:
+            mission["prompt"] = new["prompt"]
+            for limit in ("only_levels", "only_groups"):
+                if limit in new:
+                    mission[limit] = list(new[limit])
+            updated += 1
+    if updated:
+        notes.append(f"{updated} built-in AI missions reworded for every field")
     analysis = stored.get("analysis") or {}
     genres = analysis.get("genres")
     if isinstance(genres, list) and genres and {g.get("id") for g in genres} <= LEGACY_GENRE_IDS:

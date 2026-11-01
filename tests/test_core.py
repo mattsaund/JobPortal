@@ -285,6 +285,46 @@ def test_tech_only_defaults_from_older_versions_are_retired():
     assert settings.get()["industries"] == ["Finance & Insurance", "Education"]
 
 
+def test_untouched_built_in_missions_get_the_new_wording(monkeypatch):
+    import hashlib
+
+    from jobportal.ai.prompts import DEFAULT_MISSIONS
+    current = {m["id"]: m for m in DEFAULT_MISSIONS}
+    old_prompt = "Find openings, especially at tech startups."  # stands in for a built-in prompt from an older version
+    monkeypatch.setitem(settings._LEGACY_MISSION_PROMPTS, "research", hashlib.sha1(old_prompt.encode()).hexdigest()[:16])
+    monkeypatch.setitem(settings._LEGACY_MISSION_PROMPTS, "social", hashlib.sha1(old_prompt.encode()).hexdigest()[:16])
+    db.kv_set("settings", {"sources": {"ai_hunt": {"missions": [
+        {"id": "research", "name": "My labs", "enabled": False, "prompt": old_prompt},
+        {"id": "social", "name": "Social", "prompt": "My own social search."}]}}})
+    assert "1 built-in AI missions reworded for every field" in settings.migrate_defaults()
+    missions = {m["id"]: m for m in settings.get()["sources"]["ai_hunt"]["missions"]}
+    assert missions["research"]["prompt"] == current["research"]["prompt"]
+    assert missions["research"]["only_groups"] == current["research"]["only_groups"]
+    assert (missions["research"]["name"], missions["research"]["enabled"]) == ("My labs", False)  # the user's choices stay
+    assert missions["social"]["prompt"] == "My own social search."  # an edited mission stays as the user wrote it
+    assert "apprenticeships" in missions  # the new built-in mission is offered too
+    assert settings.migrate_defaults() == []
+
+
+def test_the_legacy_mission_hashes_match_the_old_prompts():
+    """The hashes in settings._LEGACY_MISSION_PROMPTS must be those of the prompts v0.2.0 shipped, or no saved mission
+    would ever get the new wording. Checked against git history when this is a full source checkout."""
+    import ast
+    import hashlib
+    import subprocess
+
+    import pytest
+    try:
+        old_source = subprocess.run(["git", "show", "1c4efe2:jobportal/ai/prompts.py"], capture_output=True, text=True,
+                                    check=True, cwd=Path(__file__).parent).stdout
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("this checkout has no git history to compare with")
+    node = next(n for n in ast.parse(old_source).body
+                if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "DEFAULT_MISSIONS")
+    old = {m["id"]: hashlib.sha1(m["prompt"].encode()).hexdigest()[:16] for m in ast.literal_eval(node.value)}
+    assert old == settings._LEGACY_MISSION_PROMPTS
+
+
 # ---------------------------------------------------------------- live events
 
 def test_publish_from_another_thread_reaches_the_dashboard():

@@ -26,6 +26,30 @@ def test_regex_prefill(sample_resume):
     assert "555" in pre["phone"]
 
 
+def test_questions_fit_any_field_and_schooling():
+    education = {k for k, _ in onboarding.FIELDS["education_level"]["options"]}
+    assert {"high_school", "some_college", "trade", "apprenticeship", "associate", "bachelor", "master", "doctorate",
+            "professional"} <= education
+    assert {"seasonal", "per_diem", "apprenticeship", "part_time"} <= {k for k, _ in onboarding.FIELDS["job_types"]["options"]}
+    assert "apprenticeship" in {k for k, _ in onboarding.FIELDS["levels"]["options"]}
+    assert "work samples" in onboarding.FIELDS["github"]["label"]  # the id stays "github" for saved answers
+    assert onboarding.FIELDS["licenses"]["type"] == "list" and "licenses" not in onboarding.REQUIRED
+
+
+def test_licenses_reach_the_kit_and_old_industry_names_are_kept():
+    answers = onboarding.save_answers({**STANDARD_ANSWERS, "licenses": ["CPR and First Aid, 2025", "Food Handler card"],
+                                       "industries": ["Software & SaaS", "Education", "Bogus"]})
+    assert answers["industries"] == ["Technology & Software", "Education"]  # renamed in v0.3.0, not dropped
+    kit = {row["q"]: row["a"] for row in profile.get("qa")}
+    assert kit["Professional licenses and certifications"] == "CPR and First Aid, 2025, Food Handler card"
+    assert "Food Handler card" in profile.digest()  # triage sees them
+
+
+def test_portfolio_links_prefill_the_work_samples_question():
+    resume = "Riley Chen\nriley.chen@example.com | behance.net/rileychen-example | Columbus, OH\n\n## Experience\n- Designed menus"
+    assert onboarding.regex_prefill(resume)["github"] == "https://behance.net/rileychen-example"
+
+
 def test_required_answers():
     with pytest.raises(ValueError, match="Full name"):
         onboarding.save_answers({**STANDARD_ANSWERS, "name": ""})

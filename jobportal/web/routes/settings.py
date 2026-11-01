@@ -1,4 +1,4 @@
-"""The Settings page: every setting, the resume playbook and layouts, and the built-in AI prompts (shown greyed out as
+"""The Settings page: every setting, the resume playbook and layouts, and the built-in AI prompts (shown grayed out as
 placeholders until the user overrides one)."""
 from fastapi import APIRouter
 
