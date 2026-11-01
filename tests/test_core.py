@@ -379,9 +379,24 @@ def test_a_missing_chrome_override_falls_back_to_the_bundled_engine(tmp_path, mo
     assert Path(osutil.find_pdf_engine()).resolve() == engine.resolve()
 
 
-def test_quoting_for_notifications():
-    assert osutil._ps_str("Jordan's offer") == "'Jordan''s offer'"
-    assert osutil._applescript_str('Say "hi" \\ bye') == '"Say \\"hi\\" \\\\ bye"'
+def test_notification_text_never_becomes_part_of_a_script(monkeypatch):
+    started = []
+    monkeypatch.setattr(osutil.subprocess, "Popen", lambda cmd, **kw: started.append((cmd, kw.get("env"))))
+    monkeypatch.setattr(osutil, "popen_flags", lambda: {})  # CREATE_NO_WINDOW only exists on Windows
+    monkeypatch.setattr(osutil.shutil, "which", lambda name: f"/usr/bin/{name}")
+    # A posting title from the web. PowerShell ends a quoted string at a curly quote (’) too.
+    title, body = "Analyst’; Start-Process calc; ’", 'Example Health \\ "Children’s"'
+    for system in ("IS_WIN", "IS_MAC"):
+        for flag in ("IS_WIN", "IS_MAC", "IS_LINUX"):
+            monkeypatch.setattr(osutil, flag, flag == system)
+        assert osutil.notify(title, body)
+        cmd, env = started[-1]
+        script = cmd if system == "IS_WIN" else cmd[:-2]
+        assert not any(title in part or body in part for part in script), system
+        if system == "IS_WIN":
+            assert env["JOBPORTAL_TOAST_TITLE"] == title and env["JOBPORTAL_TOAST_BODY"] == body
+        else:
+            assert cmd[-2:] == [title, body]  # handed to the AppleScript run handler as argv
 
 
 def test_location_edge_cases_that_used_to_drop_good_jobs():

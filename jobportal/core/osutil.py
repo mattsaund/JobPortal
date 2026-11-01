@@ -37,10 +37,12 @@ def popen_flags() -> dict:
     return {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WIN else {}
 
 
-def _spawn(cmd: list[str]) -> bool:
-    """Start a program in the background without waiting for it or showing its output. False if it couldn't start."""
+def _spawn(cmd: list[str], env: dict[str, str] | None = None) -> bool:
+    """Start a program in the background without waiting for it or showing its output. `env` adds environment variables
+    for that program only. False if it couldn't start."""
     try:
-        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen_flags())
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         env={**os.environ, **env} if env else None, **popen_flags())
         return True
     except OSError:
         return False
@@ -67,39 +69,38 @@ def open_url(url: str) -> bool:
     return open_path(url)
 
 
-def _applescript_str(s: str) -> str:
-    """`s` as an AppleScript string literal: in double quotes, with backslashes and double quotes escaped."""
-    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _ps_str(s: str) -> str:
-    """`s` as a PowerShell single-quoted string literal, where a quote is escaped by doubling it."""
-    return "'" + s.replace("'", "''") + "'"
-
-
 def notify(title: str, body: str = "", icon: str | Path | None = None) -> bool:
     """Show a desktop notification, best effort. Returns False when this system has no way to show one. The dashboard
-    shows its own toast as well, so a missing notification loses nothing. `icon` is used on Linux only."""
+    shows its own toast as well, so a missing notification loses nothing. `icon` is used on Linux only.
+
+    The title and body can hold text from job postings (a company name, a job title), so they are never written into a
+    script: they are separate arguments on Linux and macOS, and environment variables on Windows."""
     title, body = (title or "")[:120], (body or "")[:300]  # notifications only show a few lines anyway
     if IS_LINUX and shutil.which("notify-send"):
         # notify-send comes with libnotify, which most Linux desktops include. -a names the app in the notification.
         cmd = ["notify-send", "-a", "JobPortal"] + (["-i", str(icon)] if icon else []) + [title, body]
         return _spawn(cmd)
     if IS_MAC and shutil.which("osascript"):
-        # osascript runs AppleScript, which every Mac has built in.
-        return _spawn(["osascript", "-e", f"display notification {_applescript_str(body)} with title {_applescript_str(title)}"])
+        # osascript runs AppleScript, which every Mac has built in. Arguments after the script reach its run handler as
+        # the list argv.
+        script = ["-e", "on run argv", "-e", "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run"]
+        return _spawn(["osascript", *script, title, body])
     if IS_WIN:
         # A Windows toast through the built-in WinRT API, run by PowerShell. Windows only shows toasts from a registered
         # app id. JobPortal has none, so the toast is sent under PowerShell's own id, which every Windows 10 and 11 has
-        # (the GUID at its start is Windows' id for the System32 folder).
+        # (the GUID at its start is Windows' id for the System32 folder). The text goes in environment variables rather
+        # than quoted into the script: PowerShell also ends a quoted string at curly quotes, so a posting titled with
+        # one could otherwise run commands.
         script = (
             "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;"
             "$t = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02);"
-            f"$n = $t.GetElementsByTagName('text'); $n.Item(0).InnerText = {_ps_str(title)}; $n.Item(1).InnerText = {_ps_str(body)};"
+            "$n = $t.GetElementsByTagName('text'); $n.Item(0).InnerText = $env:JOBPORTAL_TOAST_TITLE;"
+            " $n.Item(1).InnerText = $env:JOBPORTAL_TOAST_BODY;"
             "$app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe';"
             "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show([Windows.UI.Notifications.ToastNotification]::new($t))"
         )
-        return _spawn(["powershell", "-NoProfile", "-NonInteractive", "-Command", script])
+        return _spawn(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                      env={"JOBPORTAL_TOAST_TITLE": title, "JOBPORTAL_TOAST_BODY": body})
     return False
 
 
