@@ -239,6 +239,7 @@ main { max-width: 1720px; margin: auto; padding: 32px 35px 60px; outline: none; 
 .icon-button { position: relative; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 7px; color: var(--muted); flex-shrink: 0; }
 .icon-button:hover { background: var(--mint); color: var(--green-dark); }
 .icon-button svg { width: 18px; height: 18px; }
+.card-delete:hover { background: var(--bad-bg); color: var(--bad-text); }  /* a lead card's one-click Delete */
 .button-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .button-row + .button-row { margin-top: 10px; }
 

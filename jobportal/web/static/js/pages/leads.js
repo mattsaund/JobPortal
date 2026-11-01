@@ -10,6 +10,8 @@
 
 const LEAD_FILTERS = [["ready", "Ready"], ["queue", "In progress"], ["filtered", "Filtered out"], ["closed", "Closed"], ["trashed", "Deleted"], ["all", "All"]];
 const LEAD_SORTS = [["score", "Best match"], ["new", "Newest found"], ["deadline", "Deadline soonest"], ["posted", "Recently posted"], ["industry", "Industry"]];
+// What a lead is (lead.kind): a job posting, or a program, an event, or a company worth contacting before it posts a job.
+const LEAD_KINDS = [["", "All kinds"], ["posting", "Job postings"], ["program", "Programs"], ["event", "Events"], ["intel", "Companies to contact"]];
 
 // Draws the page once (a new address on it only opens or closes a card), then opens the card the address names.
 async function renderLeads(id, tab) {
@@ -30,6 +32,7 @@ async function renderLeads(id, tab) {
       <div class="list-controls">
         <label class="control"><span>Sort</span><select id="lead-sort">${selectOptions(LEAD_SORTS, S.sort)}</select></label>
         <label class="control"><span>Industry</span><select id="lead-industry"><option value="">All industries</option></select></label>
+        <label class="control"><span>Kind</span><select id="lead-kind">${selectOptions(LEAD_KINDS, S.kind)}</select></label>
         <button class="chip" type="button" id="dream-chip" data-act="dream-only"></button>
         <span class="list-count" id="lead-count" aria-live="polite"></span></div>
       <div class="job-list" id="lead-list"></div>`;
@@ -110,7 +113,7 @@ function inFilter(lead, tab) {
 let leadsLoad = 0;
 async function loadLeads(silent) {
   const ticket = ++leadsLoad;
-  const params = new URLSearchParams({ tab: S.leadsTab, q: S.q, sort: S.sort, industry: S.industry, dream: S.dreamOnly ? 1 : 0 });
+  const params = new URLSearchParams({ tab: S.leadsTab, q: S.q, sort: S.sort, industry: S.industry, kind: S.kind, dream: S.dreamOnly ? 1 : 0 });
   let d;
   try {
     d = await api(`/api/leads?${params}`);
@@ -180,7 +183,8 @@ function upsertLead(lead) {
     refreshOpenCard(card, fresh.content.firstElementChild);
     return;
   }
-  const shown = inFilter(lead, S.leadsTab) && (!S.industry || lead.industry === S.industry) && (!S.dreamOnly || !!lead.dream);
+  const shown = inFilter(lead, S.leadsTab) && (!S.industry || lead.industry === S.industry) && (!S.kind || lead.kind === S.kind)
+    && (!S.dreamOnly || !!lead.dream);
   if (!shown) {
     card?.remove();
   } else if (card) {
@@ -334,15 +338,17 @@ function leadTags(l) {
   return tags.join("");
 }
 
-// The buttons on a card: where it was found, Add to tracker (for a new lead), and View details. A deleted lead has
-// Restore and Delete forever instead.
+// The buttons on a card: Delete (one click, with Undo, for sorting through leads fast), where it was found, Add to tracker
+// (for a new lead), and View details. A deleted lead has Restore and Delete forever instead.
 function cardActions(l, open) {
   if (l.app_status === "trashed") {
     return `<button class="button outline" type="button" data-act="lead-restore" data-id="${l.id}">${icon("undo")}Restore</button>`
       + `<button class="button danger" type="button" data-act="lead-purge" data-id="${l.id}">${icon("trash")}Delete forever</button>`;
   }
   const track = l.app_status === "new" ? `<button class="button light" type="button" data-act="lead-track" data-id="${l.id}">${icon("plus")}Add to tracker</button>` : "";
-  return `${foundBtn(l)}${track}<button class="button primary job-toggle" type="button" data-act="lead-open" data-id="${l.id}">`
+  const remove = `<button class="icon-button card-delete" type="button" data-act="lead-trash" data-id="${l.id}" title="Delete"`
+    + ` aria-label="Delete ${esc(l.title || "this lead")}">${icon("trash")}</button>`;
+  return `${remove}${foundBtn(l)}${track}<button class="button primary job-toggle" type="button" data-act="lead-open" data-id="${l.id}">`
     + `<span>${open ? "Close" : "View details"}</span>${icon("arrow")}</button>`;
 }
 
@@ -447,6 +453,20 @@ onAction("lead-track", async (el) => {
   refreshStats();
   toast("Added to your tracker", "It's under Ready to apply.");
 });
+onAction("lead-trash", async (el) => {  // the card's Delete: trash it (later searches won't add the job again), with Undo
+  const id = +el.dataset.id;
+  if (S.expanded === id) {  // its details are open: let them ask about unsaved edits and close the card
+    return ACTIONS["detail-delete"](el);
+  }
+  const before = $(`.job-card[data-id="${id}"]`)?.dataset.status || "new";
+  const lead = await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: "trashed" } });
+  upsertLead(lead);
+  refreshStats();
+  toast("Deleted", lead.title || "", "", null, { label: "Undo", run: async () => {
+    upsertLead(await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: before } }));
+    refreshStats();
+  } });
+});
 onAction("lead-restore", async (el) => {
   upsertLead(await api(`/api/leads/${el.dataset.id}`, { method: "PATCH", body: { app_status: "new" } }));
   refreshStats();
@@ -484,6 +504,7 @@ onAction("add-job-go", async (el) => {
 onChange((el) => {
   if (el.id === "lead-sort") S.sort = el.value;
   else if (el.id === "lead-industry") S.industry = el.value;
+  else if (el.id === "lead-kind") S.kind = el.value;
   else return false;
   loadLeads();
   return true;
