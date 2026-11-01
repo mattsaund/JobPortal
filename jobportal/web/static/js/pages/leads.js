@@ -352,8 +352,9 @@ const FOUND_NAME = { github: "GitHub list", ats: "Company board", linkedin: "Lin
   mastodon: "Mastodon", bluesky: "Bluesky", themuse: "The Muse", usajobs: "USAJobs", remote: "Remote board", rss: "RSS feed",
   adzuna: "Adzuna", google: "Google Jobs", manual: "Your link" };
 
-// The places a lead was found that have a usable link.
-const foundList = (l) => (l.found || []).filter((f) => safeUrl(f.url));
+// The places a lead was found that have a usable link, each with its link as safeUrl() returns it (trimmed, and only
+// web or mail links), so every href built from these is safe.
+const foundList = (l) => (l.found || []).map((f) => ({ ...f, url: safeUrl(f.url) })).filter((f) => f.url);
 
 // A short name for one place. AI hunt finds are named by their site ("Reddit thread"), else by their host.
 function foundShort(f) {

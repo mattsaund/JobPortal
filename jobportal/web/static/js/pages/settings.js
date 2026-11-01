@@ -145,14 +145,15 @@ async function renderAISettings(box) {
         <button class="button primary" type="button" data-act="ai-signin">Continue with ChatGPT</button></div>`;
   const webSearchText = webSearch === false ? "isn't available on your account, so the AI reads pages directly"
     : webSearch ? "is available" : "is checked the first time the AI needs it";
+  // The stage and prompt keys come from the settings and the server, so they're escaped in the attributes too.
   const stageRow = ([key, stage]) => {
     const [label, help] = AI_STAGES[key] || [humanize(key), ""];
     return `<tr><td><b>${esc(label)}</b><small class="cell-note">${esc(help)}</small></td>
-      <td><select data-path="ai.stages.${key}.model" aria-label="${esc(label)} model">${modelOptions(models, stage.model, "Default model")}</select></td>
-      <td><select data-path="ai.stages.${key}.effort" aria-label="${esc(label)} effort">${selectOptions(S.meta.efforts.map((e) => [e, humanize(e)]), stage.effort)}</select></td></tr>`;
+      <td><select data-path="ai.stages.${esc(key)}.model" aria-label="${esc(label)} model">${modelOptions(models, stage.model, "Default model")}</select></td>
+      <td><select data-path="ai.stages.${esc(key)}.effort" aria-label="${esc(label)} effort">${selectOptions(S.meta.efforts.map((e) => [e, humanize(e)]), stage.effort)}</select></td></tr>`;
   };
   const prompt = (key) => `<label class="field"><span class="field-label">${esc(humanize(key))}</span>
-    <textarea rows="5" data-path="prompts.${key}" placeholder="${esc(defaults[key])}">${esc(c.prompts?.[key] || "")}</textarea></label>`;
+    <textarea rows="5" data-path="prompts.${esc(key)}" placeholder="${esc(defaults[key])}">${esc(c.prompts?.[key] || "")}</textarea></label>`;
   box.innerHTML = `<div class="stack" data-cfg>
     ${settingsPanel("Your ChatGPT account", `JobPortal's AI runs on your ChatGPT plan (Go, Plus or Pro), and what it uses counts against your plan. You can set a
       limit for JobPortal in ChatGPT's settings. Web search ${webSearchText}.`, account)}

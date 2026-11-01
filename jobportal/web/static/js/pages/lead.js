@@ -206,10 +206,12 @@ function renderOverviewTab(box, l, pkg) {
     + `<span class="${done.includes(i) ? "done" : ""}">${esc(step)}</span></label>`;
   const planBlock = plan.length ? block("Your action plan", `<div class="check-list">${plan.map(planItem).join("")}</div>`) : "";
   const roleBlock = pkg.job_summary ? block("The role in brief", `<div class="prose">${md(pkg.job_summary)}</div>`) : "";
-  const posting = safeUrl(l.url) ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\//, "").slice(0, 60))}</a>` : "None";
+  const postingUrl = safeUrl(l.url);
+  const posting = postingUrl ? `<a href="${esc(postingUrl)}" target="_blank" rel="noopener">${esc(postingUrl.replace(/^https?:\/\//, "").slice(0, 60))}</a>` : "None";
   const foundAt = foundList(l).map((f) => `<a class="tag blue" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.label)}">${icon("external")}${esc(foundShort(f))}</a>`).join("");
-  // "82, eligible: reason; reason". The eligibility part is left out when the scoring didn't give one.
-  const scored = [triage.score ?? "-", esc(triage.eligibility || "")].filter((part) => part !== "").join(", ")
+  // "82, eligible: reason; reason". The eligibility part is left out when the scoring didn't give one. The score comes
+  // from the AI's answer, so it's escaped like any other text.
+  const scored = [esc(triage.score ?? "-"), esc(triage.eligibility || "")].filter((part) => part !== "").join(", ")
     + (triage.reasons?.length ? `: ${esc(triage.reasons.join("; "))}` : "");
   const flagsBlock = triage.red_flags?.length ? block("Red flags", bulletList(triage.red_flags, "warn")) : "";
   const coverageBlock = coverage.hit || coverage.miss
@@ -340,8 +342,8 @@ function renderContactsTab(box, l, pkg) {
   const contacts = pkg.contacts || [];
   const input = (i, key, value, placeholder) => `<input type="text" data-cf="${key}" data-i="${i}" value="${esc(value || "")}" placeholder="${placeholder}" aria-label="${placeholder}">`;
   const confidence = (c) => (c.email_confidence === "found" ? "green" : c.email_confidence === "pattern" ? "warn" : "");
-  const links = (c) => (safeUrl(c.linkedin) ? `<a href="${esc(c.linkedin)}" target="_blank" rel="noopener">LinkedIn</a>` : "")
-    + (safeUrl(c.source_url) ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener">Source</a>` : "");
+  const link = (url, label) => (safeUrl(url) ? `<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener">${label}</a>` : "");
+  const links = (c) => link(c.linkedin, "LinkedIn") + link(c.source_url, "Source");
   const row = (c, i) => `<tr><td><div class="cell-stack">${input(i, "name", c.name, "Name")}${input(i, "title", c.title, "Title")}${input(i, "org", c.org, "Organization")}</div></td>
       <td><div class="cell-stack">${input(i, "email", c.email, "Email")}<div class="cell-row"><span class="tag ${confidence(c)}">${esc(humanize(c.email_confidence || "unknown"))}</span>
         ${c.email ? `<button class="text-button" type="button" data-act="copytext" data-text="${esc(c.email)}">Copy</button>` : ""}</div></div></td>
@@ -445,9 +447,10 @@ async function saveKitAnswers() {
 
 // Posting: the job description as JobPortal captured it, with links to the posting and the apply page.
 function renderPostingTab(box, l) {
-  const posting = safeUrl(l.url) ? `<a class="button outline" href="${esc(l.url)}" target="_blank" rel="noopener">Open the posting ${icon("external")}</a>` : "";
-  const applyPage = safeUrl(l.apply_url) && l.apply_url !== l.url
-    ? `<a class="button outline" href="${esc(l.apply_url)}" target="_blank" rel="noopener">Apply page ${icon("external")}</a>` : "";
+  const postingUrl = safeUrl(l.url), applyUrl = safeUrl(l.apply_url);
+  const posting = postingUrl ? `<a class="button outline" href="${esc(postingUrl)}" target="_blank" rel="noopener">Open the posting ${icon("external")}</a>` : "";
+  const applyPage = applyUrl && applyUrl !== postingUrl
+    ? `<a class="button outline" href="${esc(applyUrl)}" target="_blank" rel="noopener">Apply page ${icon("external")}</a>` : "";
   box.innerHTML = block("", `<div class="button-row">${posting}${applyPage}<span class="muted-note">${esc(l.source_detail || "")}</span></div>
     <pre class="posting-text">${esc(l.description || "No description was captured for this job.")}</pre>`);
 }
@@ -737,9 +740,9 @@ const archetypeLabel = (key) => ARCHETYPE_LABEL[key] || humanize(key);
 function resumeStrategyBlock(pkg) {
   const st = pkg.resume_strategy || {}, style = pkg.resume_style || { theme: "classic", max_pages: 1 }, review = pkg.resume_review || {};
   const detail = (label, text) => `<p class="detail-line"><b>${label}</b> ${text}</p>`;
-  const critic = review.changes?.length
-    ? `<details class="disclosure"><summary>Recruiter review: ${plural(review.changes.length, "change")} (score ${review.before_score}
-        to ${review.after_score ?? review.before_score})</summary>${bulletList(review.changes)}</details>`
+  const critic = review.changes?.length  // the scores come from the AI's answer, so they're escaped like its text
+    ? `<details class="disclosure"><summary>Recruiter review: ${plural(review.changes.length, "change")} (score ${esc(review.before_score)}
+        to ${esc(review.after_score ?? review.before_score)})</summary>${bulletList(review.changes)}</details>`
     : "";
   return block("Strategy",
     `${st.archetype ? `<p><span class="tag purple">${esc(archetypeLabel(st.archetype))}</span></p>` : ""}
