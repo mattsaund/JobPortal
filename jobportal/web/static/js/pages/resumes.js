@@ -203,23 +203,37 @@ async function renderLibraryItem(box, id) {
       it.md = value;
     },
   };
-  // Saves the details half a second after you stop changing them. A new layout redraws the preview; a new page limit
-  // redraws the page.
-  const saveDetails = debounce(async () => {
-    const tags = $('[data-lib="tags"]').value.split(",").map((x) => x.trim()).filter(Boolean);
-    style.theme = $('[data-lib="theme"]').value;
-    style.max_pages = +$('[data-lib="max_pages"]').value;
-    await api(`/api/library/${it.id}`, { method: "PUT", body: { name: $('[data-lib="name"]').value.trim() || it.name, tags, notes: $('[data-lib="notes"]').value, style } });
+  // Saves the details half a second after you stop changing them. They're read from the form as you change them, so
+  // the save still goes out when you leave the page within that half second. A new layout redraws the preview, and a
+  // new page limit resizes it; the text in the editor stays as it is (it may have edits you haven't saved).
+  const field = (name) => $(`[data-lib="${name}"]`, box);
+  const details = () => ({
+    name: field("name").value.trim() || it.name, tags: field("tags").value.split(",").map((x) => x.trim()).filter(Boolean),
+    notes: field("notes").value, style: { ...style, theme: field("theme").value, max_pages: +field("max_pages").value },
+  });
+  const saveDetails = debounce(async (body) => {
+    try {
+      await api(`/api/library/${it.id}`, { method: "PUT", body });
+    } catch (err) {
+      state.textContent = "Not saved";
+      toast("Couldn't save the details", err.message, "error");
+      return;
+    }
+    Object.assign(style, body.style);
+    if (!state.isConnected) return;  // you've moved on: the save is done, there's nothing to show
     state.textContent = "Saved";
     if (editor.theme !== style.theme) {
       editor.theme = style.theme;
-      editor.refresh?.();
+      editor.refresh();
     }
-    if (editor.maxPages !== style.max_pages) renderLibraryItem(box, id);
+    if (editor.maxPages !== style.max_pages) {
+      editor.maxPages = style.max_pages;
+      editor.setPages(style.max_pages);
+    }
   }, 500);
   $$("[data-lib]", box).forEach((el) => el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
     state.textContent = "Saving";
-    saveDetails();
+    saveDetails(details());
   }));
   mountEditor($("#lib-editor"), editor);
 }
