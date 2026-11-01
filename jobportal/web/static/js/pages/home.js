@@ -146,13 +146,14 @@ function renderHomeHeading() {
     : !ob.resume ? "Start with your resume. The rest takes a few minutes."
     : (ob.missing || []).length ? "A few questions and you're ready to search."
     : st.built ? "Here's where your search stands." : "Your profile is almost ready.";
-  // The pill on the right: whether the profile is up to date.
+  // The pill on the right: whether the profile is up to date. (setHtml: redrawn only when it changes, so its spinner
+  // doesn't restart on every status event.)
   let pill = `<span class="status-dot"></span>Profile up to date`;
   if (st.busy) pill = `${spinner()}Updating your profile`;
   else if (st.error) pill = `<span class="status-dot bad"></span>Profile update failed`;
   else if (!st.built) pill = `<span class="status-dot off"></span>Profile not built yet`;
   else if (st.unsynced) pill = `<span class="status-dot warn"></span>${plural(st.unsynced, "answer")} to add`;
-  $("#home-status").innerHTML = pill;
+  setHtml($("#home-status"), pill);
 }
 
 // The three stats. Each one opens where its number comes from.
@@ -162,9 +163,9 @@ function renderHomeStats() {
   const s = S.stats || {};
   const stat = (href, tab, value, label, note, name, tint) => `<a class="stat" href="${href}"${tab ? ` data-act="leads-tab" data-tab="${tab}"` : ""}>`
     + `<span class="stat-icon ${tint}">${icon(name)}</span><span><strong>${value ?? 0}</strong><b>${label}</b><small>${note}</small></span>${icon("arrow")}</a>`;
-  el.innerHTML = stat("#/leads", "ready", s.ready, "Leads ready", "Ranked and tailored for you", "briefcase", "")
+  setHtml(el, stat("#/leads", "ready", s.ready, "Leads ready", "Ranked and tailored for you", "briefcase", "")
     + stat("#/tracker", "", s.applied, "Applications sent", `${s.applied_week ?? 0} in the last 7 days`, "file", "blue")
-    + stat("#/tracker", "", s.interviewing, "Interviews", s.accepted ? `${s.accepted} accepted` : "Going on now", "people", "purple");
+    + stat("#/tracker", "", s.interviewing, "Interviews", s.accepted ? `${s.accepted} accepted` : "Going on now", "people", "purple"));
 }
 
 // ---------------------------------------------------------------- questions for you
@@ -345,7 +346,8 @@ function skipQuestion(id) {
 }
 
 // ---------------------------------------------------------------- top leads and the right column
-// The five best ready leads, as job cards (leads.js). A click opens one on the Leads page.
+// The five best ready leads, as job cards (leads.js). A click opens one on the Leads page. Live refreshes during a
+// search redraw them only when they changed (setHtml).
 async function loadTopLeads() {
   let d;
   try {
@@ -357,7 +359,7 @@ async function loadTopLeads() {
   if (!box) return;  // you left Home while they loaded
   const empty = S.profileStatus?.built ? "Run a search, and your best matches show up here."
     : "Once your profile is built, run a search and your best matches show up here.";
-  box.innerHTML = d.leads.map((l) => leadCard(l)).join("") || `<div class="empty-state"><h3>No leads yet</h3><p>${empty}</p></div>`;
+  setHtml(box, d.leads.map((l) => leadCard(l)).join("") || `<div class="empty-state"><h3>No leads yet</h3><p>${empty}</p></div>`);
 }
 
 // Your profile: who you are, what you're after, and the setup checklist with its progress bar.
@@ -372,7 +374,7 @@ function renderProfilePanel() {
     ["Required questions answered", !!ob.resume && !(ob.missing || []).length], ["Profile built", !!st.built]];
   const done = checks.filter(([, ok]) => ok).length, percent = Math.round((done / checks.length) * 100);
   const tag = done === checks.length ? "COMPLETE" : st.busy ? "BUILDING" : "KEEP GOING";
-  el.innerHTML = `<div class="panel-heading"><h2>Your profile</h2><span class="small-tag">${tag}</span></div>
+  setHtml(el, `<div class="panel-heading"><h2>Your profile</h2><span class="small-tag">${tag}</span></div>
     <div class="profile-progress"><span class="avatar large">${esc(initials(name)) || icon("user")}</span>
       <div><strong>${esc(name || "Your name")}</strong><p>${esc(role || "Add the jobs you want")}</p>
         ${place ? `<span class="available"><span class="status-dot"></span>${esc(place)}</span>` : ""}</div></div>
@@ -380,7 +382,7 @@ function renderProfilePanel() {
     <progress value="${done}" max="${checks.length}" aria-label="Profile completion">${percent}%</progress>
     <ul class="checklist">${checks.map(([label, ok]) => `<li><span class="check-circle${ok ? " done" : ""}" aria-hidden="true">${ok ? icon("check") : ""}</span>`
       + `${label}${ok ? '<span class="sr-only">, done</span>' : ""}</li>`).join("")}</ul>
-    <a class="button light full" href="#/settings/profile">Edit your profile ${icon("arrow")}</a>`;
+    <a class="button light full" href="#/settings/profile">Edit your profile ${icon("arrow")}</a>`);
 }
 
 // Where the search looks, with Run search.
@@ -390,8 +392,8 @@ function renderAreaPanel() {
   const run = S.state.running
     ? `<a class="button outline full" href="#/leads">Watch the search ${icon("arrow")}</a>`
     : `<button class="button primary full" type="button" data-act="run">${icon("play", "filled")} Run search</button>`;
-  el.innerHTML = `<div class="panel-heading"><h2>Where to search</h2><a class="text-button" href="#/settings/search">Edit ${icon("arrow")}</a></div>
-    <div class="tags area-tags">${areaTags(S.searchArea)}</div>${run}`;
+  setHtml(el, `<div class="panel-heading"><h2>Where to search</h2><a class="text-button" href="#/settings/search">Edit ${icon("arrow")}</a></div>
+    <div class="tags area-tags">${areaTags(S.searchArea)}</div>${run}`);
 }
 
 // ---------------------------------------------------------------- live updates
