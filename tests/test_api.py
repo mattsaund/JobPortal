@@ -404,6 +404,18 @@ def test_skipping_application_sent_still_records_the_date(client, fake_ai):
     assert quick["applied_at"]
 
 
+def test_the_other_industry_chip_and_filter_agree(client):
+    from jobportal.search import packages
+    for i, industry in enumerate([None, "", "Other", "Education", "Education"]):
+        packages.insert_lead({"fingerprint": f"ind{i}", "title": "Tutor", "company": f"Example School {i}", "industry": industry,
+                              "stage": "ready", "app_status": "new"})
+    page = client.get("/api/leads?tab=all").json()
+    assert page["industries"] == {"Other": 3, "Education": 2}  # no industry counts as Other, added up, not replaced
+    others = client.get("/api/leads?tab=all&industry=Other").json()["leads"]
+    assert sorted(lead["company"] for lead in others) == ["Example School 0", "Example School 1", "Example School 2"]
+    assert len(client.get("/api/leads?tab=all&industry=Education").json()["leads"]) == 2
+
+
 def test_a_lead_never_gets_an_empty_status_or_an_unknown_kind(client):
     lead = client.post("/api/leads/manual", json={"title": "Barista", "company": "Example Cafe", "app_status": "ready"}).json()
     for empty in (None, ""):  # a lead with no status would be on no tab and no Tracker column

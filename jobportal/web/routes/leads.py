@@ -35,6 +35,9 @@ SORTS = {
 EDITABLE = {"app_status", "notes", "follow_up_at", "resume_md", "cover_md", "title", "company", "location", "deadline", "apply_url",
             "industry", "dream"}
 CONTACT_FIELDS = ("name", "title", "org", "email", "linkedin", "source_url", "why")
+# A lead's industry as the Leads page groups it: one with none (NULL or empty) counts as "Other", the list's catch-all.
+# The industry chips and the industry filter both use it, so a chip's count and the leads it shows always agree.
+INDUSTRY_GROUP = "COALESCE(NULLIF(industry, ''), 'Other')"
 LEAD_KINDS = ("posting", "program", "event", "intel")  # what a job added by hand can be (see RawJob.kind)
 
 
@@ -44,7 +47,7 @@ def leads(tab: str = "ready", q: str = "", sort: str = "score", kind: str = "", 
     tab_where = TABS.get(tab, TABS["all"])
     where, args = [tab_where], []
     if industry:
-        where.append("industry=?")
+        where.append(f"{INDUSTRY_GROUP}=?")  # "Other" also finds leads with no industry, as its chip counts them
         args.append(industry)
     if dream:
         where.append("dream=1")
@@ -59,11 +62,12 @@ def leads(tab: str = "ready", q: str = "", sort: str = "score", kind: str = "", 
     open_questions = profile.open_counts_by_lead()
     for row in rows:
         row["open_q"] = open_questions.get(row["id"], 0)
-    # The chips count the whole tab, ignoring the search box and the other filters.
-    industries = db.q(f"SELECT industry, COUNT(*) n FROM leads WHERE {tab_where} GROUP BY industry ORDER BY n DESC")
+    # The chips count the whole tab, ignoring the search box and the other filters. Grouping by INDUSTRY_GROUP adds the
+    # leads without an industry to "Other" (keyed by the raw column, one group would replace the other's count).
+    industries = db.q(f"SELECT {INDUSTRY_GROUP} AS industry, COUNT(*) n FROM leads WHERE {tab_where} GROUP BY 1 ORDER BY n DESC")
     return {"leads": [db.lead_row(r) for r in rows],
             "counts": {t: db.one(f"SELECT COUNT(*) n FROM leads WHERE {w}")["n"] for t, w in TABS.items()},
-            "industries": {r["industry"] or "Other": r["n"] for r in industries},
+            "industries": {r["industry"]: r["n"] for r in industries},
             "dream_count": db.one(f"SELECT COUNT(*) n FROM leads WHERE {tab_where} AND dream=1")["n"]}
 
 
