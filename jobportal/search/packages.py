@@ -288,8 +288,8 @@ async def check_resume(md: str, keywords: list[str], style: dict, archetype: str
     """Score a resume with the fixed-rule checks in documents/resumecheck.py: ATS safety, length, skills the profile backs,
     keyword coverage and style. The page count is one of the checks, so the resume is rendered to a throwaway PDF first.
 
-    Returns the check: score (0 to 100), issues, coverage, unverified_skills, pages and max_pages. Raises when no PDF engine
-    is available."""
+    Returns the check: score (0 to 100), issues, coverage, unverified_skills, pages and max_pages. Raises render.PDFError
+    when no PDF engine is available or printing fails."""
     CACHE.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=CACHE, ignore_cleanup_errors=True) as tmp:
         info = await render.resume_pdf(md, Path(tmp) / "check.pdf", style.get("theme", "classic"), style.get("max_pages", 1))

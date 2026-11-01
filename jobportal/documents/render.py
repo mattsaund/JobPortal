@@ -318,16 +318,20 @@ _PRINT_FLAGS = (
 )
 
 
+class PDFError(RuntimeError):
+    """Printing a PDF failed. The message is written for the user: the web routes show it as it is (a 503)."""
+
+
 async def html_to_pdf(html_text: str, out: Path) -> int:
     """Print an HTML page to the PDF file out and return its page count.
 
     The printer is osutil.find_pdf_engine(): JOBPORTAL_CHROME when set, else the engine bundled with the app, else an
-    installed Chrome, Edge, Chromium or Brave. It runs as a headless subprocess. Raises RuntimeError when there is no such
+    installed Chrome, Edge, Chromium or Brave. It runs as a headless subprocess. Raises PDFError when there is no such
     browser, when it takes longer than PDF_TIMEOUT, or when it doesn't write a readable PDF."""
     browser = osutil.find_pdf_engine()
     if not browser:
-        raise RuntimeError("PDF export needs Google Chrome, Microsoft Edge or Chromium. Install one, or set JOBPORTAL_CHROME "
-                           "to the browser's full path.")
+        raise PDFError("PDF export needs Google Chrome, Microsoft Edge or Chromium. Install one, or set JOBPORTAL_CHROME "
+                       "to the browser's full path.")
     CACHE.mkdir(parents=True, exist_ok=True)
     out = Path(out).resolve()  # the browser runs in its own process, so give it a full path
     out.unlink(missing_ok=True)  # an old file must never pass for a new one
@@ -345,10 +349,13 @@ async def html_to_pdf(html_text: str, out: Path) -> int:
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            raise RuntimeError("PDF export timed out") from None
+            raise PDFError("PDF export timed out") from None
+        except asyncio.CancelledError:
+            proc.kill()  # Stop, or JobPortal shutting down: don't leave the browser printing on its own
+            raise
     pages = pdf_page_count(out) if out.exists() else 0
     if not pages:
-        raise RuntimeError(f"the browser at {browser} didn't write a PDF")
+        raise PDFError(f"the browser at {browser} didn't write a PDF")
     return pages
 
 

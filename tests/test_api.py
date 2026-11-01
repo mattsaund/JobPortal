@@ -167,6 +167,14 @@ def test_lead_downloads(client):
     assert get("email-5.eml").status_code == 404 and get("cover_letter.md").status_code == 404 and get("resume.exe").status_code == 404
 
 
+def test_without_a_pdf_engine_downloads_say_what_to_install(client, monkeypatch):
+    from jobportal.core import osutil
+    monkeypatch.setattr(osutil, "find_pdf_engine", lambda: None)
+    lead_id = _lead_with_documents()
+    for response in (client.get(f"/api/leads/{lead_id}/export/resume.pdf"), client.post(f"/api/leads/{lead_id}/resume-check")):
+        assert response.status_code == 503 and "needs Google Chrome" in response.json()["detail"]  # not a bare 500
+
+
 def test_manual_lead_needs_a_link_or_text(client, fake_ai):
     assert client.post("/api/leads/manual", json={}).status_code == 400
     lead = client.post("/api/leads/manual", json={"url": "https://jobs.example.com/9"}).json()

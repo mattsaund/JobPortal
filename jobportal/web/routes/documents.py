@@ -31,6 +31,8 @@ async def export_document(lead_id: int, name: str):
         return FileResponse(path, filename=filename)
     except exports.NotAvailable as e:
         raise HTTPException(404, str(e))
+    except render.PDFError as e:  # no PDF engine, or it timed out: say so instead of a bare 500
+        raise HTTPException(503, str(e))
 
 
 @router.post("/api/preview")
@@ -68,4 +70,7 @@ async def resume_check(lead_id: int):
     lead = lead_or_404(lead_id)
     if not lead.get("resume_md"):
         raise HTTPException(404, "no resume yet")
-    return await packages.recheck_resume(lead)
+    try:
+        return await packages.recheck_resume(lead)
+    except render.PDFError as e:  # the page count needs a printed PDF
+        raise HTTPException(503, str(e))

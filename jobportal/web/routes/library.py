@@ -95,6 +95,8 @@ async def export_resume(item_id: int, fmt: str):
         path, filename = await exports.library_file(item, fmt)
     except exports.NotAvailable:
         raise HTTPException(404)
+    except render.PDFError as e:  # no PDF engine, or it timed out: say so instead of a bare 500
+        raise HTTPException(503, str(e))
     return FileResponse(path, filename=filename)
 
 
