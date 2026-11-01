@@ -1,6 +1,7 @@
 """A lead's documents: downloads (PDF, DOCX, Markdown, emails, the whole package as a zip), live previews for the editor,
 AI edits by instruction, and the resume check. The work happens in jobportal/documents/."""
 import re
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, Response
@@ -26,7 +27,8 @@ async def export_document(lead_id: int, name: str):
         email = re.fullmatch(r"email-(\d+)\.eml", name)
         if email:
             data, filename = exports.email_file(lead, int(email.group(1)))
-            return Response(data, media_type="message/rfc822", headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+            # RFC 5987 form, which carries any letters (a header written as filename="..." must be plain Latin-1).
+            return Response(data, media_type="message/rfc822", headers={"Content-Disposition": f"attachment; filename*=utf-8''{quote(filename)}"})
         path, filename = await exports.lead_file(lead, name)
         return FileResponse(path, filename=filename)
     except exports.NotAvailable as e:

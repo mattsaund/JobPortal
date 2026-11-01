@@ -167,6 +167,21 @@ def test_lead_downloads(client):
     assert get("email-5.eml").status_code == 404 and get("cover_letter.md").status_code == 404 and get("resume.exe").status_code == 404
 
 
+def test_any_email_draft_downloads(client):
+    import io
+    import zipfile
+
+    from jobportal.core import db
+    lead_id = _lead_with_documents()
+    # The AI names each draft's kind in free text, and may leave a field out.
+    db.update_lead(lead_id, package={"emails": [{"kind": "follow-up → hiring manager 你好", "to_addr": "hr@example.com"}]})
+    one = client.get(f"/api/leads/{lead_id}/export/email-0.eml")
+    assert one.status_code == 200 and "filename*=utf-8''" in one.headers["content-disposition"]
+    package = client.get(f"/api/leads/{lead_id}/export/package.zip")
+    names = zipfile.ZipFile(io.BytesIO(package.content)).namelist()
+    assert package.status_code == 200 and any(name.startswith("email-1-follow-up") for name in names)
+
+
 def test_a_cover_letter_rendered_on_an_earlier_day_is_made_again(client):
     import os
     from datetime import date

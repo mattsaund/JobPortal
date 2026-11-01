@@ -51,7 +51,8 @@ def _write_text(path: Path, text: str) -> Path:
 
 
 def document_markdown(lead: dict, doc: str) -> tuple[str, str]:
-    """A lead's document as Markdown, with the user's latest edits, and its title."""
+    """A lead's document as Markdown, with the user's latest edits, and its title. Parts the AI left out of a package
+    (an email's subject, an answer's question) read as blank instead of failing the download."""
     package = lead.get("package") or {}
     if doc == "resume":
         return lead.get("resume_md") or "", "Resume"
@@ -62,10 +63,11 @@ def document_markdown(lead: dict, doc: str) -> tuple[str, str]:
     if doc == "company_intel":
         return package.get("company_brief_md") or "", "Company intel"
     if doc == "answers":
-        return "\n\n".join(f"## {a['question']}\n{a['answer']}" for a in package.get("application_answers") or []), "Application answers"
+        return "\n\n".join(f"## {a.get('question', '')}\n{a.get('answer', '')}" for a in package.get("application_answers") or []), \
+            "Application answers"
     if doc == "emails":
-        parts = [f"## {e['kind'].replace('_', ' ').title()}\n**To:** {e.get('to_addr') or e.get('to', '')}  \n**Subject:** {e['subject']}\n\n{e['body']}"
-                 for e in package.get("emails") or []]
+        parts = [f"## {str(e.get('kind') or 'email').replace('_', ' ').title()}\n**To:** {e.get('to_addr') or e.get('to', '')}  \n"
+                 f"**Subject:** {e.get('subject', '')}\n\n{e.get('body', '')}" for e in package.get("emails") or []]
         if package.get("linkedin_note"):
             parts.append(f"## LinkedIn connection note\n{package['linkedin_note']}")
         return "\n\n".join(parts), "Outreach emails"
@@ -148,18 +150,30 @@ async def package_zip(lead: dict) -> tuple[Path, str]:
                 continue
             z.write(file, download_name)
         for i, email in enumerate((lead.get("package") or {}).get("emails") or []):
-            z.writestr(f"email-{i + 1}-{email['kind']}.eml", render.eml(email.get("to_addr") or "", email["subject"], email["body"]))
+            z.writestr(f"email-{i + 1}-{_email_name(email)}.eml", _email_bytes(email))
     return path, f"Application package - {safe_filename(lead['company'])} - {safe_filename(lead['title'])}.zip"
 
 
+def _email_name(email: dict) -> str:
+    """A file name for one of the AI's email drafts, from its kind ("recruiter", "hiring_manager"): the kind is the AI's
+    free text, so it's cut down to safe characters before it names a file."""
+    return safe_filename(str(email.get("kind") or "")) or "email"
+
+
+def _email_bytes(email: dict, sender: str = "") -> bytes:
+    """One of the AI's email drafts as .eml bytes, addressed to to_addr (the address the user filled in; the AI's "to"
+    only describes who it's for). A field the AI left out is blank, not an error."""
+    return render.eml(email.get("to_addr") or "", str(email.get("subject") or ""), str(email.get("body") or ""), sender)
+
+
 def email_file(lead: dict, index: int) -> tuple[bytes, str]:
-    """One outreach email as an .eml file that opens as a ready-to-send draft in the user's mail app."""
+    """One outreach email as an .eml file that opens as a ready-to-send draft in the user's mail app. Returns (the file's
+    bytes, its download name). Raises NotAvailable for an index the package doesn't have."""
     emails = (lead.get("package") or {}).get("emails") or []
     if not 0 <= index < len(emails):
         raise NotAvailable("no such email")
     email = emails[index]
-    sender = profile.get("facts").get("email", "")
-    return render.eml(email.get("to_addr") or "", email["subject"], email["body"], sender), f"{email['kind']}.eml"
+    return _email_bytes(email, profile.get("facts").get("email", "")), f"{_email_name(email)}.eml"
 
 
 async def library_file(item: dict, fmt: str) -> tuple[Path, str]:
