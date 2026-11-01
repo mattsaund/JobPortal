@@ -38,7 +38,7 @@ async function renderLeads(id, tab) {
     await loadLeads();
     if (S.openSources) {  // an old #/sources link
       S.openSources = false;
-      openSources();
+      openSources().catch((err) => toast("Couldn't open Sources", err.message, "error"));
     }
   }
   await expandLead(id ? +id : null, tab, arriving);

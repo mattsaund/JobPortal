@@ -275,7 +275,6 @@ const ICONS = {
   warning: '<path d="M12 3.8 2.8 20h18.4z"/><path d="M12 10v4.4M12 17.3v.2"/>',
   play: '<path d="M7 4.5v15l12-7.5z"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
-  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
   sparkle: '<path d="M11 3l1.9 5.6 5.6 1.9-5.6 1.9L11 18l-1.9-5.6-5.6-1.9 5.6-1.9z"/><path d="M18.5 14.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z"/>',
   question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.8M12 17.2v.2"/>',
   flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
@@ -283,7 +282,6 @@ const ICONS = {
   people: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.6c1.8.8 3 2.6 3.5 5.4"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
   copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
-  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   signal: '<path d="M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14M8.5 15.5a5 5 0 0 1 0-7M15.5 8.5a5 5 0 0 1 0 7"/><circle cx="12" cy="12" r="1.6"/>',
   bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
@@ -291,7 +289,6 @@ const ICONS = {
   moon: '<path d="M20.9 13a9 9 0 0 1-9.9-9.9A9 9 0 1 0 20.9 13Z"/>',
   tool: '<path d="M14.5 6.5a4 4 0 0 0-5.3 5.3L4 17l3 3 5.2-5.2a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5z"/>',
   cert: '<path d="M3 9l9-4.5L21 9l-9 4.5z"/><path d="M7 11.2V15c0 1.5 2.2 2.8 5 2.8s5-1.3 5-2.8v-3.8M21 9v5"/>',
-  grip: '<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',
 };
 const icon = (name, cls = "") => `<svg viewBox="0 0 24 24" aria-hidden="true"${cls ? ` class="${cls}"` : ""}>${ICONS[name] || ""}</svg>`;
 
@@ -312,7 +309,7 @@ const S = {
   questions: null,        // GET /api/questions and "questions" events: the questions JobPortal asks along the way
   searchArea: null,       // the search area from Settings (locations.allowed): states, cities, "Remote", "Anywhere in the US"
   industries: null,       // the industry list from Settings, for the lead details' industry menu
-  profileCache: null,     // GET /api/profile, kept for the Application kit and the search area editor (reset on "profile")
+  profileCache: null,     // GET /api/profile, kept for the Application kit and Settings, Profile (reset on "profile")
   route: [],              // the current hash split into parts: #/leads/12/emails is ["leads", "12", "emails"]
   dirty: false,           // the open editor or form has unsaved edits
   quit: false,            // you quit JobPortal from Settings: don't reconnect the live stream
@@ -325,9 +322,10 @@ const S = {
   dreamOnly: false,       // only dream companies and dream jobs
   feedOpen: store.get("feedOpen") !== "0",  // the live search feed is expanded
   expanded: null,         // the id of the lead card that's open
+  openSources: false,     // an old #/sources link: Leads opens the Sources dialog once it's drawn
   // Lead details (lead.js), on Leads or in the Tracker's dialog
   lead: null,             // GET /api/leads/{id}: the lead on screen, with its package (documents, contacts, emails...)
-  leadView: null,         // where it's shown: { box, tab, hashBase } (hashBase: tabs change the address, as on Leads)
+  leadView: null,         // where it's shown: { box, id, tab, hashBase, header } (hashBase: tabs change the address, as on Leads)
   editor: null,           // the open resume editor's options, so the layout menu and Re-check can reach it
   // Settings (settings.js, sources.js and the tabs)
   cfg: null,              // GET /api/settings, edited in place by the form until you save

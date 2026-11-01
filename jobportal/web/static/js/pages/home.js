@@ -29,6 +29,7 @@ async function renderHome() {
     main.innerHTML = welcomeHtml();
     return;
   }
+  followUpsDone = 0;
   main.innerHTML = `<div class="page-heading"><div><p class="eyebrow">YOUR JOB SEARCH</p><h1 id="home-title"></h1><p id="home-sub"></p></div>
       <span class="semester" id="home-status"></span></div>
     <div class="dashboard-layout">
@@ -172,7 +173,8 @@ function feedCards() {
   if (!S.onboarding?.resume) cards.push({ key: "resume", html: resumeCard() });
   const build = buildCard();
   if (build) cards.push(build);
-  cards.push(nextCard());
+  const next = nextCard();
+  if (next) cards.push(next);
   return cards;
 }
 
@@ -195,7 +197,8 @@ function renderFeed() {
 }
 
 // The one thing to do next: check what was read from your resume, answer a standard question, answer a question asked
-// along the way, or nothing (all caught up).
+// along the way, or nothing: all caught up once the profile is built (before that, the resume or the build card above is
+// the next thing).
 function nextCard() {
   const fields = questionFields();
   const fromResume = fromResumeIds();
@@ -210,7 +213,8 @@ function nextCard() {
     return { key: `f:${open[0].question}`, keep: true, html: followUpCard(open[0]),
       progress: `FOLLOW-UP ${followUpsDone + 1} OF ${followUpsDone + open.length}` };
   }
-  return { key: "caught-up", html: caughtUpCard() };
+  const caughtUp = S.onboarding?.resume && S.profileStatus?.built && !S.buildDone;  // "Your profile is ready" says it already
+  return caughtUp ? { key: "caught-up", html: caughtUpCard() } : null;
 }
 
 // Before there's a resume: the big drop zone.

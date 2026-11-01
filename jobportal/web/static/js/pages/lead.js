@@ -69,12 +69,14 @@ function drawLeadDetails() {
     <div class="tags">${leadTags(l)}</div>` : "";
   const tabs = DETAIL_TABS.map(([key, label]) => `<button class="tab${view.tab === key ? " active" : ""}" type="button" role="tab"`
     + ` aria-selected="${view.tab === key}" data-act="lead-tab" data-tab="${key}">${label}</button>`).join("");
+  const kept = S.dirty ? $("[data-lead-body]", view.box) : null;  // a tab with unsaved edits stays as it is
   view.box.innerHTML = `<div class="lead-details">${header}
     <div class="detail-actions">${leadActions(l, packaged)}</div>
     ${leadBanners(l, packaged)}
     <div class="tabs" role="tablist" aria-label="About this lead">${tabs}</div>
     <div class="tab-body" data-lead-body></div></div>`;
-  drawLeadTab();
+  if (kept) lv("[data-lead-body]").replaceWith(kept);
+  else drawLeadTab();
 }
 
 // The actions row. A deleted lead has Restore and Delete forever instead of Delete.
