@@ -194,19 +194,28 @@ def state_of(loc: str) -> str | None:
         return "DC"
     if _names_foreign_place(loc):
         return "FOREIGN"
-    code = (re.search(r"\bUSA?\s*-\s*([A-Z]{2})\b", loc) or re.search(r",\s*([A-Z]{2})\b", loc)
-            or re.search(r"\b([A-Z]{2})\s*(?:\d{5})?\s*$", loc))
+    code = _CODE_AFTER_US_RE.search(loc) or _CODE_AFTER_COMMA_RE.search(loc) or _CODE_AT_END_RE.search(loc)
     if code and code.group(1) in STATES:
         return code.group(1)
     low = loc.lower()
-    for name, abbr in NAME_TO_ABBR.items():
-        # "virginia" comes before "west virginia" in this dict, so the lookbehind stops it from claiming West Virginia.
-        if re.search(rf"(?<!west )\b{re.escape(name)}\b", low):
+    for pattern, abbr in _STATE_NAME_PATTERNS:  # in STATES order, the first match wins
+        if pattern.search(low):
             return abbr
-    for city, abbr in CITY_STATE.items():
-        if re.search(rf"\b{re.escape(city)}\b", low):
+    for pattern, abbr in _CITY_PATTERNS:  # in CITY_STATE order
+        if pattern.search(low):
             return abbr
     return None
+
+
+# state_of()'s patterns, compiled once: the search runs it several times for every job it reads (the location filter,
+# the fingerprint), and about 220 patterns rebuilt from text each time cost far more than the matching. The order and the
+# patterns are exactly those of the tables above, which keeps every answer (and so every fingerprint) the same.
+_CODE_AFTER_US_RE = re.compile(r"\bUSA?\s*-\s*([A-Z]{2})\b")  # "USA - TX"
+_CODE_AFTER_COMMA_RE = re.compile(r",\s*([A-Z]{2})\b")  # "Austin, TX"
+_CODE_AT_END_RE = re.compile(r"\b([A-Z]{2})\s*(?:\d{5})?\s*$")  # "Austin TX 78701"
+# "virginia" comes before "west virginia" in NAME_TO_ABBR, so the lookbehind stops it from claiming West Virginia.
+_STATE_NAME_PATTERNS = [(re.compile(rf"(?<!west )\b{re.escape(name)}\b"), abbr) for name, abbr in NAME_TO_ABBR.items()]
+_CITY_PATTERNS = [(re.compile(rf"\b{re.escape(city)}\b"), abbr) for city, abbr in CITY_STATE.items()]
 
 
 def _names_foreign_place(loc: str, us_pattern: re.Pattern = _US_RE) -> bool:
