@@ -32,6 +32,8 @@ state = {
     "tokens": 0,  # AI tokens used since JobPortal started (ai/client.py adds to it)
     "ai": None,  # ChatGPT sign-in status (ai/signin.py)
     "active_agents": {},  # AI requests running now, id -> label (ai/client.py)
+    "model": None,  # the model of the AI request that started last (ai/client.py; shown on the sidebar's AI card)
+    "ai_requests": 0,  # AI requests started since JobPortal started (ai/client.py)
 }
 # Other modules add keys as they go: search/pipeline.py sets started_at and run_tokens_start when a run begins, and
 # candidate/profile.py sets profile (the profile's build status).

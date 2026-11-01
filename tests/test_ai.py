@@ -218,6 +218,16 @@ def test_structured_result_through_submit_result(openai_mock):
     assert not any(k in body for k in ("temperature", "max_output_tokens", "previous_response_id"))
 
 
+def test_usage_for_the_sidebar_card(openai_mock):
+    before = ai.usage()
+    assert before["requests"] == 0 and before["tokens"] == 0 and before["running"] == 0 and not before["capped"]
+    openai_mock["replies"] = [[call("submit_result", {"score": 87}), done(120)]]
+    asyncio.run(ai.run("score this", system="sys", schema=SCHEMA, stage="triage", purpose="triage"))
+    after = ai.usage()
+    assert after["model"] == "gpt-test" and after["model_note"] == "last used"  # nothing runs now, so it's the last one
+    assert after["requests"] == 1 and after["tokens"] == 120 and after["slots"] == 3
+
+
 def test_web_task_fetches_pages_and_falls_back_without_search(openai_mock, monkeypatch):
     async def fake_fetch(url):
         return f"HTTP 200 {url}\n\nJob posting text"

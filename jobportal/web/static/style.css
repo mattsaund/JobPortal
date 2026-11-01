@@ -145,11 +145,27 @@ main { max-width: 1720px; margin: auto; padding: 32px 35px 60px; outline: none; 
 .nav-item.active { background: #294039; color: var(--green-bright); box-shadow: inset 3px 0 var(--green-bright); }
 .nav-badge { margin-left: auto; padding: 3px 7px; border-radius: 5px; background: #365249; color: #c9ffed; font-size: 10px; font-weight: 700; }
 .sidebar-bottom { margin-top: auto; padding-top: 30px; }
-.next-step { margin-bottom: 18px; padding: 18px 15px; border: 1px solid #454545; border-radius: 11px; background: linear-gradient(130deg, #303a35, #292929); }
+.next-step { margin-bottom: 0; padding: 18px 15px; border: 1px solid #454545; border-radius: 11px; background: linear-gradient(130deg, #303a35, #292929); }
 .next-step .eyebrow { color: #9bd6cb; font-size: 8.5px; letter-spacing: 1.2px; }
 .next-step h3 { margin: 9px 0 5px; color: #f5fffc; font-size: 17px; line-height: 1.3; }
 .next-step p { margin-bottom: 14px; color: #bbbbbb; font-size: 11px; line-height: 1.5; }
 .next-step .button.mint { margin-top: 4px; }
+/* The AI's usage at the top of the sidebar card (layout.js aiUsage), set off from the next step under it by a line. */
+.ai-usage { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid #454545; }
+.ai-usage-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-state { padding: 2px 7px; border-radius: 5px; background: #3a3a3a; color: #cfcfcf; font-size: 9.5px; font-weight: 700; }
+.ai-state.on { background: #365249; color: #c9ffed; }
+.ai-state.warn { background: #4b3a1c; color: #ffd98a; }
+.ai-usage dl { display: grid; gap: 7px; margin: 10px 0 0; }
+.ai-usage dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-width: 0; }
+.ai-usage dt { color: #aaaaaa; font-size: 10.5px; flex-shrink: 0; }
+.ai-usage dd { margin: 0; overflow: hidden; color: #f3f3f3; font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.ai-usage dd small { color: #9bd6cb; font-size: 9.5px; }
+.ai-usage progress { height: 5px; margin: -2px 0 2px; background: #3a3a3a; }
+.ai-usage progress::-webkit-progress-bar { background: #3a3a3a; }
+.ai-usage progress::-webkit-progress-value { background: var(--green-bright); }
+.ai-usage progress::-moz-progress-bar { background: var(--green-bright); }
+.ai-capped { margin: 9px 0 0; color: #ffd98a; font-size: 10.5px; line-height: 1.45; }
 .agent-list { display: grid; gap: 6px; margin: 4px 0 12px; padding: 0; list-style: none; color: #cfcfcf; font-size: 11px; }
 .agent-list li { display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green-bright); flex-shrink: 0; animation: pulse 1.6s infinite; }
@@ -167,7 +183,6 @@ main { max-width: 1720px; margin: auto; padding: 32px 35px 60px; outline: none; 
 .search-box input { width: 100%; min-width: 0; padding: 12px 0; border: 0; background: none; color: var(--text); font-size: 13px; outline: none; }
 .search-box:focus-within { color: var(--green-dark); }
 .search-box input::placeholder { color: var(--muted); opacity: 1; }
-.search-box kbd { padding: 2px 7px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font: 11px Arial, Helvetica, sans-serif; }
 .top-actions { display: flex; align-items: center; gap: 20px; }
 .run-control { display: flex; align-items: center; gap: 12px; }
 .run-status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; white-space: nowrap; }
@@ -948,7 +963,7 @@ dialog .form-grid .field { margin-bottom: 0; }
   .topbar { height: 64px; gap: 8px; padding: 0 16px; }
   .search-box { flex: 1; width: auto; gap: 7px; }
   .search-box input { font-size: 12px; }
-  .search-box kbd, .run-status, .split .button span, .button.stop span { display: none; }
+  .run-status, .split .button span, .button.stop span { display: none; }
   .top-actions { gap: 8px; }
   .split > .button:first-child, .button.stop { padding: 11px; }
   .user-button { padding: 0; border: 0; }

@@ -61,8 +61,11 @@ function onEvent({ kind, data }) {
       break;
     case "tokens":  // the AI tokens used since JobPortal started
       S.state.tokens = data;
-      renderSidebarFoot();
       if (S.route[0] === "leads") renderFeedHead();
+      break;
+    case "usage":  // the AI card's numbers: the model, the tasks running, this session's totals (ai/client.py usage())
+      S.state.usage = data;
+      renderNextStep();
       break;
     case "agents":  // the AI agents working right now
       S.state.active_agents = data;

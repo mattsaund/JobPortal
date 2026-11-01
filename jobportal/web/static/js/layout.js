@@ -22,7 +22,8 @@ function setHtml(el, html) {
 
 // ---------------------------------------------------------------- the menu
 // The pages in the menu: [route, label, icon]. Settings sits at the bottom of the sidebar.
-const NAV = [["home", "Home", "home"], ["leads", "Leads", "briefcase"], ["tracker", "Tracker", "columns"], ["analysis", "Analysis", "chart"]];
+const NAV = [["home", "Home", "home"], ["leads", "Leads", "briefcase"], ["tracker", "Tracker", "columns"], ["analysis", "Analysis", "chart"],
+  ["settings", "Settings", "settings"]];
 
 // The menu with its badges: leads ready to apply, and follow-ups due on the Tracker.
 function renderNav() {
@@ -35,11 +36,6 @@ function renderNav() {
     + (badges[key] ? `<span class="nav-badge" title="${badges[key]}">${counts[key]}<span class="sr-only"> ${badges[key]}</span></span>` : "");
   setHtml($("#navigation"), NAV.map(([key, label, name]) => `<a class="nav-item${page === key ? " active" : ""}" href="#/${key}"`
     + `${page === key ? ' aria-current="page"' : ""}>${inside(key, label, name)}</a>`).join(""));
-  const settings = $("#nav-settings");
-  setHtml(settings, inside("settings", "Settings", "settings"));
-  settings.classList.toggle("active", page === "settings");
-  if (page === "settings") settings.setAttribute("aria-current", "page");
-  else settings.removeAttribute("aria-current");
 }
 
 // ---------------------------------------------------------------- the sidebar card
@@ -51,7 +47,8 @@ const runPhase = (phase) => RUN_PHASES[phase] || humanize(phase || "Starting");
 const RUN_COUNTS = [["found", "found"], ["candidates", "new"], ["triaged", "scored"], ["qualified", "good fits"], ["packaged", "ready"]];
 const runCounts = (counts) => RUN_COUNTS.filter(([key]) => (counts || {})[key] != null).map(([key, label]) => `${counts[key]} ${label}`).join(", ");
 
-// The card above Settings: a search running (its phase, its counts and the AI agents at work), else the next useful step.
+// The AI card at the bottom of the sidebar. Once you're signed in, its top part shows the AI's usage (aiUsage), and under
+// it comes what's happening: a search running (its phase, its counts and the AI agents at work), else the next useful step.
 function renderNextStep() {
   const el = $("#next-step");
   if (!el) return;  // the frame is gone after Quit
@@ -73,7 +70,26 @@ function renderNextStep() {
   const [eyebrow, title, text, button] = card;
   const more = agents.length > 5 ? `<li>and ${agents.length - 5} more</li>` : "";
   const working = agents.length ? `<ul class="agent-list">${agents.slice(0, 5).map((label) => `<li><span class="pulse"></span>${esc(label)}</li>`).join("")}${more}</ul>` : "";
-  setHtml(el, `<span class="eyebrow">${eyebrow}</span><h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ""}${working}${button}`);
+  setHtml(el, `${aiReady() ? aiUsage() : ""}<span class="eyebrow">${eyebrow}</span><h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ""}`
+    + `${working}${button}`);
+}
+
+// The AI's usage, from S.state.usage (GET /api/stats, then "usage" events; ai/client.py usage() says what each field means):
+// the model in use (or the last one used, or the default), utilization as the AI tasks running out of the ones that may run
+// at once (Settings, AI), and this session's tokens and requests. Sign in with ChatGPT doesn't report how much of the plan
+// is used, so the card shows JobPortal's own numbers, and "Paused" while OpenAI's usage cap holds new work back.
+function aiUsage() {
+  const u = S.state.usage || {};
+  const running = +u.running || 0, slots = Math.max(1, +u.slots || 1);
+  const status = u.capped ? ["Paused", "warn"] : running ? ["Working", "on"] : ["Idle", ""];
+  const model = u.model ? `${esc(u.model)}${u.model_note ? ` <small>${esc(u.model_note)}</small>` : ""}` : "Picked from your plan";
+  const capped = u.capped ? `<p class="ai-capped">Your ChatGPT usage cap was reached. New AI work waits a few minutes.</p>` : "";
+  return `<div class="ai-usage"><div class="ai-usage-head"><span class="eyebrow">CHATGPT</span>`
+    + `<span class="ai-state ${status[1]}">${status[0]}</span></div>`
+    + `<dl><div><dt>Model</dt><dd>${model}</dd></div>`
+    + `<div><dt>Utilization</dt><dd>${running} of ${plural(slots, "AI task")}</dd></div>`
+    + `<progress value="${Math.min(running, slots)}" max="${slots}" aria-label="AI tasks running">${running} of ${slots}</progress>`
+    + `<div><dt>This session</dt><dd>${fmtTokens(+u.tokens || 0)} tokens, ${plural(+u.requests || 0, "request")}</dd></div></dl>${capped}</div>`;
 }
 
 // ---------------------------------------------------------------- ChatGPT
@@ -83,13 +99,11 @@ const aiReady = () => !!(S.state.ai && S.state.ai.signed_in);
 // Your name for the avatar: from your standard answers, else from your ChatGPT account.
 const yourName = () => String(S.onboarding?.answers?.name || "").trim() || String(S.state.ai?.name || "").trim();
 
-// The line at the bottom of the sidebar: the sign-in (with the AI tokens used this session) and the version.
+// The line at the bottom of the sidebar, under the divider: the sign-in and the version. (The AI card above it has the usage.)
 function renderSidebarFoot() {
   const el = $("#sidebar-foot");
   if (!el) return;
-  const tokens = +S.state.tokens || 0;
-  const tip = tokens ? ` title="${fmtTokens(tokens)} AI tokens used this session"` : "";
-  setHtml(el, `<span class="status-dot${aiReady() ? "" : " off"}"></span><span${tip}>${aiReady() ? "ChatGPT connected" : "Not signed in"}</span>`
+  setHtml(el, `<span class="status-dot${aiReady() ? "" : " off"}"></span><span>${aiReady() ? "ChatGPT connected" : "Not signed in"}</span>`
     + `<span>v${esc(S.meta?.version || "")}</span>`);
 }
 
@@ -186,7 +200,7 @@ function renderFrame() {
 }
 
 // The search box searches your leads: typing shows the Leads page filtered to what you typed.
-$("#search-box").innerHTML = `${icon("search")}<input id="search" type="search" placeholder="Search your leads" aria-label="Search your leads" autocomplete="off"><kbd>/</kbd>`;
+$("#search-box").innerHTML = `${icon("search")}<input id="search" type="search" placeholder="Search your leads" aria-label="Search your leads" autocomplete="off">`;
 const searchLeads = () => {
   S.q = $("#search").value.trim();
   if (S.route[0] === "leads") loadLeads();

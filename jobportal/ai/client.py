@@ -85,6 +85,28 @@ def usage_high() -> bool:
     return time.time() - _limit_hit_at < USAGE_CAP_PAUSE
 
 
+def usage() -> dict:
+    """What the sidebar's AI card shows about the AI right now. Sent with GET /api/stats and as a "usage" event whenever a
+    task starts or ends.
+
+    - model: the model a task is using now, else the one used last, else the model Settings picks by default (or the first
+      one the account lists, once that list is loaded). model_note says which: "in use", "last used" or "default".
+    - running and slots: how many AI tasks run now, out of how many may run at once (Settings, AI). That's the card's
+      utilization. Sign in with ChatGPT doesn't report how much of the plan is used, so JobPortal can't show that.
+    - tokens and requests: this session's totals, since JobPortal started.
+    - capped: True for a while after OpenAI reported the plan's usage cap (usage_high()), when new tasks wait."""
+    cfg = settings_mod.get()
+    running = len(bus.state.get("active_agents") or {})
+    last = str(bus.state.get("model") or "")
+    default = str(cfg["ai"].get("model") or (_models["ids"][0] if _models["ids"] else ""))
+    if last:
+        model, note = last, ("in use" if running else "last used")
+    else:
+        model, note = default, ("default" if default else "")
+    return {"model": model, "model_note": note, "running": running, "slots": max(1, int(cfg["ai"].get("max_parallel", 3))),
+            "tokens": int(bus.state.get("tokens") or 0), "requests": int(bus.state.get("ai_requests") or 0), "capped": usage_high()}
+
+
 def _semaphore(n: int) -> asyncio.Semaphore:
     """The shared limit on how many AI tasks run at once (ai.max_parallel: Settings, AI, "AI tasks at the same time").
     When the setting changes, a new semaphore replaces the old one, and tasks that already hold the old one simply finish
@@ -540,7 +562,10 @@ async def run(prompt: str, *, system: str, schema: dict, stage: str, purpose: st
         async with _semaphore(max(1, int(cfg["ai"].get("max_parallel", 3)))):
             convo.model = await _pick_model(cfg, stage)
             bus.state["active_agents"][agent_id] = f"{label} ({convo.model}, {effort})"
+            bus.state["model"] = convo.model  # the model in use, for the sidebar's AI card (usage())
+            bus.state["ai_requests"] = int(bus.state.get("ai_requests") or 0) + 1
             bus.publish("agents", bus.state["active_agents"])
+            bus.publish("usage", usage())
             # The conversation runs as its own task so kill_all() can cancel it.
             task = asyncio.create_task(convo.result(prompt))
             _tasks.add(task)
@@ -570,6 +595,7 @@ async def run(prompt: str, *, system: str, schema: dict, stage: str, purpose: st
                0 if error else 1, error))
         bus.state["tokens"] = int(bus.state.get("tokens") or 0) + convo.tokens
         bus.publish("tokens", bus.state["tokens"])
+        bus.publish("usage", usage())
     result["_tokens"] = convo.tokens
     result["_tools"] = {"searches": convo.searches, "pages": convo.pages}
     return result

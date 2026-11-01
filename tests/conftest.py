@@ -30,7 +30,7 @@ def zero_data():
             p.unlink(missing_ok=True)
     profile.status.update(busy=False, phase="", error=None)
     profile._last_failure.clear()
-    bus.state.update(running=False, active_agents={}, tokens=0)
+    bus.state.update(running=False, active_agents={}, tokens=0, model=None, ai_requests=0)
     ai.web_search_ok, ai._limit_hit_at = None, 0.0
     ai._models.update(at=0.0, ids=[])
     signin._pending.clear()
