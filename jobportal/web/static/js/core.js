@@ -1,14 +1,17 @@
 /* core.js: the shared toolkit. It loads first, so every other file can use what's defined here.
 
-   - Helpers: $ and $$ find elements, esc() makes text safe inside HTML, api() calls the server, plus small formatters.
+   - Helpers: $ and $$ find elements, esc() makes text safe inside HTML, safeUrl() keeps only web and mail links, api()
+     calls the server, store reads and writes browser storage, plus small formatters.
    - md(): a small Markdown renderer for the text the AI writes.
+   - icon(): the line icons of the design, drawn in the color of the text around them.
    - S: the app state that every page reads and writes.
-   - toast() for short messages in the corner, and modal() for dialogs.
+   - toast() for short messages, openDialog() for dialogs, and small pop-up menus.
    - The own window: the desktop app (desktop()) or a browser window in app mode (appWindow).
-   - The action registry: onAction() for clicks and onChange() for selects and checkboxes.
+   - The action registry: onAction() for clicks and onChange() for selects, checkboxes and file pickers.
 
-   How clicks work: any element with data-act="name" inside <main> runs the handler registered with onAction("name", fn).
-   Each page file registers its own handlers at the bottom, and main.js holds the one listener that calls them. */
+   How clicks work: any element with data-act="name" runs the handler registered with onAction("name", fn), wherever it
+   is: a page in <main>, a dialog, the sidebar or the top bar. Each file registers its own handlers at the bottom, and
+   main.js holds the one listener that calls them. */
 "use strict";
 
 // ---------------------------------------------------------------- helpers
@@ -26,14 +29,42 @@ const safeUrl = (url) => (/^(https?:\/\/|mailto:)/i.test(String(url || "").trim(
 // A deep copy of plain JSON data.
 const clone = (obj) => JSON.parse(JSON.stringify(obj));
 
-// <main>: every page draws itself in here.
+// <main>: every page draws itself in here, and marks it with data-page so a new address on the same page can update it
+// in place instead of drawing it again.
 const main = $("#main");
 
+// Browser storage for small preferences (the open filter, the theme, skipped questions). It can be unavailable (a
+// locked-down window, a private mode), so every read and write is wrapped: a failed read gives the fallback, a failed
+// write is skipped, and JobPortal works the same either way.
+const store = {
+  get(key, fallback = null) {
+    try {
+      const value = localStorage.getItem(key);
+      return value === null ? fallback : value;
+    } catch (_) {
+      return fallback;
+    }
+  },
+  set(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch (_) {}
+  },
+  list(key) {  // a saved JSON list, or [] when there's none or it can't be read
+    try {
+      const value = JSON.parse(store.get(key, "[]"));
+      return Array.isArray(value) ? value : [];
+    } catch (_) {
+      return [];
+    }
+  },
+};
+
 // Calls the JobPortal server. An object body is sent as JSON. Returns the parsed JSON (or text). When the request fails it
-// throws an Error carrying the server's message, so callers can show it in a toast.
+// throws an Error carrying the server's message (and its status), so callers can show it in a toast.
 async function api(path, opts = {}) {
   const request = { headers: {}, ...opts };
-  if (request.body && typeof request.body !== "string") {
+  if (request.body && typeof request.body !== "string" && !(request.body instanceof Blob)) {
     request.body = JSON.stringify(request.body);
     request.headers["Content-Type"] = "application/json";
   }
@@ -44,19 +75,16 @@ async function api(path, opts = {}) {
       const body = await response.json();
       message = body.detail || JSON.stringify(body);
     } catch (_) {}  // the error wasn't JSON: keep the status text
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   const type = response.headers.get("content-type") || "";
   return type.includes("json") ? response.json() : response.text();
 }
 
-// Sends a file as the raw body of a PUT and returns the JSON reply. (api() would turn the file into JSON.)
-async function uploadFile(url, file) {
-  const response = await fetch(url, { method: "PUT", body: file });
-  const reply = await response.json();
-  if (!response.ok) throw new Error(reply.detail || response.statusText);
-  return reply;
-}
+// Sends a file as the raw body of a PUT and returns the JSON reply. (A JSON body would turn the file into text.)
+const uploadFile = (url, file) => api(url, { method: "PUT", body: file });
 
 // Returns a version of fn that waits until the calls stop for ms milliseconds, then runs once with the last arguments.
 // Used for search boxes and live previews, so typing doesn't send a request per key.
@@ -104,6 +132,14 @@ function daysUntil(iso) {
   return Math.round((new Date(iso.slice(0, 10) + "T00:00:00") - today) / 86400000);
 }
 
+// "Oct 31" for a YYYY-MM-DD date ("Oct 31, 2025" in another year). Anything else comes back as it is.
+function fmtDate(iso) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return iso || "";
+  const d = new Date(iso.slice(0, 10) + "T12:00:00");
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString([], { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
+}
+
 // Server timestamps are UTC (2026-10-29T18:05:09+00:00). These show them in your local time.
 // fmtTs: "Oct 29, 2:05 PM" (or "never"). localStamp: "2026-10-29 14:05". localClock: "14:05:09" (now, when iso is empty).
 const fmtTs = (ts) => (ts ? new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "never");
@@ -121,35 +157,49 @@ function localClock(iso) {
 // "1 question", "3 questions".
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// A bullet list of escaped text. cls adds classes such as "good" or "warn", which color the bullets.
-const bulletList = (items, cls = "") => `<ul class="clean${cls ? " " + cls : ""}">${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+// "big_tech_swe" as "Big tech swe": a readable label for a key the dashboard has no name for.
+const humanize = (key) => {
+  const text = String(key || "").replace(/[_-]+/g, " ").trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+};
 
-// The color of a fit score: green for great matches, fading to gray for weak ones.
-function scoreColor(score) {
-  if (score >= 85) return "var(--good)";
-  if (score >= 70) return "color-mix(in srgb, var(--good) 60%, var(--text2))";
-  return score >= 55 ? "var(--warn)" : "var(--muted)";
+// The initials of a name, for avatars: "Jordan Rivera" is "JR". "" for no name.
+const initials = (name) => String(name || "").trim().split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+
+// 950, 45k or 1.2M
+const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : (n || 0).toLocaleString());
+
+// The name of an application status ("applied" is "Application sent"). The server sends them in S.meta.status_labels.
+const statusLabel = (status) => (S.meta?.status_labels || {})[status] || humanize(status);
+
+// A bullet list of escaped text. cls adds classes such as "good" or "warn", which color the bullets.
+const bulletList = (items, cls = "") => `<ul class="bullets${cls ? " " + cls : ""}">${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+
+// The match pill on job cards: the fit score out of 100, tinted by how good it is.
+function matchPill(score) {
+  const level = score == null ? "none" : score >= 80 ? "high" : score >= 60 ? "mid" : "low";
+  return `<div class="match ${level}" title="How well this job fits you, out of 100">`
+    + `<strong>${score ?? "-"}</strong>${score == null ? "" : "<small>%</small>"}<span>${score == null ? "NOT SCORED" : "MATCH"}</span></div>`;
 }
 
-// The round score badge on lead cards and the lead page. big = the larger one in the lead page header.
-const ring = (score, big) => `<div class="ring ${big ? "big" : ""}" style="--v:${score || 0};--c:${scoreColor(score || 0)}">`
-  + `<span>${score ?? "-"}</span></div>`;
-
-// An on/off switch. attrs go on the hidden checkbox (an id, or data-* attributes that say what it controls).
-const toggle = (attrs, on) => `<label class="toggle"><input type="checkbox" ${attrs} ${on ? "checked" : ""}><i></i></label>`;
+// An on/off switch. attrs go on the checkbox inside (an id, or data-* attributes that say what it controls).
+const toggle = (attrs, on) => `<label class="switch"><input type="checkbox" ${attrs} ${on ? "checked" : ""}><span></span></label>`;
 
 // <option> tags for a <select>. Each choice is a value, or a [value, label] pair. The choice equal to selected is chosen.
 function selectOptions(choices, selected) {
   return choices.map((choice) => {
     const [value, label] = Array.isArray(choice) ? choice : [choice, choice];
-    return `<option value="${esc(value)}"${value === selected ? " selected" : ""}>${esc(label)}</option>`;
+    return `<option value="${esc(value)}"${String(value) === String(selected ?? "") ? " selected" : ""}>${esc(label)}</option>`;
   }).join("");
 }
 
+// A spinner, for anything that's working.
+const spinner = () => `<span class="spinner" aria-hidden="true"></span>`;
+
 // ---------------------------------------------------------------- markdown
-// A small Markdown renderer for text the AI writes (company intel, interview prep, the profile). It handles headings,
+// A small Markdown renderer for text the AI writes (company briefs, interview prep, the profile). It handles headings,
 // bullet and numbered lists, paragraphs, **bold**, *italic*, `code` and links. The text is escaped first, so HTML inside
-// it shows as plain text.
+// it shows as plain text. Put the result in an element with class "prose".
 function md(src) {
   const inline = (s) => s
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
@@ -176,7 +226,7 @@ function md(src) {
     let m;
     if ((m = line.match(/^(#{1,4})\s+(.*)/))) {
       closeList();
-      const level = m[1].length + 1;  // "#" becomes <h2>: the page already has its own <h1>
+      const level = m[1].length + 2;  // "#" becomes <h3>: the page and its cards already use <h1> and <h2>
       out.push(`<h${level}>${inline(m[2])}</h${level}>`);
     } else if ((m = line.match(/^[-*•]\s+(.*)/))) {
       listItem("ul", m[1]);
@@ -194,101 +244,132 @@ function md(src) {
 }
 
 // ---------------------------------------------------------------- icons
-// Inline SVG icons for the navigation (one per page, by route name) plus "ext" (opens elsewhere) and "dl" (download).
-// The small icons in text and buttons are CSS classes instead: <i class=i-star></i> (see the end of style.css).
-const I = {
-  leads: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><path d="M12 12l6-6"/><circle cx="12" cy="12" r="1"/></svg>',
-  tracker: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>',
-  contacts: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 010 7M18 14.6c1.8.8 3 2.6 3.5 5.4"/></svg>',
-  sources: '<svg viewBox="0 0 24 24"><path d="M5 19a10 10 0 010-14M19 5a10 10 0 010 14M8.5 15.5a5 5 0 010-7M15.5 8.5a5 5 0 010 7"/><circle cx="12" cy="12" r="1.6"/></svg>',
-  profile: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="15.5" cy="8" r="3.5" stroke-dasharray="2 2"/><path d="M17.5 14.7c2.1.6 3.5 2.4 4 5.3" stroke-dasharray="2 2"/></svg>',
-  settings: '<svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
-  crm: '<svg viewBox="0 0 24 24"><path d="M14 4l6 6M15.5 5.5L8 13M3 21l5-5"/><path d="M12 3l-3 3 9 9 3-3"/></svg>',
-  dreams: '<svg viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg>',
-  analysis: '<svg viewBox="0 0 24 24"><path d="M12 3l8 5.5-3 9.5H7L4 8.5z"/><path d="M12 8l3.5 2.5-1.3 4H9.8l-1.3-4z"/></svg>',
-  resumes: '<svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 11h6M9 14.5h6M9 18h4"/></svg>',
-  runs: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M12 15h5"/></svg>',
-  setup: '<svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg>',
-  ext: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/></svg>',
-  dl: '<svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>',
+// The line icons, from the design's set plus the ones the app needs. icon("pin") draws one; cls adds a class ("filled"
+// paints its inside).
+const ICONS = {
+  home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10v10h13V10"/><path d="M10 20v-5.5h4V20"/>',
+  briefcase: '<rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12a22 22 0 0 0 18 0M12 12v3"/>',
+  columns: '<rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="14" rx="1.5"/>',
+  chart: '<path d="M3 20h18"/><rect x="5" y="11" width="3" height="6" rx="1"/><rect x="10.5" y="5" width="3" height="12" rx="1"/><rect x="16" y="8" width="3" height="9" rx="1"/>',
+  settings: '<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z"/><path d="m9 3-1 3-3 1-2 3 2 2-1 3 2 3 3-1 2 3h3l1-3 3-1 2-3-2-2 1-3-2-3-3 1-2-3z"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/>',
+  book: '<path d="M12 5C8 2 3 3 3 3v16s5-1 9 2c4-3 9-2 9-2V3s-5-1-9 2zM12 5v16"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18M8 15h2M14 15h2"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  back: '<path d="M15 6l-6 6 6 6"/>',
+  search: '<circle cx="10.5" cy="10.5" r="7.5"/><path d="m16 16 5 5"/>',
+  chevron: '<path d="m7 10 5 5 5-5"/>',
+  up: '<path d="m7 14 5-5 5 5"/>',
+  upload: '<path d="M12 16V3M7 8l5-5 5 5M4 16v5h16v-5"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  pin: '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0z"/><circle cx="12" cy="10" r="2.5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
+  refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>',
+  undo: '<path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v5h5"/>',
+  external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
+  warning: '<path d="M12 3.8 2.8 20h18.4z"/><path d="M12 10v4.4M12 17.3v.2"/>',
+  play: '<path d="M7 4.5v15l12-7.5z"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>',
+  sparkle: '<path d="M11 3l1.9 5.6 5.6 1.9-5.6 1.9L11 18l-1.9-5.6-5.6-1.9 5.6-1.9z"/><path d="M18.5 14.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z"/>',
+  question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.7-2.5 2.2-2.5 3.8M12 17.2v.2"/>',
+  flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>',
+  people: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.6c1.8.8 3 2.6 3.5 5.4"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  signal: '<path d="M5 19a10 10 0 0 1 0-14M19 5a10 10 0 0 1 0 14M8.5 15.5a5 5 0 0 1 0-7M15.5 8.5a5 5 0 0 1 0 7"/><circle cx="12" cy="12" r="1.6"/>',
+  bell: '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/>',
+  moon: '<path d="M20.9 13a9 9 0 0 1-9.9-9.9A9 9 0 1 0 20.9 13Z"/>',
+  tool: '<path d="M14.5 6.5a4 4 0 0 0-5.3 5.3L4 17l3 3 5.2-5.2a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5z"/>',
+  cert: '<path d="M3 9l9-4.5L21 9l-9 4.5z"/><path d="M7 11.2V15c0 1.5 2.2 2.8 5 2.8s5-1.3 5-2.8v-3.8M21 9v5"/>',
+  grip: '<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',
 };
+const icon = (name, cls = "") => `<svg viewBox="0 0 24 24" aria-hidden="true"${cls ? ` class="${cls}"` : ""}>${ICONS[name] || ""}</svg>`;
 
 // ---------------------------------------------------------------- app state
-// S is the one object every page shares. Each field lists who fills it. "Event" means a Server-Sent Event (see live.js).
+// S is the one object every page shares. Each field says who fills it. "Event" means a Server-Sent Event (see live.js).
 const S = {
   // Loaded at startup (main.js) and kept up to date by events
-  meta: null,             // GET /api/meta: version, os, data_dir, statuses, efforts, collectors, pdf_ready
+  meta: null,             // GET /api/meta: version, os, data_dir, statuses, status_labels, efforts, collectors, pdf_ready
   state: { running: false, counts: {} },  // the live run state from the server: running, run_id, mode, phase, counts,
-                                          // started_at, tokens, run_tokens_start, ai (sign-in status), active_agents
-  stats: null,            // GET /api/stats: the numbers behind the navigation badges and the Leads page tiles
+                                          // started_at, tokens, run_tokens_start, ai (the ChatGPT sign-in), active_agents
+  stats: null,            // GET /api/stats: the sidebar badges and the Home stats
   logs: [],               // live feed lines {ts, source, level, msg}: the last run's log, then "log" events (600 at most)
   profileStatus: null,    // GET /api/profile/status and "profile_status" events: has_resume, answers_saved, built, busy,
                           // phase, error, unsynced (answers not yet in the profile), open_questions, last_built
+  buildDone: false,       // a profile build finished while you watched: Home says so until you move on
+  onboarding: null,       // GET /api/onboarding: the standard questions, your answers, what's missing, the main resume
+  documents: [],          // the extra documents (GET /api/onboarding, then "documents" events)
   questions: null,        // GET /api/questions and "questions" events: the questions JobPortal asks along the way
   searchArea: null,       // the search area from Settings (locations.allowed): states, cities, "Remote", "Anywhere in the US"
-  industries: null,       // the industry list from Settings, for the lead page's industry menu
+  industries: null,       // the industry list from Settings, for the lead details' industry menu
   profileCache: null,     // GET /api/profile, kept for the Application kit and the search area editor (reset on "profile")
-  route: [],              // the current hash split into parts: #/lead/12/emails is ["lead", "12", "emails"]
-  dirty: false,           // the open page has unsaved edits (an editor or an answers form)
+  route: [],              // the current hash split into parts: #/leads/12/emails is ["leads", "12", "emails"]
+  dirty: false,           // the open editor or form has unsaved edits
   quit: false,            // you quit JobPortal from Settings: don't reconnect the live stream
-  // Leads page (leads.js). The tab and the two switches are remembered in localStorage.
-  leadsTab: localStorage.getItem("leadsTab") || "ready",  // ready, queue, filtered, closed, trashed or all
-  q: "",                  // the search box
+  notify: store.get("notify") === "1",  // system notifications for toasts while JobPortal is in the background
+  // Leads page (leads.js). The filter and the feed's open state are remembered.
+  leadsTab: store.get("leadsTab", "ready"),  // ready, queue, filtered, closed, trashed or all
+  q: "",                  // the search box in the top bar
   sort: "score",          // score, new, deadline, posted or industry
-  kind: "",               // "" (all), posting, program, event or intel
   industry: "",           // "" (all) or one industry
   dreamOnly: false,       // only dream companies and dream jobs
-  consoleOpen: localStorage.getItem("consoleOpen") !== "0",  // the live feed is expanded
-  notify: localStorage.getItem("notify") === "1",            // system notifications for toasts while JobPortal is hidden
-  // Lead page (lead.js)
+  feedOpen: store.get("feedOpen") !== "0",  // the live search feed is expanded
+  expanded: null,         // the id of the lead card that's open
+  // Lead details (lead.js), on Leads or in the Tracker's dialog
   lead: null,             // GET /api/leads/{id}: the lead on screen, with its package (documents, contacts, emails...)
-  leadTab: "overview",    // the lead page tab (LEAD_TABS)
+  leadView: null,         // where it's shown: { box, tab, hashBase } (hashBase: tabs change the address, as on Leads)
   editor: null,           // the open resume editor's options, so the layout menu and Re-check can reach it
-  // Profile page (profile.js)
-  profileTab: null,       // the open tab (PTABS)
-  openQuestions: null,    // the open questions in the order the Questions tab lists them
-  skills: null,           // the skills inventory rows being edited on the Skills tab
-  drawSkills: null,       // redraws the Skills tab table from S.skills
-  // Settings and Sources pages (settings.js, sources.js)
+  // Settings (settings.js, sources.js and the tabs)
   cfg: null,              // GET /api/settings, edited in place by the form until you save
   cfgDirty: false,        // S.cfg has edits that aren't saved yet
-  // Set up page (setup.js)
-  onboarding: null,       // GET /api/onboarding: the standard questions, your answers, the imported resume, the status
-  setupStep: null,        // chatgpt, resume, answers or build
-  prefill: null,          // answers the AI read from the resume you just imported, to pre-fill the questions
-  // Resumes page (resumes.js)
-  libTag: "",             // the tag filter
-  libQ: "",               // the search box
-  libLog: "",             // the last import progress line
-  // Other pages
+  cfgEdits: new Set(),    // the settings paths edited since the last save: saving writes only those
+  profileSection: null,   // the open part of Settings, Profile (profile.js)
+  skills: null,           // the skills inventory rows being edited (profile.js)
   dreams: null,           // GET /api/dreams (dreams.js)
-  crmKind: "",            // the "kind of move" filter on Equity mining (crm.js)
+  libTag: "",             // the tag filter on Settings, Resumes (resumes.js)
+  libQ: "",               // its search box
   analysis: null,         // the latest analysis' search steering, for its "Add to search plan" buttons (analysis.js)
 };
 
 // Display names for where a lead came from (lead.source and lead.sources).
 const LABEL_SRC = { github: "GitHub lists", ats: "Company board", linkedin: "LinkedIn", ai_hunt: "AI hunt", hackernews: "Hacker News",
   themuse: "The Muse", usajobs: "USAJobs", reddit: "Reddit", mastodon: "Mastodon", bluesky: "Bluesky", remote: "Remote board",
-  rss: "RSS", adzuna: "Adzuna", google: "Google Jobs", manual: "Manual" };
-// Display names for the application statuses (lead.app_status). The server sends the list in S.meta.statuses.
-const STATUS_LABEL = { new: "New", saved: "Saved", applied: "Applied", assessment: "Assessment / OA", interviewing: "Interviewing",
-  offer: "Offer", rejected: "Rejected", ghosted: "Ghosted", withdrawn: "Withdrawn", trashed: "Trashed" };
+  rss: "RSS", adzuna: "Adzuna", google: "Google Jobs", manual: "Added by you" };
 // The resume layouts, as named in RESUME_THEMES in documents/render.py on the server.
 const RESUME_THEMES = ["classic", "modern", "compact", "academic"];
 
-// ---------------------------------------------------------------- toasts and the modal
-// Shows a short message in the corner. level "error" makes it red and keeps it longer. With a leadId, clicking it opens that
-// lead. When alerts are on (S.notify) and JobPortal is in the background, it also shows a system notification.
-function toast(title, body = "", level = "", leadId = null) {
+// ---------------------------------------------------------------- toasts
+// Shows a short message at the bottom of the window. level "error" makes it red and keeps it longer. With a leadId,
+// clicking it opens that lead. action ({ label, run }) adds a button, like Undo. When alerts are on (S.notify) and
+// JobPortal is in the background, it also shows a system notification.
+function toast(title, body = "", level = "", leadId = null, action = null) {
   const el = document.createElement("div");
   el.className = `toast ${level}`;
-  el.innerHTML = `<b>${esc(title)}</b><span>${esc(body)}</span>`;
-  el.onclick = () => {
-    if (leadId) location.hash = `#/lead/${leadId}`;
+  el.innerHTML = `<div class="toast-text"><b>${esc(title)}</b>${body ? `<span>${esc(body)}</span>` : ""}</div>`
+    + (action ? `<button class="toast-action" type="button">${esc(action.label)}</button>` : "")
+    + `<button class="toast-close" type="button" aria-label="Dismiss">${icon("close")}</button>`;
+  el.addEventListener("click", (e) => {
+    if (e.target.closest(".toast-action")) {
+      Promise.resolve().then(action.run).catch((err) => toast("Something went wrong", err.message, "error"));
+    } else if (leadId && !e.target.closest(".toast-close")) {
+      location.hash = `#/leads/${leadId}`;
+    }
     el.remove();
-  };
-  $("#toasts").prepend(el);
-  setTimeout(() => el.remove(), level === "error" ? 12000 : 6500);
+  });
+  const box = $("#toasts");
+  box.prepend(el);
+  $$(".toast", box).slice(4).forEach((old) => old.remove());  // four at most
+  setTimeout(() => el.remove(), level === "error" ? 12000 : action ? 10000 : 6500);
   if (!S.notify) return;
   if (desktop() && !document.hasFocus()) {
     window.pywebview.api.notify(title, body);
@@ -296,22 +377,65 @@ function toast(title, body = "", level = "", leadId = null) {
     const notification = new Notification(title, { body });
     notification.onclick = () => {
       window.focus();
-      if (leadId) location.hash = `#/lead/${leadId}`;
+      if (leadId) location.hash = `#/leads/${leadId}`;
     };
   }
 }
 
-// Opens a dialog with the given HTML. Clicking the dark backdrop around it closes it. Dialogs live outside <main>, so their
-// buttons use their own handlers instead of data-act.
-function modal(html) {
-  const host = $("#modal");
-  host.onclick = host.onchange = null;  // drop the last dialog's handlers (a dialog that needs them sets them after this)
-  host.innerHTML = `<div class="modal-bg"><div class="modal">${html}</div></div>`;
-  $(".modal-bg", host).addEventListener("mousedown", (e) => {
-    if (e.target.classList.contains("modal-bg")) closeModal();
+// ---------------------------------------------------------------- dialogs
+// Opens a dialog with the given HTML under a top row (a small heading and a close button) and returns it. Dialogs stack:
+// one opened from another sits on top of it. Clicks inside run data-act actions like anywhere else.
+// opts: eyebrow (the small heading), wide (a large dialog, for a lead's details), guard (it edits: closing it with
+// unsaved edits asks first, and closing it drops them), onClose (runs once it has closed, whatever closed it).
+function openDialog(html, opts = {}) {
+  const dialog = document.createElement("dialog");
+  dialog.className = opts.wide ? "wide" : "";
+  dialog.innerHTML = `<div class="dialog-body"><div class="dialog-top"><span class="eyebrow">${esc(opts.eyebrow || "")}</span>`
+    + `<button class="icon-button" type="button" data-act="close-dialog" aria-label="Close">${icon("close")}</button></div>${html}</div>`;
+  dialog.jp = { guard: !!opts.guard, onClose: opts.onClose };
+  dialog.addEventListener("cancel", (e) => {  // Esc
+    e.preventDefault();
+    closeDialog(dialog);
+  });
+  dialog.addEventListener("mousedown", (e) => {  // a press on the dim backdrop around the dialog
+    if (e.target === dialog) closeDialog(dialog);
+  });
+  dialog.addEventListener("close", () => {
+    if (dialog.jp.guard) {
+      S.dirty = false;
+      S.cfgDirty = false;
+    }
+    dialog.remove();
+    if (dialog.jp.onClose) dialog.jp.onClose();
+  });
+  document.body.appendChild(dialog);
+  dialog.showModal();
+  return dialog;
+}
+
+// Closes a dialog (the top one when none is given). A dialog with unsaved edits asks first; returns false when you keep it.
+function closeDialog(dialog = $$("dialog[open]").at(-1)) {
+  if (!dialog) return true;
+  if (dialog.jp.guard && (S.dirty || S.cfgDirty) && !confirm("Discard your unsaved edits?")) return false;
+  dialog.close();
+  return true;
+}
+
+// ---------------------------------------------------------------- pop-up menus
+// A button with data-act="menu" opens the .menu right after it (both inside a .menu-wrap). Picking an item, a click
+// anywhere else or Esc closes it.
+function closeMenus() {
+  $$(".menu:not([hidden])").forEach((menu) => {
+    menu.hidden = true;
+    menu.previousElementSibling?.setAttribute("aria-expanded", "false");
   });
 }
-const closeModal = () => ($("#modal").innerHTML = "");
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".menu-wrap") || e.target.closest(".menu [data-act]")) closeMenus();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeMenus();
+});
 
 // ---------------------------------------------------------------- own window
 // JobPortal shows the dashboard in a window of its own when it can:
@@ -338,7 +462,7 @@ async function openUrl(url) {
   if (url.startsWith("/api/")) {  // a file download: save it where you choose
     const result = await window.pywebview.api.save_file(url);
     if (result.ok) toast("Saved", result.path);
-    else if (!result.cancelled) toast("Couldn't save the file", result.error || "", "error");
+    else if (!result.canceled) toast("Couldn't save the file", result.error || "", "error");
   } else {
     window.pywebview.api.open_external(url);
   }
@@ -368,13 +492,13 @@ if (appWindow) {
 }
 
 // ---------------------------------------------------------------- the action registry
-// Clicks: an element with data-act="name" inside <main> runs ACTIONS[name](el, event), where el is that element. Only the
-// nearest data-act element runs, so a button inside a clickable card runs its own action and not the card's.
+// Clicks: an element with data-act="name" runs ACTIONS[name](el, event), where el is that element. Only the nearest
+// data-act element runs, so a button inside a clickable card runs its own action and not the card's.
 const ACTIONS = {};
 const onAction = (name, fn) => {
   ACTIONS[name] = fn;
 };
-// Changes to selects and checkboxes inside <main>. main.js offers each change to every handler in turn. A handler returns
+// Changes to selects, checkboxes and file pickers. main.js offers each change to every handler in turn. A handler returns
 // true when the change was its own, and the search stops there.
 const CHANGE_HANDLERS = [];
 const onChange = (fn) => {
@@ -382,9 +506,15 @@ const onChange = (fn) => {
 };
 
 // ---------------------------------------------------------------- actions
-// A link inside a clickable card (a lead's "found at" link) has data-act="ext", so the click only follows the link.
+// A link inside a clickable card (where a lead was found) has data-act="ext", so the click only follows the link.
 onAction("ext", () => {});
 // Copies the element's data-text (contact emails, standard answers).
-onAction("copytext", (el) => {
-  copy(el.dataset.text);
+onAction("copytext", (el) => copy(el.dataset.text));
+onAction("close-dialog", (el) => closeDialog(el.closest("dialog")));
+onAction("menu", (el) => {
+  const menu = el.nextElementSibling;
+  const opening = menu.hidden;
+  closeMenus();
+  menu.hidden = !opening;
+  el.setAttribute("aria-expanded", String(opening));
 });

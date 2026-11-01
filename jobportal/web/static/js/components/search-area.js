@@ -1,8 +1,8 @@
 /* search-area.js: the search area, which sets where jobs may be. Settings stores it as one list (locations.allowed) of
-   state names, cities, "Remote" and "Anywhere in the US"; the search drops jobs outside it before AI triage. This file
-   turns that list into the editor's parts and back, writes the short summary on the chips, and runs the editor dialog
-   (states, presets, cities, remote, nationwide). The Leads page chip and Settings open it with data-act="edit-area".
-   APIs: GET /api/settings and PUT /api/settings (only the locations part changes). */
+   state names, cities, "Remote" and "Anywhere in the US"; a search skips jobs outside it before scoring them. This file
+   turns that list into the editor's parts and back, writes the short summary and the chips, and runs the editor dialog
+   (states, regions, cities, remote, nationwide). Home's "Where to search" and Settings, Search open it with
+   data-act="edit-area". APIs: GET /api/settings and PUT /api/settings (only the locations part changes). */
 "use strict";
 
 const US_STATES = [["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arkansas"],["CA","California"],["CO","Colorado"],["CT","Connecticut"],
@@ -13,7 +13,7 @@ const US_STATES = [["AL","Alabama"],["AK","Alaska"],["AZ","Arizona"],["AR","Arka
   ["OR","Oregon"],["PA","Pennsylvania"],["RI","Rhode Island"],["SC","South Carolina"],["SD","South Dakota"],["TN","Tennessee"],["TX","Texas"],
   ["UT","Utah"],["VT","Vermont"],["VA","Virginia"],["WA","Washington"],["WV","West Virginia"],["WI","Wisconsin"],["WY","Wyoming"]];
 
-// One-click regions for the editor's preset buttons.
+// One-click regions for the editor's buttons.
 const AREA_PRESETS = {
   "Northeast": ["ME", "NH", "VT", "MA", "RI", "CT", "NY", "NJ", "PA"],
   "Mid-Atlantic": ["NY", "NJ", "PA", "DE", "MD", "DC", "VA", "WV"],
@@ -26,9 +26,9 @@ const AREA_PRESETS = {
 // The ways people write "anywhere in the US".
 const NATIONWIDE_RE = /^(anywhere( in the)?( us| usa| united states)?|nationwide|united states|usa|us)$/i;
 
-// The "My state" preset: the state from your standard answers (needs S.profileCache), when it's a US state. "" otherwise.
+// The "My state" button: the state from your standard answers, when it's a US state. "" otherwise.
 function homeStateAbbr() {
-  const state = String((S.profileCache?.facts || {}).state || "").trim().toLowerCase();
+  const state = String(S.onboarding?.answers?.state || "").trim().toLowerCase();
   const hit = US_STATES.find(([abbr, name]) => abbr.toLowerCase() === state || name.toLowerCase() === state);
   return hit ? hit[0] : "";
 }
@@ -61,113 +61,120 @@ function areaToAllowed(area) {
   ];
 }
 
-// A short summary for chips: "OH, PA, Pittsburgh, Remote". Past nine states it adds "+N".
+// A short summary: "OH, PA, Pittsburgh, Remote". Past nine states it adds "+N".
 function areaSummary(allowed) {
   const area = parseArea(allowed);
-  if (area.nationwide) return `Anywhere in the US${area.remote ? " + Remote" : ""}`;
+  if (area.nationwide) return `Anywhere in the US${area.remote ? " and remote" : ""}`;
   const states = [...area.states].sort();
   const more = states.length > 9 ? [`+${states.length - 9}`] : [];
-  return [...states.slice(0, 9), ...more, ...area.cities, ...(area.remote ? ["Remote"] : [])].join(", ") || "nowhere yet: pick an area";
+  return [...states.slice(0, 9), ...more, ...area.cities, ...(area.remote ? ["Remote"] : [])].join(", ") || "Nowhere yet";
+}
+
+// The area as tags: one per state, city, "Remote" or "Anywhere in the US" (twelve at most, then "+N more").
+function areaTags(allowed) {
+  const items = allowed || [];
+  if (!items.length) return `<span class="tag warn">Nowhere yet: pick an area</span>`;
+  const more = items.length > 12 ? `<span class="tag">+${items.length - 12} more</span>` : "";
+  return items.slice(0, 12).map((item) => `<span class="tag">${icon("pin")}${esc(item)}</span>`).join("") + more;
 }
 
 // The search area dialog. Every change redraws it from `area`; Save writes it to Settings.
 async function openAreaEditor() {
-  const cfg = await api("/api/settings");
-  const loc = cfg.locations;
-  if (!S.profileCache) {
-    try { S.profileCache = await api("/api/profile"); } catch (_) {}  // for the "My state" preset
-  }
+  const loc = (await api("/api/settings")).locations;
   const area = parseArea(loc.allowed);
   const home = homeStateAbbr();
-  const showSummary = () => ($("#ar-sum").textContent = areaSummary(areaToAllowed(area)));
+  const dialog = openDialog(`<div class="area-editor"></div>`, { eyebrow: "SEARCH AREA" });
+  const box = $(".area-editor", dialog);
+  const showSummary = () => ($(".area-summary", box).textContent = areaSummary(areaToAllowed(area)));
   const draw = () => {
-    const presets = (home ? `<button class="btn sm" data-preset="__home">My state (${home})</button>` : "")
-      + Object.keys(AREA_PRESETS).map((name) => `<button class="btn sm" data-preset="${esc(name)}">${esc(name)}</button>`).join("");
-    const stateBox = ([abbr, name]) => `<label class="st ${area.states.has(abbr) ? "on" : ""}" title="${esc(name)}">`
-      + `<input type="checkbox" data-st="${abbr}" ${area.states.has(abbr) ? "checked" : ""}><b>${abbr}</b><span>${esc(name)}</span></label>`;
-    const cities = area.cities.map((city, i) => `<span class="chip">${esc(city)}<span class="x" data-rmcity="${i}"><i class=i-x></i></span></span>`).join("")
-      || `<span class="muted small">none</span>`;
-    modal(`<h2>Search area</h2>
-      <p class="muted small" style="margin-top:-6px">Where jobs can be. Everything outside this area is filtered out before AI triage, except
-        dream companies when the bypass is on.</p>
-      <div class="row" style="margin-bottom:10px">${presets}
-        <button class="btn sm" data-preset="__clear">Clear states</button></div>
-      <div class="row" style="gap:18px;margin-bottom:12px">
-        <label class="row small">${toggle(`id="ar-remote"`, area.remote)} Remote jobs (US)</label>
-        <label class="row small">${toggle(`id="ar-nation"`, area.nationwide)} <b>Anywhere in the US</b> (ignores the state list)</label></div>
-      <div class="stategrid ${area.nationwide ? "dim" : ""}">${US_STATES.map(stateBox).join("")}</div>
-      <div style="margin-top:14px"><label class="f"><span>Specific cities or metros (matched by name, e.g. “Houston, TX”, “Denver”, “Raleigh, NC”)</span></label>
-        <div class="row" style="gap:6px;margin:6px 0">${cities}</div>
-        <div class="row"><input type="text" id="ar-city" placeholder="Add a city" style="max-width:300px"><button class="btn sm" id="ar-addcity">Add city</button></div></div>
-      <div class="hr"></div>
-      <div class="row" style="gap:18px"><label class="row small">${toggle(`id="ar-dream"`, loc.dream_bypass)} Dream companies can be anywhere in the US</label>
-        <label class="row small">Unknown location: <select id="ar-unknown" style="width:auto">${selectOptions([["ai", "let AI decide"], ["drop", "drop"]], loc.unknown_policy)}</select></label></div>
-      <div class="row" style="justify-content:space-between;margin-top:16px"><span class="muted small" id="ar-sum"></span>
-        <div class="row"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn primary" id="ar-save">Save search area</button></div></div>`);
+    const presets = (home ? `<button class="chip" type="button" data-preset="__home">My state (${home})</button>` : "")
+      + Object.keys(AREA_PRESETS).map((name) => `<button class="chip" type="button" data-preset="${esc(name)}">${esc(name)}</button>`).join("")
+      + `<button class="chip" type="button" data-preset="__clear">Clear states</button>`;
+    const stateBox = ([abbr, name]) => `<label class="state${area.states.has(abbr) ? " on" : ""}" title="${esc(name)}">`
+      + `<input type="checkbox" data-st="${abbr}"${area.states.has(abbr) ? " checked" : ""}><b>${abbr}</b><span>${esc(name)}</span></label>`;
+    const cities = area.cities.map((city, i) => `<span class="tag">${esc(city)}<button class="tag-x" type="button" data-rmcity="${i}" aria-label="Remove ${esc(city)}">${icon("close")}</button></span>`).join("")
+      || `<span class="muted-note">None yet.</span>`;
+    box.innerHTML = `<h2>Where should JobPortal look?</h2>
+      <p>Jobs outside this area are skipped before they're scored, except at dream companies when that's on below.</p>
+      <div class="filters">${presets}</div>
+      <div class="switch-list">
+        <label class="switch-row">${toggle(`id="ar-remote"`, area.remote)}<span>Remote jobs (US)</span></label>
+        <label class="switch-row">${toggle(`id="ar-nation"`, area.nationwide)}<span><b>Anywhere in the US</b> (ignores the states below)</span></label></div>
+      <div class="state-grid${area.nationwide ? " dim" : ""}">${US_STATES.map(stateBox).join("")}</div>
+      <h3>Cities or metro areas</h3>
+      <div class="tags">${cities}</div>
+      <div class="inline-form"><input type="text" id="ar-city" placeholder="Add a city, like Houston, TX" aria-label="City">
+        <button class="button light" type="button" id="ar-addcity">Add city</button></div>
+      <div class="switch-list">
+        <label class="switch-row">${toggle(`id="ar-dream"`, loc.dream_bypass)}<span>Dream companies can be anywhere in the US</span></label>
+        <label class="switch-row"><span>When a job's location is unclear:</span>
+          <select id="ar-unknown">${selectOptions([["ai", "let the AI decide"], ["drop", "skip it"]], loc.unknown_policy)}</select></label></div>
+      <div class="dialog-actions"><span class="area-summary muted-note"></span>
+        <button class="button outline" type="button" data-act="close-dialog">Cancel</button>
+        <button class="button primary" type="button" id="ar-save">Save search area</button></div>`;
     showSummary();
-    // The dialog is outside <main>, so it handles its own events (modal() cleared the last dialog's handlers).
-    const dialog = $("#modal");
-    dialog.onchange = (e) => {  // a state box or one of the switches
-      const t = e.target;
-      if (t.dataset.st) {
-        if (t.checked) area.states.add(t.dataset.st);
-        else area.states.delete(t.dataset.st);
-        t.parentElement.classList.toggle("on", t.checked);
-      }
-      if (t.id === "ar-remote") area.remote = t.checked;
-      if (t.id === "ar-nation") {
-        area.nationwide = t.checked;
-        $(".stategrid").classList.toggle("dim", t.checked);
-      }
-      showSummary();
-    };
-    dialog.onclick = async (e) => {
-      const preset = e.target.closest("[data-preset]");
-      const removeCity = e.target.closest("[data-rmcity]");  // closest(): the click lands on the x icon inside
-      if (preset) {
-        const name = preset.dataset.preset;
-        area.states = new Set(name === "__clear" ? [] : name === "__home" ? [home] : AREA_PRESETS[name]);
-        area.nationwide = false;
-        draw();
-      } else if (removeCity) {
-        area.cities.splice(+removeCity.dataset.rmcity, 1);
-        draw();
-      } else if (e.target.id === "ar-addcity") {
-        const city = $("#ar-city").value.trim();
-        if (city) {
-          area.cities.push(city);
-          draw();
-        }
-      } else if (e.target.id === "ar-save") {
-        await saveArea(area);
-      }
-    };
   };
+  // The dialog keeps its own listeners: the area being edited lives here until you save.
+  dialog.addEventListener("change", (e) => {
+    const t = e.target;
+    if (t.dataset.st) {
+      if (t.checked) area.states.add(t.dataset.st);
+      else area.states.delete(t.dataset.st);
+      t.parentElement.classList.toggle("on", t.checked);
+    }
+    if (t.id === "ar-remote") area.remote = t.checked;
+    if (t.id === "ar-nation") {
+      area.nationwide = t.checked;
+      $(".state-grid", box).classList.toggle("dim", t.checked);
+    }
+    showSummary();
+  });
+  const addCity = () => {
+    const city = $("#ar-city", box).value.trim();
+    if (!city) return;
+    area.cities.push(city);
+    draw();
+    $("#ar-city", box).focus();
+  };
+  dialog.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && e.target.id === "ar-city") addCity();
+  });
+  dialog.addEventListener("click", async (e) => {
+    const preset = e.target.closest("[data-preset]");
+    const removeCity = e.target.closest("[data-rmcity]");
+    if (preset) {
+      const name = preset.dataset.preset;
+      area.states = new Set(name === "__clear" ? [] : name === "__home" ? [home] : AREA_PRESETS[name]);
+      area.nationwide = false;
+      draw();
+    } else if (removeCity) {
+      area.cities.splice(+removeCity.dataset.rmcity, 1);
+      draw();
+    } else if (e.target.closest("#ar-addcity")) {
+      addCity();
+    } else if (e.target.closest("#ar-save")) {
+      await saveArea(area, dialog).catch((err) => toast("Couldn't save the search area", err.message, "error"));
+    }
+  });
   draw();
 }
 
 // Saves the dialog's area. It re-reads the settings first, so only the locations part changes.
-async function saveArea(area) {
+async function saveArea(area, dialog) {
   const fresh = await api("/api/settings");
-  fresh.locations = { ...fresh.locations, allowed: areaToAllowed(area), dream_bypass: $("#ar-dream").checked, unknown_policy: $("#ar-unknown").value };
+  const box = $(".area-editor", dialog);
+  fresh.locations = { ...fresh.locations, allowed: areaToAllowed(area), dream_bypass: $("#ar-dream", box).checked, unknown_policy: $("#ar-unknown", box).value };
   if (!fresh.locations.allowed.length) {
-    toast("Pick an area", "Choose at least one state, city, Remote or Anywhere.", "error");
+    toast("Pick an area", "Choose at least one state, a city, Remote or Anywhere in the US.", "error");
     return;
   }
-  await api("/api/settings", { method: "PUT", body: fresh });
-  S.searchArea = fresh.locations.allowed;
-  closeModal();
-  toast("Search area saved", areaSummary(fresh.locations.allowed));
-  if (S.route[0] === "leads") renderMission();
-  if (S.route[0] === "settings") {
-    // Unsaved Settings edits stay on screen: only their locations take the values just saved.
-    if (S.cfgDirty && S.cfg) {
-      S.cfg.locations = { ...S.cfg.locations, ...fresh.locations };
-      renderSettings({ keepEdits: true });
-    } else {
-      renderSettings();
-    }
-  }
+  const saved = await api("/api/settings", { method: "PUT", body: fresh });
+  S.searchArea = saved.locations.allowed;
+  if (S.cfg) S.cfg.locations = saved.locations;  // a settings form on screen shows the new area (and only saves its own edits)
+  closeDialog(dialog);
+  toast("Search area saved", areaSummary(S.searchArea));
+  if (S.route[0] === "home") renderAreaPanel();
+  if (S.route[0] === "settings" && S.route[1] === "search") renderAreaCard();
 }
 
 // ---------------------------------------------------------------- actions

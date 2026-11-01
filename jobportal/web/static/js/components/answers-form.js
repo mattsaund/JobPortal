@@ -1,45 +1,48 @@
-/* answers-form.js: the standard questions form, used by setup (step 3) and Profile > Standard answers. The questions come
-   from the server (GET /api/onboarding returns them as sections of fields), so adding a question needs no change here:
-   see QUESTIONS in candidate/onboarding.py. */
+/* answers-form.js: the standard questions. The full form (Settings, Profile, Standard answers) and the input for one
+   question (Home asks them one at a time, and checks what it read from your resume). The questions come from the server
+   (GET /api/onboarding returns them as sections of fields with an id, label, type, options, help, placeholder and
+   required), so adding a question needs no change here: see QUESTIONS in candidate/onboarding.py. */
 "use strict";
 
-// The form for the given sections. values are your saved answers. prefill holds answers the AI read from your resume: a
-// field whose value is still the prefilled one gets a "from resume" chip, so you know to check it.
-function answersForm(sections, values, prefill) {
-  const answers = values || {}, fromAI = prefill || {};
-  const fromResume = (id) => (fromAI[id] != null && JSON.stringify(fromAI[id]) === JSON.stringify(answers[id])
-    ? `<span class="chip violet pf" title="Filled in from your resume. Check it.">from resume</span>` : "");
-  const field = (f) => {
-    const value = answers[f.id];
-    const required = f.required ? `<b class="req" title="required">*</b>` : "";
-    const help = f.help ? `<div class="small muted">${esc(f.help)}</div>` : "";
-    const head = `<span>${esc(f.label)}${required}${fromResume(f.id)}</span>`;
-    const placeholder = `placeholder="${esc(f.placeholder || "")}"`;
-    if (f.type === "select") {
-      return `<label class="f">${head}<select data-qf="${f.id}">${selectOptions([["", "Choose one"], ...f.options], value)}</select>${help}</label>`;
-    }
-    if (f.type === "multi") {  // pick any number: a checkbox per option, styled as pills
-      const chosen = value || [];
-      const pills = f.options.map(([key, label]) => `<label class="chk ${chosen.includes(key) ? "on" : ""}">`
-        + `<input type="checkbox" data-qm="${f.id}" value="${esc(key)}" ${chosen.includes(key) ? "checked" : ""}>${esc(label)}</label>`).join("");
-      return `<div class="f qmulti" style="grid-column:1/-1"><label class="f">${head}</label><div class="row" style="gap:6px;margin-top:4px">${pills}</div>${help}</div>`;
-    }
-    if (f.type === "list") {  // one item per line
-      return `<label class="f">${head}<textarea data-ql="${f.id}" rows="4" ${placeholder}>${esc((value || []).join("\n"))}</textarea>${help}</label>`;
-    }
-    if (f.type === "textarea") {
-      const rows = f.id === "writing_sample" ? 8 : 3;
-      return `<label class="f" style="grid-column:1/-1">${head}<textarea data-qf="${f.id}" rows="${rows}" ${placeholder}>${esc(value || "")}</textarea>${help}</label>`;
-    }
-    const type = ["url", "email", "tel"].includes(f.type) ? f.type : "text";
-    return `<label class="f">${head}<input type="${type}" data-qf="${f.id}" value="${esc(value || "")}" ${placeholder}>${help}</label>`;
-  };
-  return sections.map((section) => `<div class="card qsec" style="margin-bottom:14px"><h3>${esc(section.title)}</h3>
-    ${section.help ? `<p class="muted small" style="margin-top:-4px">${esc(section.help)}</p>` : ""}
-    <div class="grid3">${section.fields.map(field).join("")}</div></div>`).join("");
+// The input for one question, by its type: text, email, tel, url, select (pick one), multi (pick several), list (one
+// item per line) or textarea. big = Home's one-question card, where a select's options are buttons that answer at once.
+// extra adds attributes to a single input (Home labels it with the question above it).
+function answerInput(f, value, big, extra = "") {
+  const id = esc(f.id), placeholder = `placeholder="${esc(f.placeholder || "")}" ${extra}`;
+  if (f.type === "select") {
+    if (!big) return `<select data-qf="${id}" ${extra}>${selectOptions([["", "Choose one"], ...f.options], value)}</select>`;
+    return `<div class="choice-row">${f.options.map(([key, label]) => `<button type="button" class="choice${value === key ? " active" : ""}"`
+      + ` data-act="home-pick" data-id="${id}" data-value="${esc(key)}">${esc(label)}</button>`).join("")}</div>`;
+  }
+  if (f.type === "multi") {  // a checkbox per option, drawn as a pill
+    const chosen = value || [];
+    return `<div class="choice-row">${f.options.map(([key, label]) => `<label class="choice${chosen.includes(key) ? " active" : ""}">`
+      + `<input type="checkbox" data-qm="${id}" value="${esc(key)}"${chosen.includes(key) ? " checked" : ""}>${esc(label)}</label>`).join("")}</div>`;
+  }
+  if (f.type === "list") return `<textarea data-ql="${id}" rows="${big ? 4 : 3}" ${placeholder}>${esc((value || []).join("\n"))}</textarea>`;
+  if (f.type === "textarea") return `<textarea data-qf="${id}" rows="${f.id === "writing_sample" ? 8 : 3}" ${placeholder}>${esc(value || "")}</textarea>`;
+  const type = ["url", "email", "tel"].includes(f.type) ? f.type : "text";
+  return `<input type="${type}" data-qf="${id}" value="${esc(value || "")}" ${placeholder}>`;
 }
 
-// Reads the form back into { field id: answer }. List fields become arrays of lines, multi-choice fields arrays of values.
+// The full form: a panel per section and a field per question. values are your saved answers. fromResume lists the
+// questions answered from your resume that you haven't checked yet; they get a tag.
+function answersForm(sections, values, fromResume = []) {
+  const field = (f) => {
+    const wide = ["multi", "textarea", "list"].includes(f.type);
+    const tag = fromResume.includes(f.id) ? `<span class="tag green" title="Read from your resume. Check it.">FROM RESUME</span>` : "";
+    const label = `<span class="field-label">${esc(f.label)}${f.required ? `<b class="req" title="Required">*</b>` : ""}${tag}</span>`;
+    const help = f.help ? `<small>${esc(f.help)}</small>` : "";
+    // A pill group holds labels of its own, so its field is a <div>; every other field is a <label> around its input.
+    const tagName = f.type === "multi" ? "div" : "label";
+    return `<${tagName} class="field${wide ? " wide" : ""}">${label}${answerInput(f, values[f.id])}${help}</${tagName}>`;
+  };
+  return sections.map((section) => `<section class="panel form-section"><h2>${esc(section.title)}</h2>`
+    + `${section.help ? `<p>${esc(section.help)}</p>` : ""}<div class="form-grid">${section.fields.map(field).join("")}</div></section>`).join("");
+}
+
+// Reads the inputs inside root back into { question id: answer }. List fields become arrays of lines, multi-choice
+// fields arrays of the options picked.
 function readAnswersForm(root) {
   const out = {};
   $$("[data-qf]", root).forEach((el) => (out[el.dataset.qf] = el.value.trim()));
@@ -51,16 +54,17 @@ function readAnswersForm(root) {
   return out;
 }
 
+// True when an answer has content: a non-blank string, or a list with at least one non-blank item.
+const filled = (value) => (Array.isArray(value) ? value.some((x) => String(x).trim()) : !!String(value ?? "").trim());
+
 // The labels of the required questions left empty. Reads the question list from S.onboarding (GET /api/onboarding).
 function missingRequired(answers) {
-  const required = (S.onboarding && S.onboarding.required) || [];
   const labels = {};
-  ((S.onboarding && S.onboarding.questions) || []).forEach((section) => section.fields.forEach((f) => (labels[f.id] = f.label)));
-  const isEmpty = (value) => (Array.isArray(value) ? !value.length : !String(value ?? "").trim());
-  return required.filter((id) => isEmpty(answers[id])).map((id) => labels[id] || id);
+  (S.onboarding?.questions || []).forEach((section) => section.fields.forEach((f) => (labels[f.id] = f.label)));
+  return (S.onboarding?.required || []).filter((id) => !filled(answers[id])).map((id) => labels[id] || id);
 }
 
 // A multi-choice pill lights up while its checkbox is checked.
 document.addEventListener("change", (e) => {
-  if (e.target.dataset && e.target.dataset.qm != null) e.target.closest(".chk")?.classList.toggle("on", e.target.checked);
+  if (e.target.dataset?.qm != null) e.target.closest(".choice")?.classList.toggle("active", e.target.checked);
 });

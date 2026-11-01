@@ -1,205 +1,259 @@
-/* lead.js: one lead's page (#/lead/12, or #/lead/12/emails to open a tab). The header has the score, the chips, where
-   the lead was found and the main actions (dream, industry, status, apply, downloads, regenerate). Under it: banners for
-   the package state, the questions for this application, and the tabs: fit and triage, the tailored resume and cover
-   letter editors, outreach emails, contacts, company intel, interview prep, the application kit, activity and the posting.
+/* lead.js: everything about one lead, drawn into any container: an open card on Leads (#/leads/12, or #/leads/12/emails
+   for a tab) or the Tracker's large dialog. At the top: the actions (Add to tracker, Apply, the status, the industry,
+   Dream, downloads, tailor again, Delete) and banners for the application's state. Then the tabs: the overview (the fit,
+   the action plan, the role in brief, and questions that would make this application stronger), the tailored resume
+   (editor, live preview, layouts and the resume check), the cover letter, emails, contacts, interview prep, the company
+   brief, the application kit, the posting, and activity.
 
    APIs: GET /api/leads/{id} (the lead with its package), PATCH /api/leads/{id} (every edit), POST /api/preview (the
    editor's live preview), POST /api/leads/{id}/revise, /package, /resume-check, /events, /contacts/{i},
-   /questions/generate and /apply-answers, plus the exports under /api/leads/{id}/export/.
-   S.lead is the lead on screen and S.dirty marks unsaved edits. A "lead" event redraws the page unless edits are open. */
+   /questions/generate and /apply-answers, POST /api/questions/answer and /dismiss, and the downloads under
+   /api/leads/{id}/export/. S.lead is the lead on screen and S.leadView where it's drawn; S.dirty marks unsaved edits. A
+   "lead" event redraws it unless edits are open (refreshLeadDetails, from live.js). */
 "use strict";
 
-// ---------------------------------------------------------------- the page
-// Draws the lead page and its open tab (S.leadTab). fromEvent = a live update: skipped when you have unsaved edits or
-// nothing changed.
-async function renderLead(id, fromEvent) {
-  if (fromEvent && S.dirty) return;
-  let l;
+// ---------------------------------------------------------------- showing a lead
+// Shows a lead in box. opts: tab (the one to open), hashBase (tabs change the address, as on Leads: #/leads/12/emails),
+// header (draw the title, company and match pill too: the Tracker's dialog has no card around it).
+async function showLeadDetails(box, id, opts = {}) {
+  S.leadView = { box, id, tab: opts.tab || "overview", hashBase: opts.hashBase || "", header: !!opts.header };
+  S.lead = null;
+  box.innerHTML = `<p class="loading">${spinner()} Loading</p>`;
+  let lead;
   try {
-    l = await api(`/api/leads/${id}`);
-  } catch (e) {
-    main.innerHTML = `<div class="page"><div class="empty"><b>Lead not found</b></div></div>`;
+    lead = await api(`/api/leads/${id}`);
+  } catch (err) {
+    if (S.leadView?.box === box) box.innerHTML = `<div class="empty-state"><h3>That lead is gone</h3><p>${esc(err.message)}</p></div>`;
     return;
   }
-  if (fromEvent && S.lead && S.lead.stage === l.stage && S.lead.updated_at === l.updated_at) return;
-  S.lead = l;
+  if (S.leadView?.box !== box || S.leadView.id !== id) return;  // something else opened while it loaded
+  S.lead = lead;
+  drawLeadDetails();
+}
+
+// Forgets the lead on screen: its card closed, or its dialog.
+function closeLeadDetails() {
+  S.lead = null;
+  S.leadView = null;
+  S.editor = null;
   S.dirty = false;
-  const packaged = !!l.resume_md;
+}
+
+// Reads the lead again and redraws it on the same tab. fromEvent = a live update: skipped while you have unsaved edits,
+// or when nothing changed.
+async function refreshLeadDetails(fromEvent) {
+  const view = S.leadView;
+  if (!view || (fromEvent && S.dirty)) return;
+  let lead;
+  try {
+    lead = await api(`/api/leads/${view.id}`);
+  } catch (_) {
+    return;
+  }
+  if (S.leadView !== view || (fromEvent && S.dirty)) return;
+  const same = S.lead && ["stage", "updated_at", "app_status"].every((key) => S.lead[key] === lead[key]);
+  if (fromEvent && same) return;
+  S.lead = lead;
+  drawLeadDetails();
+}
+
+// An element inside the lead on screen.
+const lv = (selector) => $(selector, S.leadView.box);
+
+// Draws the lead: the header (in the Tracker's dialog), the actions, the banners, the tabs and the open tab.
+function drawLeadDetails() {
+  const l = S.lead, view = S.leadView, packaged = !!l.resume_md;
+  const header = view.header ? `<div class="detail-header">${companyLogo(l.company)}
+      <div class="job-title"><h2>${esc(l.title)}</h2><div class="company-line"><span>${esc(l.company)}</span>${stageTag(l)}</div>
+        <div class="job-meta">${leadMeta(l)}</div></div>${matchPill(l.score || null)}</div>
+    <div class="tags">${leadTags(l)}</div>` : "";
+  const tabs = DETAIL_TABS.map(([key, label]) => `<button class="tab${view.tab === key ? " active" : ""}" type="button" role="tab"`
+    + ` aria-selected="${view.tab === key}" data-act="lead-tab" data-tab="${key}">${label}</button>`).join("");
+  view.box.innerHTML = `<div class="lead-details">${header}
+    <div class="detail-actions">${leadActions(l, packaged)}</div>
+    ${leadBanners(l, packaged)}
+    <div class="tabs" role="tablist" aria-label="About this lead">${tabs}</div>
+    <div class="tab-body" data-lead-body></div></div>`;
+  drawLeadTab();
+}
+
+// The actions row. A deleted lead has Restore and Delete forever instead of Delete.
+function leadActions(l, packaged) {
   const apply = safeUrl(l.apply_url) || safeUrl(l.url);
-  const foundAt = foundList(l).map((f) => `<a class="chip blue" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.label)}">`
-    + `<i class=i-ext></i> ${esc(foundShort(f))}</a>`).join("");
+  const statuses = S.meta.statuses.filter((s) => s !== "trashed" || l.app_status === "trashed").map((s) => [s, statusLabel(s)]);
   // The industry menu offers the Settings list, plus the lead's own industry when it isn't on that list.
   const industries = S.industries || [];
   const industryChoices = l.industry && !industries.includes(l.industry) ? [...industries, l.industry] : industries;
-  const statusChoices = S.meta.statuses.map((status) => [status, STATUS_LABEL[status]]);
-
-  main.innerHTML = `<div class="page">
-    <div class="row" style="margin-bottom:12px"><a href="#/leads" class="mono small"><i class=i-back></i> All leads</a></div>
-    <div class="lh">${ring(l.score, true)}
-      <div><h1>${esc(l.title)}</h1><div class="co"><b>${esc(l.company)}</b>, ${esc(l.location || "location n/a")}</div>
-        <div class="row" style="margin-top:8px;gap:6px">${leadChips(l)}</div>
-        ${foundAt ? `<div class="row small" style="margin-top:8px;gap:6px"><span class="muted mono">FOUND AT</span>${foundAt}</div>` : ""}</div>
-      <div class="acts">
-        <button class="btn ${l.dream ? "toggled" : "ghost"}" data-act="toggle-dream" title="Mark as a dream job">${l.dream ? "<i class=i-star></i>" : "<i class=i-star-o></i>"} Dream</button>
-        <select id="industry" title="Industry (edit if it's wrong)">${selectOptions(industryChoices, l.industry)}</select>
-        <select id="appstatus" title="Application status">${selectOptions(statusChoices, l.app_status)}</select>
-        ${apply ? `<button class="btn primary" data-act="apply" data-url="${esc(apply)}">Apply ${I.ext}</button>` : ""}
-        ${packaged ? `<a class="btn" href="/api/leads/${l.id}/export/package.zip" title="Resume, cover letter, emails (.eml), answers, prep, intel, contacts">${I.dl} All files</a>` : ""}
-        <button class="btn" data-act="regen" title="Re-run research + tailoring">${packaged ? "<i class=i-refresh></i> Regenerate" : "Build package"}</button>
-      </div></div>
-    ${leadBanners(l, packaged)}
-    ${leadQuestionsPanel(l)}
-    <div class="tabs" id="dtabs">${LEAD_TABS.map(([key, label]) => `<a class="${S.leadTab === key ? "on" : ""}" data-act="ltabgo" data-tab="${key}">${label}</a>`).join("")}</div>
-    <div id="dbody"></div></div>`;
-  $("#appstatus").onchange = (e) => setStatus(l.id, e.target.value);
-  $("#industry").onchange = async (e) => {
-    await api(`/api/leads/${l.id}`, { method: "PATCH", body: { industry: e.target.value } });
-    toast("Industry updated", e.target.value);
-  };
-  renderLeadTab();
+  const remove = l.app_status === "trashed"
+    ? `<button class="button outline" type="button" data-act="lead-restore" data-id="${l.id}">${icon("undo")}Restore</button>`
+      + `<button class="button danger" type="button" data-act="lead-purge" data-id="${l.id}">${icon("trash")}Delete forever</button>`
+    : `<button class="button danger" type="button" data-act="detail-delete">${icon("trash")}Delete</button>`;
+  return (l.app_status === "new" ? `<button class="button light" type="button" data-act="detail-track">${icon("plus")}Add to tracker</button>` : "")
+    + (apply ? `<button class="button primary" type="button" data-act="apply" data-url="${esc(apply)}">Apply ${icon("external")}</button>` : "")
+    + `<label class="control"><span>Status</span><select data-lead-status>${selectOptions(statuses, l.app_status)}</select></label>`
+    + `<label class="control"><span>Industry</span><select data-lead-industry>${selectOptions([["", "Not set"], ...industryChoices], l.industry || "")}</select></label>`
+    + `<button class="button outline${l.dream ? " on" : ""}" type="button" data-act="toggle-dream" aria-pressed="${!!l.dream}">${icon("star", l.dream ? "filled" : "")}Dream job</button>`
+    + (packaged ? `<a class="button outline" href="/api/leads/${l.id}/export/package.zip" title="Resume, cover letter, emails, answers, prep, brief and contacts">${icon("download")}All files</a>` : "")
+    + `<button class="button outline" type="button" data-act="regen">${icon("refresh")}${packaged ? "Tailor again" : "Tailor it now"}</button>`
+    + `<span class="spacer"></span>${remove}`;
 }
 
-// The banners under the header: the package is building, failed or missing, the posting looks closed, a follow-up is due.
+// A banner: a note across the details with an icon and, sometimes, a button.
+const banner = (cls, mark, text, action = "") => `<div class="banner ${cls}">${mark}<div>${text}</div>${action}</div>`;
+
+// The banners: the application is being tailored, failed or isn't tailored yet, the posting looks closed, or a
+// follow-up is due.
 function leadBanners(l, packaged) {
   let html = "";
   if (l.stage === "packaging") {
-    html = `<div class="banner accent"><span class="spin"></span><div><b>JobPortal is building this package:</b> reading the posting,
-      researching the team, finding contacts, tailoring your resume and cover letter. Usually 2 to 6 minutes.</div></div>`;
+    html = banner("info", spinner(), `<b>JobPortal is tailoring this application:</b> reading the posting, researching the company, finding
+      people to contact, and writing your resume and cover letter. Usually 2 to 6 minutes.`);
   } else if (l.stage === "error") {
-    html = `<div class="banner bad"><div><b>Package failed:</b> ${esc(l.stage_error)}</div><span class="spacer"></span>`
-      + `<button class="btn sm" data-act="regen">Retry</button></div>`;
+    html = banner("bad", icon("warning"), `<b>Tailoring failed:</b> ${esc(l.stage_error)}`,
+      `<button class="button outline" type="button" data-act="regen">Try again</button>`);
   } else if (!packaged) {
-    const why = l.stage === "filtered" ? "Triage scored this below your threshold." : "Queued for packaging.";
-    html = `<div class="banner"><div>${why} Want the full package now?</div><span class="spacer"></span>`
-      + `<button class="btn primary sm" data-act="regen">Build package</button></div>`;
+    const why = l.stage === "filtered" ? "This one scored below your bar, so it wasn't tailored." : "This one isn't tailored yet.";
+    html = banner("", icon("sparkle"), `${why} JobPortal can write its resume, cover letter and emails now.`,
+      `<button class="button primary" type="button" data-act="regen">Tailor it now</button>`);
   } else if (l.stage === "closed") {
-    html = `<div class="banner bad"><div><b>JobPortal couldn't find this posting open anymore.</b> Double-check the link before spending
-      time on it.</div></div>`;
+    html = banner("bad", icon("warning"), "<b>This posting looks closed.</b> Check the link before you spend time on it.");
   }
-  const waitingOnThem = ["applied", "assessment", "interviewing"].includes(l.app_status);
-  if (packaged && waitingOnThem && l.follow_up_at && daysUntil(l.follow_up_at) <= 0) {
-    html += `<div class="banner accent"><div><b>Follow-up due.</b> A ready-to-send follow-up email is in the Emails tab.</div>`
-      + `<span class="spacer"></span><button class="btn sm" data-act="ltabgo" data-tab="emails">Open emails</button></div>`;
+  const waiting = ["applied", "interviewing"].includes(l.app_status);
+  if (packaged && waiting && l.follow_up_at && daysUntil(l.follow_up_at) <= 0) {
+    html += banner("warn", icon("bell"), "<b>Time to follow up.</b> A follow-up email is ready under Emails.",
+      `<button class="button outline" type="button" data-act="lead-tab" data-tab="emails">Open emails</button>`);
   }
   return html;
 }
 
-// Questions for this application, shown once the lead has a resume: answer or dismiss each, then rework the resume with
-// your answers. With no questions yet, a button asks the AI to find some.
-function leadQuestionsPanel(l) {
-  if (!l.resume_md) return "";
-  const questions = l.questions || [];
-  if (!questions.length) {
-    return `<div class="banner"><div class="small">No open questions for this application.</div><span class="spacer"></span>
-    <button class="btn sm" data-act="lead-gapq" title="Ask the AI what you could tell it that would make this resume stronger"><i class=i-question></i> Find gaps to ask me about</button></div>`;
-  }
-  const open = questions.filter((q) => q.status === "open");
-  const answered = questions.filter((q) => q.status === "answered");
-  const openItem = (q) => `<div class="lq-item"><div><b>${esc(q.question)}</b></div><div class="small muted">${esc(q.why)}</div>
-      <div class="row" style="margin-top:6px"><input type="text" data-lqa="${esc(q.question)}" placeholder="Your answer" style="flex:1">
-      <button class="btn sm" data-act="lead-answer">Save answer</button><button class="btn sm ghost" data-act="lead-dismiss" data-q="${esc(q.question)}" title="Not relevant"><i class=i-x></i></button></div></div>`;
-  const answeredItem = (q) => `<div class="lq-item done"><div class="small"><b>${esc(q.question)}</b></div>`
-    + `<div class="small" style="color:var(--good)"><i class=i-check></i> ${esc(q.answer || "")}</div></div>`;
-  const applyButton = answered.length
-    ? `<button class="btn primary sm ai" data-act="lead-apply" title="Add your answers to your profile, then rework this resume with them"><i class=i-ai></i> Update this resume with my answers</button>`
-    : "";
-  return `<div class="card lq" style="margin-bottom:14px"><div class="row" style="margin-bottom:6px"><h3 style="margin:0"><i class=i-question></i> Questions that could strengthen this resume</h3>
-      <span class="muted small">Answers are saved to your profile, so every future application benefits.</span><span class="spacer"></span>
-      ${applyButton}</div>
-    ${open.map(openItem).join("")}
-    ${answered.map(answeredItem).join("")}</div>`;
-}
-
 // ---------------------------------------------------------------- tabs
-// The tabs in order: [key, label, function that fills the tab]. The key also works in the address: #/lead/12/emails.
-const LEAD_TABS = [
+// The tabs in order: [key, label, function that fills the tab]. The key also works in the address: #/leads/12/emails.
+const DETAIL_TABS = [
   ["overview", "Overview", renderOverviewTab],
   ["resume", "Resume", (box, l, pkg) => renderDocumentTab(box, l, pkg, "resume")],
   ["cover", "Cover letter", (box, l, pkg) => renderDocumentTab(box, l, pkg, "cover")],
   ["emails", "Emails", renderEmailsTab],
   ["contacts", "Contacts", renderContactsTab],
-  ["intel", "Company intel", (box, l, pkg) => renderNotesTab(box, l, pkg, "intel")],
   ["prep", "Interview prep", (box, l, pkg) => renderNotesTab(box, l, pkg, "prep")],
+  ["intel", "Company brief", (box, l, pkg) => renderNotesTab(box, l, pkg, "intel")],
   ["kit", "Application kit", renderKitTab],
-  ["activity", "Activity", renderActivityTab],
   ["posting", "Posting", renderPostingTab],
+  ["activity", "Activity", renderActivityTab],
 ];
 
-// Fills #dbody with the open tab. It swaps in a fresh, empty #dbody first, which drops the listeners the last tab added.
-function renderLeadTab() {
-  const old = $("#dbody");
-  const box = old.cloneNode(false);
-  old.replaceWith(box);
-  $$("#dtabs a").forEach((a) => a.classList.toggle("on", a.dataset.tab === S.leadTab));
-  const tab = LEAD_TABS.find(([key]) => key === S.leadTab);
-  if (tab) tab[2](box, S.lead, S.lead.package || {});
+// Fills the tab body. It swaps in a fresh, empty body first, which drops the listeners the last tab added.
+function drawLeadTab() {
+  const view = S.leadView;
+  const old = lv("[data-lead-body]");
+  const body = old.cloneNode(false);
+  old.replaceWith(body);
+  $$(".tabs .tab", view.box).forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.tab === view.tab);
+    tab.setAttribute("aria-selected", String(tab.dataset.tab === view.tab));
+  });
+  S.editor = null;
+  const tab = DETAIL_TABS.find(([key]) => key === view.tab) || DETAIL_TABS[0];
+  tab[2](body, S.lead, S.lead.package || {});
 }
 
-// The empty state of a tab whose part of the package doesn't exist yet.
-const noneYet = (what) => `<div class="empty"><b>No ${what} yet</b>Build the package to generate it.</div>`;
-
-// Keyword chips: green for the job's keywords the resume has, plain (with a tooltip) for the ones it lacks.
-function keywordChips(coverage, missingTip) {
-  const hits = (coverage.hit || []).map((k) => `<span class="chip good">${esc(k)}</span>`).join("");
-  const misses = (coverage.miss || []).map((k) => `<span class="chip" title="${missingTip}">${esc(k)}</span>`).join("");
-  return `<div class="cov">${hits}${misses}</div>`;
+// Opens another tab of the lead on screen.
+function showLeadTab(tab) {
+  const view = S.leadView;
+  const key = DETAIL_TABS.some(([k]) => k === tab) ? tab : "overview";
+  if (!view || !S.lead || view.tab === key) return;
+  view.tab = key;
+  drawLeadTab();
 }
 
-// Overview: the fit (summary, strengths, gaps, eligibility), the action plan, the role in brief, the facts at a glance,
-// red flags and the ATS keywords in your resume.
+// A block: a titled box inside the details. head adds buttons or tags on the title's line; cls adds classes.
+const block = (title, html, head = "", cls = "") => `<section class="block${cls ? " " + cls : ""}">`
+  + `${title || head ? `<div class="block-head"><h3>${title}</h3>${head}</div>` : ""}${html}</section>`;
+
+// The empty state of a tab whose part of the application doesn't exist yet.
+const noneYet = (what) => `<div class="empty-state"><h3>No ${what} yet</h3><p>Tailor this application to write it.</p>
+  <button class="button primary" type="button" data-act="regen">Tailor it now</button></div>`;
+
+// Keyword tags: green for the job's keywords your resume has, plain (with a tip) for the ones it lacks.
+function keywordTags(coverage, missingTip) {
+  const hits = (coverage.hit || []).map((k) => `<span class="tag green">${esc(k)}</span>`).join("");
+  const misses = (coverage.miss || []).map((k) => `<span class="tag" title="${missingTip}">${esc(k)}</span>`).join("");
+  return `<div class="tags">${hits}${misses}</div>`;
+}
+
+// Overview: questions that would make this application stronger, the fit (summary, strengths, gaps, eligibility), the
+// action plan and the role in brief; on the right the facts at a glance, red flags and the keywords in your resume.
 function renderOverviewTab(box, l, pkg) {
   const fit = pkg.fit || {}, triage = l.triage || {}, coverage = pkg.coverage || {};
   const plan = pkg.action_plan || [], done = pkg.plan_done || [];
-  const fitCard = fit.summary || triage.summary ? `<div class="card"><h3>Fit</h3><p style="margin:0 0 10px">${esc(fit.summary || triage.summary)}</p>
-        ${fit.strengths?.length ? `<b class="small mono">STRENGTHS</b>${bulletList(fit.strengths, "good")}` : ""}
-        ${fit.gaps?.length ? `<div style="margin-top:10px"><b class="small mono">GAPS & HOW TO HANDLE THEM</b>${bulletList(fit.gaps, "warn")}</div>` : ""}
-        ${fit.eligibility_notes ? `<p class="small" style="margin:10px 0 0"><b class="mono">ELIGIBILITY:</b> ${esc(fit.eligibility_notes)}</p>` : ""}</div>` : "";
-  const planItem = (step, i) => `<label><input type="checkbox" data-act="plan" data-i="${i}" ${done.includes(i) ? "checked" : ""}>`
+  const fitBlock = fit.summary || triage.summary ? block("Why it fits", `<p>${esc(fit.summary || triage.summary)}</p>
+      ${fit.strengths?.length ? `<h4>Your strengths</h4>${bulletList(fit.strengths, "good")}` : ""}
+      ${fit.gaps?.length ? `<h4>Gaps, and how to handle them</h4>${bulletList(fit.gaps, "warn")}` : ""}
+      ${fit.eligibility_notes ? `<p><b>Eligibility:</b> ${esc(fit.eligibility_notes)}</p>` : ""}`) : "";
+  const planItem = (step, i) => `<label class="check-row"><input type="checkbox" data-plan="${i}"${done.includes(i) ? " checked" : ""}>`
     + `<span class="${done.includes(i) ? "done" : ""}">${esc(step)}</span></label>`;
-  const planCard = plan.length ? `<div class="card"><h3>Action plan</h3><div class="checklist">${plan.map(planItem).join("")}</div></div>` : "";
-  const roleCard = pkg.job_summary ? `<div class="card"><h3>The role in brief</h3><div class="md">${md(pkg.job_summary)}</div></div>` : "";
-  const posting = safeUrl(l.url) ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.slice(0, 70))}</a>` : "none";
-  // "82, eligible: reason; reason". The eligibility part is left out when triage didn't give one.
-  const triageText = [triage.score ?? "-", esc(triage.eligibility || "")].filter((part) => part !== "").join(", ")
+  const planBlock = plan.length ? block("Your action plan", `<div class="check-list">${plan.map(planItem).join("")}</div>`) : "";
+  const roleBlock = pkg.job_summary ? block("The role in brief", `<div class="prose">${md(pkg.job_summary)}</div>`) : "";
+  const posting = safeUrl(l.url) ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.replace(/^https?:\/\//, "").slice(0, 60))}</a>` : "None";
+  const foundAt = foundList(l).map((f) => `<a class="tag blue" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.label)}">${icon("external")}${esc(foundShort(f))}</a>`).join("");
+  // "82, eligible: reason; reason". The eligibility part is left out when the scoring didn't give one.
+  const scored = [triage.score ?? "-", esc(triage.eligibility || "")].filter((part) => part !== "").join(", ")
     + (triage.reasons?.length ? `: ${esc(triage.reasons.join("; "))}` : "");
-  const flagsCard = triage.red_flags?.length ? `<div class="card"><h3>Red flags</h3>${bulletList(triage.red_flags, "warn")}</div>` : "";
-  const coverageCard = coverage.hit || coverage.miss
-    ? `<div class="card"><h3>ATS keywords in your resume: ${Math.round((l.ats_coverage || 0) * 100)}%</h3>${keywordChips(coverage, "Not in the resume. Add it only if it's true.")}</div>`
+  const flagsBlock = triage.red_flags?.length ? block("Red flags", bulletList(triage.red_flags, "warn")) : "";
+  const coverageBlock = coverage.hit || coverage.miss
+    ? block(`Job keywords in your resume: ${Math.round((l.ats_coverage || 0) * 100)}%`, keywordTags(coverage, "Not in your resume. Add it only if it's true."))
     : "";
-  box.innerHTML = `<div class="cols"><div class="stack">
-      ${fitCard}
-      ${planCard}
-      ${roleCard}
-    </div><div class="stack">
-      <div class="card"><h3>At a glance</h3><dl class="kv">
-        <dt>Status</dt><dd>${esc(STATUS_LABEL[l.app_status])}${l.applied_at ? `, applied ${esc(l.applied_at)}` : ""}</dd>
-        <dt>Deadline</dt><dd>${esc(l.deadline || "unknown")}</dd>
-        <dt>Posted</dt><dd>${esc(l.posted_at || "unknown")}</dd>
-        <dt>Found via</dt><dd>${esc(l.source_detail || l.source)}</dd>
+  box.innerHTML = `${leadQuestionsBlock(l)}<div class="two-col"><div class="stack">${fitBlock}${planBlock}${roleBlock}
+      ${fitBlock || planBlock || roleBlock ? "" : `<div class="empty-state"><h3>Not tailored yet</h3><p>The fit and an action plan show up here once it's tailored.</p></div>`}</div>
+    <div class="stack">${block("At a glance", `<dl class="facts">
+        <dt>Status</dt><dd>${esc(statusLabel(l.app_status))}${l.applied_at ? `, applied ${esc(fmtDate(l.applied_at))}` : ""}</dd>
+        <dt>Deadline</dt><dd>${esc(l.deadline ? fmtDate(l.deadline) : "Not given")}</dd>
+        <dt>Posted</dt><dd>${esc(l.posted_at ? fmtDate(l.posted_at) : "Not given")}</dd>
+        <dt>Found</dt><dd>${foundAt ? `<div class="tags">${foundAt}</div>` : esc(l.source_detail || LABEL_SRC[l.source] || l.source)}</dd>
         <dt>Posting</dt><dd>${posting}</dd>
-        <dt>Triage</dt><dd>${triageText}</dd>
-        <dt>AI usage</dt><dd>${(+l.tokens || 0).toLocaleString()} tokens</dd></dl></div>
-      ${flagsCard}
-      ${coverageCard}
-    </div></div>`;
+        <dt>Score</dt><dd>${scored}</dd>
+        <dt>AI used</dt><dd>${(+l.tokens || 0).toLocaleString()} tokens</dd></dl>`)}
+      ${flagsBlock}${coverageBlock}</div></div>`;
+}
+
+// Questions for this application, once it has a resume: answer or dismiss each, then rework the resume with your
+// answers. With none yet, a button asks the AI to find some.
+function leadQuestionsBlock(l) {
+  if (!l.resume_md) return "";
+  const questions = l.questions || [];
+  if (!questions.length) {
+    return `<div class="banner">${icon("question")}<div>Could anything you haven't told JobPortal make this resume stronger?</div>
+      <button class="button outline" type="button" data-act="lead-gapq">${icon("sparkle")}Ask me about gaps</button></div>`;
+  }
+  const open = questions.filter((q) => q.status === "open"), answered = questions.filter((q) => q.status === "answered");
+  const openItem = (q) => `<div class="question-row"><b>${esc(q.question)}</b>${q.why ? `<small>${esc(q.why)}</small>` : ""}
+      <div class="inline-form"><input type="text" data-lead-answer="${esc(q.question)}" placeholder="Your answer" aria-label="Your answer">
+        <button class="button outline" type="button" data-act="lead-answer">Save</button>
+        <button class="icon-button" type="button" data-act="lead-dismiss" data-q="${esc(q.question)}" aria-label="Not relevant" title="Not relevant">${icon("close")}</button></div></div>`;
+  const answeredItem = (q) => `<div class="question-row done"><b>${esc(q.question)}</b><small>${icon("check")}${esc(q.answer || "")}</small></div>`;
+  const rework = answered.length
+    ? `<button class="button primary" type="button" data-act="lead-apply-answers">${icon("sparkle")}Update this resume with my answers</button>` : "";
+  return block(`${icon("question")}Questions that could make this application stronger`, `<p class="block-note">Your answers go into your
+      profile, so every future application gets them too.</p>${open.map(openItem).join("")}${answered.map(answeredItem).join("")}
+      ${rework ? `<div class="block-actions">${rework}</div>` : ""}`, "", "questions-block");
 }
 
 // Resume and Cover letter: the editor with its live preview, downloads and "Revise with AI". The resume tab adds the
-// strategy and resume check cards and the collection buttons.
+// strategy and resume check, and the buttons for your resume collection.
 function renderDocumentTab(box, l, pkg, doc) {
   const isResume = doc === "resume";
   const text = isResume ? l.resume_md : l.cover_md;
   if (!text) {
     box.innerHTML = isResume
-      ? `<div class="empty"><b>No tailored resume yet</b>Build the package to generate one, or start from a resume in your collection.
-        <div style="margin-top:12px"><button class="btn" data-act="lead-lib-use">Use a saved resume</button></div></div>`
+      ? `<div class="empty-state"><h3>No tailored resume yet</h3><p>Tailor this application to write one, or start from a resume you saved.</p>
+          <div class="block-actions"><button class="button primary" type="button" data-act="regen">Tailor it now</button>
+          <button class="button outline" type="button" data-act="lead-lib-use">Use a saved resume</button></div></div>`
       : noneYet("cover letter");
     return;
   }
   let host = box;
   if (isResume) {
-    box.innerHTML = `<div class="cols" style="margin-bottom:14px">${resumeStrategyCard(pkg)}${resumeCheckCard(pkg.resume_check)}</div><div id="ed-host"></div>`;
-    host = $("#ed-host", box);
+    box.innerHTML = `<div class="two-col">${resumeStrategyBlock(pkg)}${resumeCheckBlock(pkg.resume_check)}</div><div class="editor-host"></div>`;
+    host = $(".editor-host", box);
   }
   const style = pkg.resume_style || {};
   const field = isResume ? "resume_md" : "cover_md";
@@ -216,15 +270,15 @@ function renderDocumentTab(box, l, pkg, doc) {
     },
     files: isResume ? ["resume.pdf", "resume.docx", "resume.md"] : ["cover_letter.pdf", "cover_letter.docx", "cover_letter.md"],
     tools: isResume
-      ? `<button class="btn" data-act="lead-lib-save" title="Keep a copy of this resume in your collection"><i class=i-star></i> Save to collection</button>`
-        + `<button class="btn" data-act="lead-lib-use">Use a saved resume</button>`
+      ? `<button class="button outline" type="button" data-act="lead-lib-save" title="Keep a copy in Settings, Resumes">${icon("star")}Save to my resumes</button>`
+        + `<button class="button outline" type="button" data-act="lead-lib-use">Use a saved resume</button>`
       : "",
     coverage: isResume ? pkg.coverage : null,
   });
 }
 
-// Emails: each outreach email with its recipient, subject and body to edit, the ways to send it, and "Revise" by
-// instruction. Then the LinkedIn connection note, and buttons to export or save them all.
+// Emails: each email with its recipient, subject and body to edit, the ways to send it, and "Revise" by instruction.
+// Then the LinkedIn connection note, and buttons to download or save them all.
 function renderEmailsTab(box, l, pkg) {
   const emails = pkg.emails || [];
   if (!emails.length && !pkg.linkedin_note) {
@@ -234,32 +288,32 @@ function renderEmailsTab(box, l, pkg) {
   // The "To" box suggests the contacts that have an email address.
   const suggestions = (pkg.contacts || []).filter((c) => c.email)
     .map((c) => `<option value="${esc(c.email)}">${esc(c.name)}, ${esc(c.title)}</option>`).join("");
-  const emailCard = (e, i) => `<div class="card email" data-i="${i}">
-        <div class="hd"><span class="chip accent">${esc(e.kind.replace(/_/g, " "))}</span><span class="muted small">${esc(e.to)}</span><span class="spacer"></span>
-          <button class="btn sm" data-act="mail" data-how="gmail" data-i="${i}">Open in Gmail ${I.ext}</button>
-          <button class="btn sm" data-act="mail" data-how="mailto" data-i="${i}">Mail app</button>
-          <button class="btn sm" data-act="mail" data-how="copy" data-i="${i}">Copy</button>
-          <button class="btn sm" data-act="mail" data-how="eml" data-i="${i}" title="Download as an unsent draft (.eml) for Thunderbird / Outlook / Apple Mail">.eml</button>
-          <button class="btn sm" data-act="mail" data-how="sent" data-i="${i}">Mark sent</button></div>
-        <div class="grid2"><label class="f"><span>To</span><input type="email" list="cemails" data-ef="to_addr" value="${esc(pickTo(e))}" placeholder="pick a contact or type an address"></label>
-          <label class="f"><span>Subject</span><input type="text" data-ef="subject" value="${esc(e.subject)}"></label></div>
-        <textarea data-ef="body">${esc(e.body)}</textarea>
-        <div class="revise" style="margin:0"><input type="text" data-erev="${i}" placeholder="Say how to change this email"><button class="btn sm" data-act="revise-email" data-i="${i}">Revise</button></div></div>`;
-  const note = pkg.linkedin_note ? `<div class="card"><h3>LinkedIn connection note <span id="lncount" class="muted">${pkg.linkedin_note.length}/300</span></h3>
-          <textarea id="lnote" rows="3">${esc(pkg.linkedin_note)}</textarea>
-          <div class="row" style="margin-top:8px"><button class="btn sm" data-act="copy-lnote">Copy</button></div></div>` : "";
-  box.innerHTML = `<datalist id="cemails">${suggestions}</datalist>
-      <div class="stack">${emails.map(emailCard).join("")}
-        ${note}
-        <div class="row" style="justify-content:flex-end"><span class="muted small">Export all emails:</span>${exportBtns(l.id, "emails", ["md", "docx", "pdf"])}
-          <button class="btn primary" data-act="save-emails">Save edits</button></div></div>`;
+  const emailCard = (e, i) => `<section class="block email-card" data-email="${i}">
+      <div class="email-head"><span class="tag green">${esc(humanize(e.kind))}</span><small>${esc(e.to)}</small><span class="spacer"></span>
+        <button class="button outline small" type="button" data-act="mail" data-how="gmail" data-i="${i}">Gmail ${icon("external")}</button>
+        <button class="button outline small" type="button" data-act="mail" data-how="mailto" data-i="${i}">Mail app</button>
+        <button class="button outline small" type="button" data-act="mail" data-how="copy" data-i="${i}">${icon("copy")}Copy</button>
+        <button class="button outline small" type="button" data-act="mail" data-how="eml" data-i="${i}" title="Download as an unsent draft for Outlook, Apple Mail or Thunderbird">.eml</button>
+        <button class="button light small" type="button" data-act="mail" data-how="sent" data-i="${i}">${icon("check")}Mark sent</button></div>
+      <div class="form-grid"><label class="field"><span class="field-label">To</span><input type="email" list="contact-emails" data-ef="to_addr" value="${esc(pickTo(e))}" placeholder="Pick a contact or type an address"></label>
+        <label class="field"><span class="field-label">Subject</span><input type="text" data-ef="subject" value="${esc(e.subject)}"></label></div>
+      <textarea data-ef="body" rows="9" aria-label="Email text">${esc(e.body)}</textarea>
+      <div class="inline-form"><input type="text" data-erev="${i}" placeholder="Say how to change this email" aria-label="How to change it">
+        <button class="button light" type="button" data-act="revise-email" data-i="${i}">${icon("sparkle")}Revise</button></div></section>`;
+  const note = pkg.linkedin_note ? block("LinkedIn connection note",
+    `<textarea data-note rows="3" aria-label="LinkedIn note">${esc(pkg.linkedin_note)}</textarea>
+      <div class="block-actions"><button class="button outline small" type="button" data-act="copy-note">${icon("copy")}Copy</button></div>`,
+    `<small class="count" data-note-count>${pkg.linkedin_note.length}/300</small>`) : "";
+  box.innerHTML = `<datalist id="contact-emails">${suggestions}</datalist><div class="stack">${emails.map(emailCard).join("")}${note}
+      <div class="block-actions end"><span class="muted-note">Download all emails:</span>${exportButtons(l.id, "emails", ["md", "docx", "pdf"])}
+        <button class="button primary" type="button" data-act="save-emails">Save edits</button></div></div>`;
   box.addEventListener("input", (e) => {
     S.dirty = true;
-    if (e.target.id === "lnote") $("#lncount").textContent = `${e.target.value.length}/300`;  // LinkedIn allows 300 characters
+    if (e.target.matches("[data-note]")) lv("[data-note-count]").textContent = `${e.target.value.length}/300`;  // LinkedIn allows 300 characters
   });
 }
 
-// The recipient to pre-fill: the address the AI wrote for this email. A guessed pattern ("first.last@...") or a
+// The recipient to fill in: the address the AI wrote for this email. A guessed pattern ("first.last@...") or a
 // placeholder is left out, so you never send to an invented address.
 function pickTo(e) {
   if (e.to_addr != null) return e.to_addr;
@@ -271,30 +325,28 @@ function pickTo(e) {
 // right away, and you can add or remove people.
 function renderContactsTab(box, l, pkg) {
   const contacts = pkg.contacts || [];
-  const input = (i, key, value, placeholder) => `<input type="text" data-cf="${key}" data-i="${i}" value="${esc(value || "")}" placeholder="${placeholder}">`;
-  const gap = `<div style="height:4px"></div>`;
-  const confidence = (c) => (c.email_confidence === "found" ? "good" : c.email_confidence === "pattern" ? "warn" : "");
-  const links = (c) => (safeUrl(c.linkedin) ? `<a href="${esc(c.linkedin)}" target="_blank" rel="noopener">open LinkedIn</a>` : "")
-    + (safeUrl(c.source_url) ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener">source</a>` : "");
-  const row = (c, i) => `<tr><td style="min-width:200px">${input(i, "name", c.name, "Name")}${gap}${input(i, "title", c.title, "Title")}${gap}${input(i, "org", c.org, "Organization")}</td>
-        <td style="min-width:220px">${input(i, "email", c.email, "email@example.com")}<div class="row" style="margin-top:5px;gap:5px"><span class="chip ${confidence(c)}">${esc(c.email_confidence || "unknown")}</span>
-          ${c.email ? `<button class="btn sm ghost" data-act="copytext" data-text="${esc(c.email)}">copy</button>` : ""}</div></td>
-        <td style="min-width:200px">${input(i, "linkedin", c.linkedin, "LinkedIn URL")}${gap}${input(i, "notes", c.notes, "Notes")}
-          <div class="small row" style="margin-top:4px;gap:8px">${links(c)}</div></td>
-        <td class="small" style="max-width:300px"><textarea data-cf="why" data-i="${i}" rows="3">${esc(c.why || "")}</textarea></td>
-        <td>${contactStatusSelect(l.id, i, c.status)}</td>
-        <td><button class="btn sm ghost danger" data-act="rm-contact" data-i="${i}" title="Remove"><i class=i-x></i></button></td></tr>`;
-  const table = contacts.length ? `<table class="t"><thead><tr><th>Name / title / org</th><th>Email</th><th>LinkedIn and notes</th><th>Why them</th><th>Status</th><th></th></tr></thead><tbody>
-      ${contacts.map(row).join("")}
-      </tbody></table>` : `<div class="muted">No contacts found yet.</div>`;
-  box.innerHTML = `<div class="card"><div class="row" style="margin-bottom:6px"><h3 style="margin:0">People to reach (${contacts.length})</h3><span class="spacer"></span>
-      ${exportBtns(l.id, "contacts", ["csv"])}</div>
-      <p class="muted small" style="margin-top:0">Found by the AI on the public web. Every field is editable and saves when you leave it. <b>found</b> means the
-        email was seen publicly; <b>pattern</b> means it was inferred from the company's email format (verify it).</p>
-      ${table}
-      <div class="hr"></div><div class="grid3" id="newc">
-        <input type="text" placeholder="Name" data-nc="name"><input type="text" placeholder="Title" data-nc="title"><input type="email" placeholder="Email" data-nc="email">
-        <input type="url" placeholder="LinkedIn URL" data-nc="linkedin"><input type="text" placeholder="Why / notes" data-nc="why"><button class="btn" data-act="add-contact">+ Add contact</button></div></div>`;
+  const input = (i, key, value, placeholder) => `<input type="text" data-cf="${key}" data-i="${i}" value="${esc(value || "")}" placeholder="${placeholder}" aria-label="${placeholder}">`;
+  const confidence = (c) => (c.email_confidence === "found" ? "green" : c.email_confidence === "pattern" ? "warn" : "");
+  const links = (c) => (safeUrl(c.linkedin) ? `<a href="${esc(c.linkedin)}" target="_blank" rel="noopener">LinkedIn</a>` : "")
+    + (safeUrl(c.source_url) ? `<a href="${esc(c.source_url)}" target="_blank" rel="noopener">Source</a>` : "");
+  const row = (c, i) => `<tr><td><div class="cell-stack">${input(i, "name", c.name, "Name")}${input(i, "title", c.title, "Title")}${input(i, "org", c.org, "Organization")}</div></td>
+      <td><div class="cell-stack">${input(i, "email", c.email, "Email")}<div class="cell-row"><span class="tag ${confidence(c)}">${esc(humanize(c.email_confidence || "unknown"))}</span>
+        ${c.email ? `<button class="text-button" type="button" data-act="copytext" data-text="${esc(c.email)}">Copy</button>` : ""}</div></div></td>
+      <td><div class="cell-stack">${input(i, "linkedin", c.linkedin, "LinkedIn link")}${input(i, "notes", c.notes, "Notes")}<div class="cell-row">${links(c)}</div></div></td>
+      <td><textarea class="why" data-cf="why" data-i="${i}" rows="4" aria-label="Why them">${esc(c.why || "")}</textarea></td>
+      <td>${contactStatusSelect(l.id, i, c.status)}</td>
+      <td><button class="icon-button" type="button" data-act="rm-contact" data-i="${i}" aria-label="Remove ${esc(c.name)}">${icon("trash")}</button></td></tr>`;
+  const table = contacts.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Name, title, organization</th><th>Email</th><th>LinkedIn and notes</th>
+      <th>Why them</th><th>Status</th><th><span class="sr-only">Remove</span></th></tr></thead><tbody>${contacts.map(row).join("")}</tbody></table></div>`
+    : `<p class="muted-note">No contacts found yet.</p>`;
+  box.innerHTML = block(`People to reach (${contacts.length})`,
+    `<p class="block-note">Found by the AI on the public web. Every field saves when you leave it. <b>Found</b> means the email was seen in
+      public; <b>Pattern</b> means it was worked out from the company's email format, so check it first.</p>${table}
+    <h4>Add someone</h4><div class="form-grid three"><input type="text" placeholder="Name" data-nc="name" aria-label="Name">
+      <input type="text" placeholder="Title" data-nc="title" aria-label="Title"><input type="email" placeholder="Email" data-nc="email" aria-label="Email">
+      <input type="url" placeholder="LinkedIn link" data-nc="linkedin" aria-label="LinkedIn link"><input type="text" placeholder="Why them, or notes" data-nc="why" aria-label="Why them">
+      <button class="button outline" type="button" data-act="add-contact">${icon("plus")}Add contact</button></div>`,
+    exportButtons(l.id, "contacts", ["csv"]));
   box.addEventListener("change", async (e) => {  // an edited contact field: save that one field
     const el = e.target;
     if (!el.dataset.cf) return;
@@ -303,9 +355,9 @@ function renderContactsTab(box, l, pkg) {
   });
 }
 
-// Company intel and Interview prep: Markdown documents with a preview, downloads and "Revise with AI".
+// Interview prep and the company brief: Markdown documents with a preview, downloads and "Revise with AI".
 const NOTES_DOCS = {
-  intel: { key: "company_brief_md", name: "company intel", stem: "company_intel", doc: "company brief" },
+  intel: { key: "company_brief_md", name: "company brief", stem: "company_intel", doc: "company brief" },
   prep: { key: "interview_prep_md", name: "interview prep", stem: "interview_prep", doc: "interview prep" },
 };
 function renderNotesTab(box, l, pkg, tab) {
@@ -331,82 +383,83 @@ function renderNotesTab(box, l, pkg, tab) {
 async function renderKitTab(box, l, pkg) {
   if (!S.profileCache) S.profileCache = await api("/api/profile");
   const qa = S.profileCache.qa || [];
-  const copyRow = (q, a) => `<div class="copyrow"><div class="q">${esc(q)}</div><div class="a">${esc(a)}</div>`
-    + `<button class="btn sm" data-act="copytext" data-text="${esc(a)}">copy</button></div>`;
+  const copyRow = (q, a) => `<div class="copy-row"><span class="copy-q">${esc(q)}</span><span class="copy-a">${esc(a)}</span>`
+    + `<button class="text-button" type="button" data-act="copytext" data-text="${esc(a)}">${icon("copy")}Copy</button></div>`;
   const apply = safeUrl(l.apply_url) || safeUrl(l.url);
   const answers = pkg.application_answers || [];
-  const answerEditor = (x, i) => `<div class="stack" style="gap:6px;padding-bottom:12px;border-bottom:1px solid var(--line)">
-        <div class="row"><input type="text" data-aq="${i}" value="${esc(x.question)}" style="flex:1;font-weight:600">
-          <button class="btn sm" data-act="copy-answer" data-i="${i}">copy</button><button class="btn sm ghost danger" data-act="rm-answer" data-i="${i}" title="Remove"><i class=i-x></i></button></div>
-        <textarea data-aa="${i}" rows="5" style="font-size:13px">${esc(x.answer)}</textarea></div>`;
+  const answerEditor = (x, i) => `<div class="answer-edit"><div class="inline-form"><input type="text" data-aq="${i}" value="${esc(x.question)}" aria-label="Question">
+        <button class="button outline small" type="button" data-act="copy-answer" data-i="${i}">${icon("copy")}Copy</button>
+        <button class="icon-button" type="button" data-act="rm-answer" data-i="${i}" aria-label="Remove this question">${icon("trash")}</button></div>
+      <textarea data-aa="${i}" rows="5" aria-label="Answer">${esc(x.answer)}</textarea></div>`;
   const standard = qa.filter((x) => !x.eeo), selfId = qa.filter((x) => x.eeo);  // eeo = voluntary self-identification
-  const selfIdCard = selfId.length ? `<div class="card"><h3>Voluntary self-identification</h3><p class="muted small" style="margin-top:-4px">Only shown here for copying.
-      Never sent to the AI.</p>${selfId.map((x) => copyRow(x.q, x.a)).join("")}</div>` : "";
-  box.innerHTML = `<div class="cols"><div class="stack">
-    <div class="card"><h3>Files</h3><div class="row">${l.resume_md ? exportBtns(l.id, "resume", ["pdf", "docx", "md"], "Resume") : ""}</div>
-      <div class="row" style="margin-top:8px">${l.cover_md ? exportBtns(l.id, "cover_letter", ["pdf", "docx", "md"], "Cover") : ""}</div>
-      <div class="row" style="margin-top:12px"><a class="btn" href="/api/leads/${l.id}/export/package.zip">${I.dl} Everything (.zip)</a>
-      ${apply ? `<button class="btn primary" data-act="apply" data-url="${esc(apply)}">Open application ${I.ext}</button>` : ""}</div></div>
-    <div class="card"><div class="row" style="margin-bottom:10px"><h3 style="margin:0">Tailored answers</h3><span class="spacer"></span>${exportBtns(l.id, "answers", ["docx", "pdf", "md"])}</div>
-      <div class="stack" id="answers">${answers.map(answerEditor).join("") || `<div class="muted">Build the package to generate tailored answers.</div>`}</div>
-      <div class="row" style="margin-top:12px"><button class="btn sm" data-act="add-answer">+ Add question</button><span class="spacer"></span>
-        <span class="muted small" id="ans-state"></span><button class="btn primary sm" data-act="save-answers">Save answers</button></div></div>
-  </div><div class="stack"><div class="card"><h3>Standard answers</h3><p class="muted small" style="margin-top:-4px">From your answers in
-      <a href="#/profile/answers">Profile, Standard answers</a>. Edit them there.</p>
-    ${standard.map((x) => copyRow(x.q, x.a)).join("") || `<div class="muted small">Answer the standard questions to fill these in.</div>`}</div>
-    ${selfIdCard}</div></div>`;
+  const selfIdBlock = selfId.length ? block("Voluntary self-identification", `<p class="block-note">Shown here only so you can copy it.
+      It's never sent to the AI.</p>${selfId.map((x) => copyRow(x.q, x.a)).join("")}`) : "";
+  box.innerHTML = `<div class="two-col"><div class="stack">
+    ${block("Files", `<div class="button-row">${l.resume_md ? exportButtons(l.id, "resume", ["pdf", "docx", "md"], "Resume") : ""}</div>
+      <div class="button-row">${l.cover_md ? exportButtons(l.id, "cover_letter", ["pdf", "docx", "md"], "Cover letter") : ""}</div>
+      <div class="button-row"><a class="button outline" href="/api/leads/${l.id}/export/package.zip">${icon("download")}Everything (.zip)</a>
+        ${apply ? `<button class="button primary" type="button" data-act="apply" data-url="${esc(apply)}">Open the application ${icon("external")}</button>` : ""}</div>`)}
+    ${block("Tailored answers",
+      `<div class="stack">${answers.map(answerEditor).join("") || `<p class="muted-note">Tailor this application to write answers to its questions.</p>`}</div>
+      <div class="block-actions"><button class="button outline" type="button" data-act="add-answer">${icon("plus")}Add a question</button><span class="spacer"></span>
+        <span class="muted-note" data-answers-state></span><button class="button primary" type="button" data-act="save-answers">Save answers</button></div>`,
+      exportButtons(l.id, "answers", ["docx", "pdf", "md"]))}
+  </div><div class="stack">${block("Your standard answers", `<p class="block-note">From your answers in <a href="#/settings/profile/answers">Settings, Profile</a>.
+      Change them there.</p>${standard.map((x) => copyRow(x.q, x.a)).join("") || `<p class="muted-note">Answer the standard questions to fill these in.</p>`}`)}
+    ${selfIdBlock}</div></div>`;
   box.addEventListener("input", (e) => {
     if (e.target.dataset.aq == null && e.target.dataset.aa == null) return;
     S.dirty = true;
-    $("#ans-state").textContent = "unsaved";
+    lv("[data-answers-state]").textContent = "Not saved yet";
   });
 }
 
 // Reads the kit's answer fields back into S.lead.package.application_answers and returns them.
-function readAnswers() {
+function readKitAnswers() {
   const pkg = S.lead.package;
   pkg.application_answers = (pkg.application_answers || []).map((x, i) => ({
-    question: $(`[data-aq="${i}"]`)?.value ?? x.question,
-    answer: $(`[data-aa="${i}"]`)?.value ?? x.answer,
+    question: lv(`[data-aq="${i}"]`)?.value ?? x.question,
+    answer: lv(`[data-aa="${i}"]`)?.value ?? x.answer,
   }));
   return pkg.application_answers;
 }
 
 // Saves the kit's answers into the lead's package.
-async function saveAnswers() {
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { application_answers: readAnswers() } } });
+async function saveKitAnswers() {
+  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { application_answers: readKitAnswers() } } });
   S.dirty = false;
-}
-
-// Activity: your notes, the timeline of events, the follow-up date, and buttons to log what happened.
-const EVENT_PRESETS = ["Got online assessment", "Recruiter reached out", "Interview scheduled", "Referral submitted", "Offer!", "Rejected"];
-function renderActivityTab(box, l) {
-  const timeline = (l.events || []).map((e) => `<div class="ev"><span class="ts">${esc(localStamp(e.ts))}</span><span class="chip">${esc(e.type)}</span><span>${esc(e.text)}</span></div>`).join("")
-    || `<div class="muted">No activity yet.</div>`;
-  const presets = EVENT_PRESETS.map((text) => `<button class="btn sm" data-act="logev" data-text="${esc(text)}">${esc(text)}</button>`).join("");
-  box.innerHTML = `<div class="cols"><div class="stack"><div class="card"><h3>Notes</h3><textarea id="notes" rows="8">${esc(l.notes || "")}</textarea>
-        <div class="row" style="margin-top:8px"><button class="btn sm" data-act="save-notes">Save notes</button></div></div>
-      <div class="card"><h3>Timeline</h3><div class="timeline">${timeline}</div></div></div>
-      <div class="stack"><div class="card"><h3>Follow-up</h3><label class="f"><span>Follow up on</span><input type="date" id="fu" value="${esc(l.follow_up_at || "")}"></label>
-        <div class="row" style="margin-top:8px"><button class="btn sm" data-act="save-fu">Save date</button></div></div>
-        <div class="card"><h3>Log an event</h3><div class="row">${presets}</div>
-          <div class="row" style="margin-top:10px"><input type="text" id="evtext" placeholder="Custom event" style="flex:1"><button class="btn sm" data-act="logev">Log</button></div></div></div></div>`;
 }
 
 // Posting: the job description as JobPortal captured it, with links to the posting and the apply page.
 function renderPostingTab(box, l) {
-  const posting = safeUrl(l.url) ? `<a class="btn sm" href="${esc(l.url)}" target="_blank" rel="noopener">Open posting ${I.ext}</a>` : "";
+  const posting = safeUrl(l.url) ? `<a class="button outline" href="${esc(l.url)}" target="_blank" rel="noopener">Open the posting ${icon("external")}</a>` : "";
   const applyPage = safeUrl(l.apply_url) && l.apply_url !== l.url
-    ? `<a class="btn sm" href="${esc(l.apply_url)}" target="_blank" rel="noopener">Apply page ${I.ext}</a>` : "";
-  box.innerHTML = `<div class="card"><div class="row" style="margin-bottom:12px">${posting}
-      ${applyPage}
-      <span class="muted small">${esc(l.source_detail || "")}</span></div><pre class="jd">${esc(l.description || "No description captured.")}</pre></div>`;
+    ? `<a class="button outline" href="${esc(l.apply_url)}" target="_blank" rel="noopener">Apply page ${icon("external")}</a>` : "";
+  box.innerHTML = block("", `<div class="button-row">${posting}${applyPage}<span class="muted-note">${esc(l.source_detail || "")}</span></div>
+    <pre class="posting-text">${esc(l.description || "No description was captured for this job.")}</pre>`);
 }
 
-// Download buttons: exportBtns(12, "resume", ["pdf", "docx"], "Resume") makes "Resume PDF" and "Resume DOCX".
-function exportBtns(leadId, stem, formats, label = "") {
-  return formats.map((fmt) => `<button class="btn sm" data-act="export" data-url="/api/leads/${leadId}/export/${stem}.${fmt}">`
-    + `${I.dl} ${label ? label + " " : ""}${fmt.toUpperCase()}</button>`).join("");
+// Activity: your notes, the timeline, the follow-up date, and buttons to log what happened.
+const EVENT_PRESETS = ["Recruiter reached out", "Got an assessment", "Interview scheduled", "Referral submitted", "Got an offer", "Rejected"];
+function renderActivityTab(box, l) {
+  const timeline = (l.events || []).map((e) => `<li class="timeline-row"><span class="timeline-time">${esc(localStamp(e.ts))}</span>`
+    + `<span class="tag">${esc(humanize(e.type))}</span><span>${esc(e.text)}</span></li>`).join("");
+  const presets = EVENT_PRESETS.map((text) => `<button class="chip" type="button" data-act="log-event" data-text="${esc(text)}">${esc(text)}</button>`).join("");
+  box.innerHTML = `<div class="two-col"><div class="stack">
+      ${block("Notes", `<textarea data-notes rows="8" aria-label="Notes">${esc(l.notes || "")}</textarea>
+        <div class="block-actions"><button class="button outline" type="button" data-act="save-notes">Save notes</button></div>`)}
+      ${block("Timeline", timeline ? `<ul class="timeline">${timeline}</ul>` : `<p class="muted-note">Nothing yet.</p>`)}</div>
+    <div class="stack">${block("Follow-up", `<label class="field"><span class="field-label">Follow up on</span><input type="date" data-follow-up value="${esc(l.follow_up_at || "")}"></label>
+        <div class="block-actions"><button class="button outline" type="button" data-act="save-follow-up">Save date</button></div>`)}
+      ${block("Log what happened", `<div class="filters">${presets}</div>
+        <div class="inline-form"><input type="text" data-event-text placeholder="Something else" aria-label="What happened">
+          <button class="button outline" type="button" data-act="log-event">Log it</button></div>`)}</div></div>`;
+}
+
+// Download buttons: exportButtons(12, "resume", ["pdf", "docx"], "Resume") makes "Resume PDF" and "Resume DOCX".
+function exportButtons(leadId, stem, formats, label = "") {
+  return formats.map((fmt) => `<button class="button outline small" type="button" data-act="export" data-url="/api/leads/${leadId}/export/${stem}.${fmt}">`
+    + `${icon("download")}${label ? label + " " : ""}${fmt.toUpperCase()}</button>`).join("");
 }
 
 // ---------------------------------------------------------------- editors
@@ -425,7 +478,7 @@ function saveOnCtrlS(textarea, save) {
 async function reviseWithAI(button, url, doc, instruction, textarea, afterRevise) {
   if (!instruction) return;
   button.disabled = true;
-  button.innerHTML = `<span class="spin"></span> Revising…`;
+  button.innerHTML = `${spinner()} Revising`;
   try {
     const r = await api(url, { method: "POST", body: { doc, instruction, text: textarea.value } });
     textarea.value = r.text;
@@ -433,31 +486,31 @@ async function reviseWithAI(button, url, doc, instruction, textarea, afterRevise
     afterRevise();
     toast("Revised", r.change_summary);
   } catch (err) {
-    toast("Revision failed", err.message, "error");
+    toast("The revision didn't work", err.message, "error");
   }
   button.disabled = false;
-  button.innerHTML = "<i class=i-ai></i> Revise with AI";
+  button.innerHTML = `${icon("sparkle")}Revise with AI`;
 }
 
-// The Markdown editor for company intel and interview prep: text on the left, a rendered preview on the right.
-// o: { text, leadId, stem (export file name), doc (the name the AI sees), save(text) }
+// The Markdown editor for interview prep and the company brief: text on the left, a rendered preview on the right.
+// o: { text, leadId, stem (the download's file name), doc (the name the AI sees), save(text) }
 function mountDocEditor(container, o) {
-  container.innerHTML = `<div class="toolbar"><button class="btn primary" data-de="save">Save</button>
-      ${["pdf", "docx", "md"].map((fmt) => `<button class="btn" data-de="exp" data-fmt="${fmt}">${I.dl} ${fmt.toUpperCase()}</button>`).join("")}
-      <span class="muted small mono" id="destate"></span></div>
-    <div class="revise"><input type="text" id="de-rev" placeholder="Say how to change it, e.g. “add 3 questions about system design, shorten the company history”">
-      <button class="btn ai" data-de="revise"><i class=i-ai></i> Revise with AI</button></div>
-    <div class="editor"><textarea id="de-ed" spellcheck="true">${esc(o.text)}</textarea><div class="card md" id="de-pv" style="max-height:76vh;overflow:auto"></div></div>`;
-  const editor = $("#de-ed", container), preview = $("#de-pv", container), state = $("#destate", container);
+  container.innerHTML = `<div class="toolbar"><button class="button primary" type="button" data-de="save">Save</button>
+      ${["pdf", "docx", "md"].map((fmt) => `<button class="button outline small" type="button" data-de="exp" data-fmt="${fmt}">${icon("download")}${fmt.toUpperCase()}</button>`).join("")}
+      <span class="muted-note" data-state></span></div>
+    <div class="inline-form revise"><input type="text" data-revise placeholder="Say how to change it, like: add three likely questions, shorten the history" aria-label="How to change it">
+      <button class="button light" type="button" data-de="revise">${icon("sparkle")}Revise with AI</button></div>
+    <div class="editor"><textarea class="editor-text" spellcheck="true" aria-label="Text">${esc(o.text)}</textarea><div class="block prose editor-preview"></div></div>`;
+  const editor = $(".editor-text", container), preview = $(".editor-preview", container), state = $("[data-state]", container);
   const draw = () => (preview.innerHTML = md(editor.value));
   const save = async () => {
     await o.save(editor.value);
     S.dirty = false;
-    state.textContent = "saved";
+    state.textContent = "Saved";
   };
   editor.addEventListener("input", debounce(() => {
     S.dirty = true;
-    state.textContent = "unsaved";
+    state.textContent = "Not saved yet";
     draw();
   }, 150));
   saveOnCtrlS(editor, save);
@@ -467,12 +520,12 @@ function mountDocEditor(container, o) {
     const what = button.dataset.de;
     if (what === "save") save();
     if (what === "exp") {
-      if (S.dirty) await save();  // export what you see
+      if (S.dirty) await save();  // download what you see
       openUrl(`/api/leads/${o.leadId}/export/${o.stem}.${button.dataset.fmt}`);
     }
     if (what === "revise") {
-      await reviseWithAI(button, `/api/leads/${o.leadId}/revise`, o.doc, $("#de-rev", container).value.trim(), editor, () => {
-        state.textContent = "revised: review it, then Save";
+      await reviseWithAI(button, `/api/leads/${o.leadId}/revise`, o.doc, $("[data-revise]", container).value.trim(), editor, () => {
+        state.textContent = "Revised: read it over, then Save";
         draw();
       });
     }
@@ -480,53 +533,55 @@ function mountDocEditor(container, o) {
   draw();
 }
 
-// A US Letter page at 96 pixels per inch, the size the preview iframe is drawn at before it's scaled to fit.
+// A US Letter page at 96 pixels per inch, the size the preview is drawn at before it's scaled to fit.
 const PAGE_W = 816, PAGE_H = 1056;
 
-// The resume and cover letter editor, used on the lead page and for saved resumes on the Resumes page: Markdown on the
-// left, the page exactly as its PDF will look on the right (POST /api/preview renders it on the server).
+// The resume and cover letter editor, used on a lead and for saved resumes (Settings, Resumes): Markdown on the left,
+// the page exactly as its PDF will look on the right (POST /api/preview renders it on the server).
 // o: { doc ("resume" or "cover"), text, save(text), files (download names), leadId, theme, maxPages, original (the AI's
-//      version, for Revert), tools (extra toolbar HTML), coverage (keyword chips), reviseUrl and fileHref (saved resumes) }
-// It adds o.refresh() (redraw the preview) and o.saveNow(), and keeps o in S.editor for the layout menu and Re-check.
+//      version, for Revert), tools (more toolbar buttons), coverage (keyword tags), reviseUrl and fileHref (saved resumes) }
+// It adds o.refresh() (redraw the preview), o.saveNow() and o.text() (what's in the editor), and keeps o in S.editor
+// for the layout menu and Re-check.
 function mountEditor(container, o) {
   container.innerHTML = `<div class="toolbar">
-      <button class="btn primary" data-ed="save">Save</button>
-      ${(o.files || []).map((f) => `<button class="btn" data-ed="file" data-file="${f}">${I.dl} ${f.split(".").pop().toUpperCase()}</button>`).join("")}
-      ${o.original ? `<button class="btn ghost" data-ed="revert">Revert to AI version</button>` : ""}${o.tools || ""}
-      <span class="muted small mono" id="edstate"></span><span class="spacer"></span><span class="chip warn" id="overflow" style="display:none"><i class=i-warn></i> spills past one page</span></div>
-    <div class="revise"><input type="text" id="revise-in" placeholder="Say how to change it, e.g. “lead with the data pipeline project, emphasize SQL, cut the retail job to one bullet”">
-      <button class="btn ai" data-ed="revise"><i class=i-ai></i> Revise with AI</button></div>
-    ${o.coverage ? `<div style="margin-bottom:12px">${keywordChips(o.coverage, "Not in this resume")}</div>` : ""}
-    <div class="editor"><textarea id="ed" spellcheck="true">${esc(o.text)}</textarea>
-      <div class="preview-wrap" id="pvw"><div class="preview-box" id="pvb"><iframe id="pv" sandbox="allow-same-origin" title="preview"></iframe></div></div></div>`;
-  const editor = $("#ed", container), frame = $("#pv", container), state = $("#edstate", container);
-  const wrap = $("#pvw", container), box = $("#pvb", container);
+      <button class="button primary" type="button" data-ed="save">Save</button>
+      ${(o.files || []).map((f) => `<button class="button outline small" type="button" data-ed="file" data-file="${f}">${icon("download")}${f.split(".").pop().toUpperCase()}</button>`).join("")}
+      ${o.original ? `<button class="button text" type="button" data-ed="revert">${icon("undo")}Back to the AI's version</button>` : ""}${o.tools || ""}
+      <span class="muted-note" data-state></span><span class="spacer"></span><span class="tag" data-fit hidden></span></div>
+    <div class="inline-form revise"><input type="text" data-revise placeholder="Say how to change it, like: lead with my newest job, cut the oldest one to one line" aria-label="How to change it">
+      <button class="button light" type="button" data-ed="revise">${icon("sparkle")}Revise with AI</button></div>
+    ${o.coverage ? keywordTags(o.coverage, "Not in this resume") : ""}
+    <div class="editor"><textarea class="editor-text" spellcheck="true" aria-label="${o.doc === "cover" ? "Cover letter" : "Resume"} text">${esc(o.text)}</textarea>
+      <div class="preview"><div class="preview-page"><iframe sandbox="allow-same-origin" title="Preview"></iframe></div></div></div>`;
+  const editor = $(".editor-text", container), frame = $("iframe", container), state = $("[data-state]", container);
+  const wrap = $(".preview", container), page = $(".preview-page", container);
   const pages = Math.max(1, +o.maxPages || 1);
   frame.style.height = `${PAGE_H * pages}px`;
   // Shrink the full-size page to the width of the preview column.
   const scale = () => {
     const s = Math.min(1, (wrap.clientWidth - 28) / PAGE_W);
     frame.style.transform = `scale(${s})`;
-    box.style.width = `${PAGE_W * s}px`;
-    box.style.height = `${PAGE_H * pages * s}px`;
+    page.style.width = `${PAGE_W * s}px`;
+    page.style.height = `${PAGE_H * pages * s}px`;
   };
   const refresh = async () => {
     frame.srcdoc = await api("/api/preview", { method: "POST", body: { doc: o.doc, md: editor.value, lead_id: o.leadId, theme: o.theme } });
-    frame.onload = () => showFit(frame, o.doc, pages, $("#overflow", container));
+    frame.onload = () => showFit(frame, o.doc, pages, $("[data-fit]", container));
   };
   const later = debounce(refresh, 350);
   const save = async () => {
     await o.save(editor.value);
     S.dirty = false;
-    state.textContent = "saved";
+    state.textContent = "Saved";
     if (o.doc === "resume" && o.leadId) recheckResume(o.leadId);
   };
   o.refresh = refresh;
   o.saveNow = save;
+  o.text = () => editor.value;
   S.editor = o;
   editor.addEventListener("input", () => {
     S.dirty = true;
-    state.textContent = "unsaved";
+    state.textContent = "Not saved yet";
     later();
   });
   saveOnCtrlS(editor, save);
@@ -539,16 +594,16 @@ function mountEditor(container, o) {
       if (S.dirty) await save();  // download what you see
       openUrl(o.fileHref ? o.fileHref(button.dataset.file) : `/api/leads/${o.leadId}/export/${button.dataset.file}`);
     }
-    if (what === "revert" && confirm("Replace the editor contents with the original AI version?")) {
+    if (what === "revert" && confirm("Replace what's in the editor with the AI's original version?")) {
       editor.value = o.original;
       S.dirty = true;
-      state.textContent = "unsaved";
+      state.textContent = "Not saved yet";
       refresh();
     }
     if (what === "revise") {
       const url = o.reviseUrl || `/api/leads/${o.leadId}/revise`;
-      await reviseWithAI(button, url, o.doc, $("#revise-in", container).value.trim(), editor, () => {
-        state.textContent = "revised: review it, then Save";
+      await reviseWithAI(button, url, o.doc, $("[data-revise]", container).value.trim(), editor, () => {
+        state.textContent = "Revised: read it over, then Save";
         refresh();
       });
     }
@@ -563,9 +618,9 @@ function mountEditor(container, o) {
 const FIT_SCALES = [1, 0.97, 0.94, 0.91, 0.88, 0.86];
 
 // After the preview loads: shrink a resume step by step until it fits its page limit, the same way the server fits the
-// PDF, so the preview matches the download. The chip in the toolbar then says "auto-fit at N%" or "Longer than one page,
-// trim it".
-function showFit(frame, doc, pages, chip) {
+// PDF, so the preview matches the download. The tag in the toolbar then says "Fits one page at 94%" or "Longer than one
+// page: trim it".
+function showFit(frame, doc, pages, tag) {
   try {
     const d = frame.contentDocument, page = d.querySelector(".page");
     d.documentElement.style.overflow = "hidden";
@@ -574,7 +629,7 @@ function showFit(frame, doc, pages, chip) {
     // preview is one tall sheet that has them once. So a two-page resume loses one set of margins at the page break.
     const limit = () => {
       if (!page) return 1060 * pages;
-      const css = d.defaultView.getComputedStyle(page);
+      const css = getComputedStyle(page);  // this window's: the sandboxed preview runs no script of its own
       const repeats = (css.boxDecorationBreak || css.webkitBoxDecorationBreak) === "clone";
       const margins = parseFloat(css.paddingTop) + parseFloat(css.paddingBottom);
       return 1060 * pages - (repeats ? (pages - 1) * margins : 0);
@@ -593,89 +648,92 @@ function showFit(frame, doc, pages, chip) {
     }
     const over = d.documentElement.scrollHeight > limit();
     const pageLimit = pages === 1 ? "one page" : `${pages} pages`;
-    chip.style.display = over || fit < 1 ? "" : "none";
-    chip.className = `chip ${over ? "bad" : "blue"}`;
-    chip.textContent = over ? `Longer than ${pageLimit}, trim it` : `auto-fit to ${pageLimit} at ${Math.round(fit * 100)}%`;
+    tag.hidden = !(over || fit < 1);
+    tag.className = `tag ${over ? "bad" : "blue"}`;
+    tag.textContent = over ? `Longer than ${pageLimit}: trim it` : `Fits ${pageLimit} at ${Math.round(fit * 100)}%`;
   } catch (_) {}  // the preview went away before it loaded
 }
 
-// ---------------------------------------------------------------- resume cards
-// Display names for the resume strategies (archetypes) the AI picks.
-const ARCHETYPE_LABEL = { big_tech_swe: "Big-tech SWE", startup_product: "Startup / product", defense_contractor: "Defense contractor",
-  aerospace_space: "Aerospace / space", research_lab: "Research lab", federal_usajobs: "Federal (USAJobs)", data_ml: "Data / ML",
-  it_support_infra: "IT / infrastructure", solutions_sales_eng: "Solutions / sales engineering", experienced_professional: "Experienced professional",
+// ---------------------------------------------------------------- the resume's strategy and check
+// Names for the resume strategies (archetypes) the AI picks. A strategy not listed here shows its key, made readable.
+const ARCHETYPE_LABEL = { big_tech_swe: "Big-tech SWE", startup_product: "Startup or product", defense_contractor: "Defense contractor",
+  aerospace_space: "Aerospace and space", research_lab: "Research lab", federal_usajobs: "Federal (USAJobs)", data_ml: "Data and ML",
+  it_support_infra: "IT and infrastructure", solutions_sales_eng: "Solutions and sales engineering", experienced_professional: "Experienced professional",
   general: "General", general_tech: "General tech" };
+const archetypeLabel = (key) => ARCHETYPE_LABEL[key] || humanize(key);
 
-// The Strategy card on the Resume tab: the archetype the AI wrote for, the layout menu, the page limit, why it chose what
-// it did, and what the recruiter critic changed.
-function resumeStrategyCard(pkg) {
+// The strategy block on the Resume tab: what kind of resume the AI wrote, the layout menu, the page limit, why it chose
+// what it did, and what the recruiter review changed.
+function resumeStrategyBlock(pkg) {
   const st = pkg.resume_strategy || {}, style = pkg.resume_style || { theme: "classic", max_pages: 1 }, review = pkg.resume_review || {};
-  const detail = (label, text, first) => `<div class="small"${first ? "" : ` style="margin-top:4px"`}><b class="mono">${label}</b> ${text}</div>`;
+  const detail = (label, text) => `<p class="detail-line"><b>${label}</b> ${text}</p>`;
   const critic = review.changes?.length
-    ? `<details style="margin-top:8px"><summary class="small mono" style="cursor:pointer">RECRUITER CRITIC: ${plural(review.changes.length, "change")}
-        (score ${review.before_score} → ${review.after_score ?? review.before_score})</summary>${bulletList(review.changes, "small")}</details>`
+    ? `<details class="disclosure"><summary>Recruiter review: ${plural(review.changes.length, "change")} (score ${review.before_score}
+        to ${review.after_score ?? review.before_score})</summary>${bulletList(review.changes)}</details>`
     : "";
-  return `<div class="card"><div class="row" style="margin-bottom:8px"><h3 style="margin:0">Strategy</h3>
-      ${st.archetype ? `<span class="chip violet">${esc(ARCHETYPE_LABEL[st.archetype] || st.archetype)}</span>` : ""}<span class="spacer"></span>
-      <label class="row small" style="gap:6px">Layout <select id="rs-theme" style="width:auto">${selectOptions(RESUME_THEMES, style.theme)}</select></label>
-      <span class="chip">${style.max_pages === 2 ? "2 pages max" : "1 page"}</span></div>
-    ${st.rationale ? `<p class="small" style="margin:0 0 8px">${esc(st.rationale)}</p>` : `<p class="muted small" style="margin:0 0 8px">Regenerate this package to get a strategy-driven resume.</p>`}
-    ${st.section_order?.length ? detail("ORDER", st.section_order.map(esc).join(" → "), true) : ""}
-    ${st.projects?.length ? detail("PROJECTS", st.projects.map(esc).join(", ")) : ""}
-    ${st.summary ? detail("SUMMARY", esc(st.summary)) : ""}
-    ${st.skills_grouping ? detail("SKILLS", esc(st.skills_grouping)) : ""}
-    ${critic}</div>`;
+  return block("Strategy",
+    `${st.archetype ? `<p><span class="tag purple">${esc(archetypeLabel(st.archetype))}</span></p>` : ""}
+    ${st.rationale ? `<p>${esc(st.rationale)}</p>` : `<p class="muted-note">Tailor it again to get a resume written to a strategy.</p>`}
+    ${st.section_order?.length ? detail("Order:", st.section_order.map(esc).join(", then ")) : ""}
+    ${st.projects?.length ? detail("Projects:", st.projects.map(esc).join(", ")) : ""}
+    ${st.summary ? detail("Summary:", esc(st.summary)) : ""}
+    ${st.skills_grouping ? detail("Skills:", esc(st.skills_grouping)) : ""}
+    ${critic}`,
+    `<label class="control"><span>Layout</span><select data-resume-theme>${selectOptions(RESUME_THEMES.map((t) => [t, humanize(t)]), style.theme)}</select></label>
+      <span class="tag">${style.max_pages === 2 ? "Two pages at most" : "One page"}</span>`);
 }
 
-// The Resume check card: the score, pages, keyword coverage, and each issue the check found (or a clean bill).
-function resumeCheckCard(check) {
+// The resume check block: the score, pages, keyword coverage, and each issue the check found (or a clean bill).
+function resumeCheckBlock(check) {
   if (!check) {
-    return `<div class="card" id="rcheck"><h3>Resume check</h3><p class="muted small">Not checked yet.</p><button class="btn sm" data-act="resume-recheck">Run check</button></div>`;
+    return block("Resume check", `<p class="muted-note">Not checked yet.</p>`,
+      `<button class="button outline small" type="button" data-act="resume-recheck">Check it</button>`, "resume-check");
   }
-  const color = check.score >= 85 ? "good" : check.score >= 65 ? "warn" : "bad";
-  const issue = (i) => i.level === "error"
-    ? `<li style="color:var(--bad)"><i class=i-x></i> ${esc(i.text)}</li>`
-    : `<li style="color:var(--text2)"><i class=i-warn></i> ${esc(i.text)}</li>`;
+  const level = check.score >= 85 ? "green" : check.score >= 65 ? "warn" : "bad";
+  const issue = (i) => `<li class="${i.level === "error" ? "bad" : ""}">${icon(i.level === "error" ? "close" : "warning")}${esc(i.text)}</li>`;
   const issues = check.issues.length
-    ? `<ul class="clean small">${check.issues.map(issue).join("")}</ul>`
-    : `<div class="small" style="color:var(--good)"><i class=i-check></i> ATS-safe, fits the page limit, and every skill is backed by your inventory.</div>`;
-  return `<div class="card" id="rcheck"><div class="row" style="margin-bottom:8px"><h3 style="margin:0">Resume check</h3><span class="chip ${color}">${check.score}/100</span>
-      <span class="chip">${check.pages ?? "?"} page${check.pages === 1 ? "" : "s"}</span><span class="chip ${check.coverage >= 0.75 ? "good" : "warn"}">keywords ${Math.round((check.coverage || 0) * 100)}%</span>
-      <span class="spacer"></span><button class="btn sm" data-act="resume-recheck">Re-check</button></div>
-    ${issues}</div>`;
+    ? `<ul class="issue-list">${check.issues.map(issue).join("")}</ul>`
+    : `<p class="good-note">${icon("check")}Easy for hiring software to read, fits its page limit, and every skill is backed by your profile.</p>`;
+  const tags = `<p class="tags"><span class="tag ${level}">${check.score}/100</span><span class="tag">${plural(check.pages ?? 0, "page")}</span>`
+    + `<span class="tag ${check.coverage >= 0.75 ? "green" : "warn"}">Keywords ${Math.round((check.coverage || 0) * 100)}%</span></p>`;
+  return block("Resume check", tags + issues,
+    `<button class="button outline small" type="button" data-act="resume-recheck">Check again</button>`, "resume-check");
 }
 
-// Runs the resume check again (POST /api/leads/{id}/resume-check) and swaps in the new card. The card dims meanwhile.
+// Runs the resume check again (POST /api/leads/{id}/resume-check) and swaps in the new block. The block dims meanwhile.
 async function recheckResume(id) {
-  const card = $("#rcheck");
-  if (card) card.style.opacity = 0.5;
+  const shown = S.leadView && lv(".resume-check");
+  if (shown) shown.style.opacity = 0.5;
   try {
     const check = await api(`/api/leads/${id}/resume-check`, { method: "POST" });
-    if (S.lead?.package) S.lead.package.resume_check = check;
-    const current = $("#rcheck");
-    if (current) current.outerHTML = resumeCheckCard(check);
+    if (S.lead?.id === id && S.lead.package) S.lead.package.resume_check = check;
+    const current = S.leadView && lv(".resume-check");
+    if (current) current.outerHTML = resumeCheckBlock(check);
   } catch (e) {
-    if (card) card.style.opacity = "";
-    toast("Check failed", e.message, "error");
+    if (shown) shown.style.opacity = "";
+    toast("The check didn't run", e.message, "error");
   }
 }
 
 // ---------------------------------------------------------------- saving
-// Sets the application status (PATCH). Applying also sets a 7-day follow-up on the server.
-async function setStatus(id, status) {
-  try {
-    await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: status } });
-    toast("Status updated", STATUS_LABEL[status]);
-    refreshStats();
-    if (S.route[0] === "lead") renderLead(id);
-  } catch (e) {
-    toast("Couldn't update", e.message, "error");
-  }
+// After a lead changed (its status, mostly): redraw it and every list that shows it, and the counts.
+function leadChanged(summary) {
+  if (S.route[0] === "leads" && summary) upsertLead(summary);
+  if (S.route[0] === "tracker") refreshTracker();
+  if (S.route[0] === "home") loadTopLeads();
+  refreshStats();
+  refreshLeadDetails();
 }
 
-// The send buttons on an email card: Gmail, the mail app, copy, download as .eml, or log it as sent.
+// Sets the application status (PATCH). Marking it sent also sets a follow-up in 7 days on the server.
+async function setStatus(id, status) {
+  leadChanged(await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: status } }));
+  toast("Status changed", statusLabel(status));
+}
+
+// The send buttons on an email: Gmail, the mail app, copy, download as .eml, or log it as sent.
 async function mailAction(how, i) {
-  const card = $(`.email[data-i="${i}"]`);
+  const card = lv(`[data-email="${i}"]`);
   const field = (name) => $(`[data-ef="${name}"]`, card).value;
   const to = field("to_addr"), subject = field("subject"), body = field("body");
   const query = (pairs) => pairs.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
@@ -688,74 +746,73 @@ async function mailAction(how, i) {
   } else if (how === "copy") {
     copy(`Subject: ${subject}\n\n${body}`, "Email copied");
   } else if (how === "eml") {
-    await saveEmails();  // the download is built from the saved email
+    await saveEmails();  // the download is made from the saved email
     openUrl(`/api/leads/${S.lead.id}/export/email-${i}.eml`);
   } else if (how === "sent") {
-    const kind = S.lead.package.emails[i].kind.replace(/_/g, " ");
+    const kind = humanize(S.lead.package.emails[i].kind).toLowerCase();
     await api(`/api/leads/${S.lead.id}/events`, { method: "POST", body: { type: "email", text: `Sent ${kind} to ${to || "?"}: ${subject}` } });
-    toast("Logged", "Email marked as sent");
+    toast("Logged", "Marked as sent.");
   }
 }
 
 // Saves the edited emails and the LinkedIn note into the lead's package. Does nothing when the Emails tab isn't open.
 async function saveEmails() {
-  if (!$(".email") && !$("#lnote")) return;
+  if (!lv("[data-email]") && !lv("[data-note]")) return;
   const emails = (S.lead.package.emails || []).map((email, i) => {
-    const card = $(`.email[data-i="${i}"]`);
+    const card = lv(`[data-email="${i}"]`);
     const field = (name) => $(`[data-ef="${name}"]`, card).value;
     return { ...email, to_addr: field("to_addr"), subject: field("subject"), body: field("body") };
   });
   const changes = { emails };
-  if ($("#lnote")) changes.linkedin_note = $("#lnote").value;
+  if (lv("[data-note]")) changes.linkedin_note = lv("[data-note]").value;
   await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: changes } });
   Object.assign(S.lead.package, changes);
   S.dirty = false;
 }
 
-// After answering, dismissing or adding questions: reload them (for the navigation badge) and redraw the lead.
+// After answering, dismissing or adding questions: reload them (for Home and the sidebar) and redraw the lead.
 async function refreshLeadQuestions() {
   S.questions = await api("/api/questions");
-  renderNav();
-  renderLead(S.lead.id);
+  renderNextStep();
+  refreshLeadDetails();
 }
 
 // ---------------------------------------------------------------- actions
-onAction("ltabgo", (el) => {  // a tab (or the "Open emails" button in the follow-up banner)
-  if (S.dirty && !confirm("Discard unsaved edits?")) return;
+onAction("lead-tab", (el) => {  // a tab (or the "Open emails" button in the follow-up banner)
+  if (S.dirty && !confirm("Discard your unsaved edits?")) return;
   S.dirty = false;
-  S.leadTab = el.dataset.tab;
-  renderLeadTab();
+  if (S.leadView.hashBase) location.hash = `${S.leadView.hashBase}/${el.dataset.tab}`;  // on Leads the address follows
+  else showLeadTab(el.dataset.tab);
 });
 onAction("apply", (el) => {
   openUrl(el.dataset.url);
-  if (S.lead && !["applied", "assessment", "interviewing", "offer"].includes(S.lead.app_status)) {
-    setTimeout(() => {  // after the application opens, ask whether to mark it applied
-      if (confirm("Did you submit the application? Mark it as Applied (sets a 7-day follow-up)?")) setStatus(S.lead.id, "applied");
-    }, 800);
+  const lead = S.lead;
+  if (lead && !["applied", "interviewing", "accepted"].includes(lead.app_status)) {
+    toast("Did you send it?", "Mark it as sent to track it. A follow-up reminder is set for a week later.", "", null,
+      { label: "Mark as sent", run: () => setStatus(lead.id, "applied") });
   }
 });
-onAction("regen", async () => {
-  if (S.lead.resume_md && !confirm("Regenerate the whole package? Your edits to the resume/cover letter will be replaced.")) return;
-  await api(`/api/leads/${S.lead.id}/package`, { method: "POST" });
-  toast("Building package", "It'll update here when ready.");
-  setTimeout(() => renderLead(S.lead.id), 800);
+onAction("detail-track", () => setStatus(S.lead.id, "ready"));
+onAction("detail-delete", async () => {
+  const { id, title, app_status: before } = S.lead;
+  const summary = await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: "trashed" } });
+  toast("Deleted", title, "", null, { label: "Undo", run: async () => leadChanged(await api(`/api/leads/${id}`, { method: "PATCH", body: { app_status: before } })) });
+  if (S.leadView.hashBase) location.hash = "#/leads";  // close its card
+  else closeDialog(S.leadView.box.closest("dialog"));
+  leadChanged(summary);
 });
-onAction("plan", async (el) => {  // an action plan checkbox
-  const pkg = S.lead.package;
-  const done = new Set(pkg.plan_done || []);
-  if (el.checked) done.add(+el.dataset.i);
-  else done.delete(+el.dataset.i);
-  pkg.plan_done = [...done];
-  el.nextElementSibling.classList.toggle("done", el.checked);
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { plan_done: pkg.plan_done } } });
+onAction("regen", async () => {
+  if (S.lead.resume_md && !confirm("Tailor the whole application again? Your edits to the resume and cover letter will be replaced.")) return;
+  await api(`/api/leads/${S.lead.id}/package`, { method: "POST" });
+  toast("Tailoring it", "It updates here when it's ready.");
+  setTimeout(() => refreshLeadDetails(), 800);
 });
 onAction("toggle-dream", async () => {
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { dream: S.lead.dream ? 0 : 1 } });
-  renderLead(S.lead.id);
+  leadChanged(await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { dream: S.lead.dream ? 0 : 1 } }));
 });
 onAction("export", async (el) => {  // save open edits first, so the file matches the screen
-  if (S.dirty && S.leadTab === "emails") await saveEmails();
-  if (S.dirty && S.leadTab === "kit") await saveAnswers();
+  if (S.dirty && S.leadView?.tab === "emails") await saveEmails();
+  if (S.dirty && S.leadView?.tab === "kit") await saveKitAnswers();
   openUrl(el.dataset.url);
 });
 // Resume tab
@@ -764,125 +821,142 @@ onAction("resume-recheck", async () => {
   else recheckResume(S.lead.id);
 });
 onAction("lead-lib-save", async () => {
-  const name = prompt("Name this resume in your collection:", `${S.lead.company}: ${S.lead.title}`.slice(0, 90));
+  const name = prompt("Name this resume:", `${S.lead.company}: ${S.lead.title}`.slice(0, 90));
   if (name === null) return;
-  const item = await api("/api/library", { method: "POST", body: { lead_id: S.lead.id, name, md: $("#ed")?.value || S.lead.resume_md, style: S.lead.package?.resume_style } });
-  toast("Saved to your collection", item.name);
+  const item = await api("/api/library", { method: "POST", body: { lead_id: S.lead.id, name, md: S.editor?.text() || S.lead.resume_md, style: S.lead.package?.resume_style } });
+  toast("Saved to your resumes", item.name);
 });
-onAction("lead-lib-use", () => leadPickSavedModal(S.lead));
+onAction("lead-lib-use", () => leadPickSavedDialog(S.lead));
 // Emails tab
 onAction("mail", (el) => mailAction(el.dataset.how, +el.dataset.i));
 onAction("save-emails", async () => {
   await saveEmails();
-  toast("Saved", "Emails updated");
+  toast("Saved", "Your emails are updated.");
 });
 onAction("revise-email", async (el) => {
   const i = +el.dataset.i;
-  const instruction = $(`[data-erev="${i}"]`).value.trim();
+  const instruction = lv(`[data-erev="${i}"]`).value.trim();
   if (!instruction) return;
-  const body = $('[data-ef="body"]', $(`.email[data-i="${i}"]`));
+  const body = $('[data-ef="body"]', lv(`[data-email="${i}"]`));
   el.disabled = true;
-  el.innerHTML = `<span class="spin"></span>`;
+  el.innerHTML = spinner();
   try {
     const r = await api(`/api/leads/${S.lead.id}/revise`, { method: "POST", body: { doc: `email (${S.lead.package.emails[i].kind})`, instruction, text: body.value } });
     body.value = r.text;
     S.dirty = true;
-    toast("Email revised", "Review it, then Save edits.");
+    toast("Email revised", "Read it over, then Save edits.");
   } catch (err) {
-    toast("Revision failed", err.message, "error");
+    toast("The revision didn't work", err.message, "error");
   }
   el.disabled = false;
-  el.textContent = "Revise";
+  el.innerHTML = `${icon("sparkle")}Revise`;
 });
-onAction("copy-lnote", () => copy($("#lnote").value, "LinkedIn note copied"));
+onAction("copy-note", () => copy(lv("[data-note]").value, "LinkedIn note copied"));
 // Contacts tab
 onAction("add-contact", async () => {
   const contact = {};
-  $$("[data-nc]").forEach((input) => (contact[input.dataset.nc] = input.value));
+  $$("[data-nc]", S.leadView.box).forEach((input) => (contact[input.dataset.nc] = input.value));
   if (!contact.name) return;
   const r = await api(`/api/leads/${S.lead.id}/contacts/-1`, { method: "POST", body: contact });  // index -1 adds a contact
   S.lead.package.contacts = r.contacts;
-  renderLeadTab();
+  drawLeadTab();
 });
 onAction("rm-contact", async (el) => {
   if (!confirm("Remove this contact?")) return;
   const r = await api(`/api/leads/${S.lead.id}/contacts/${el.dataset.i}`, { method: "POST", body: { delete: true } });
   S.lead.package.contacts = r.contacts;
-  renderLeadTab();
+  drawLeadTab();
 });
 // Application kit tab
 onAction("save-answers", async () => {
-  await saveAnswers();
-  $("#ans-state").textContent = "saved";
+  await saveKitAnswers();
+  lv("[data-answers-state]").textContent = "Saved";
 });
 onAction("add-answer", () => {
-  readAnswers();
+  readKitAnswers();
   S.lead.package.application_answers.push({ question: "New question", answer: "" });
-  renderLeadTab();
+  drawLeadTab();
   S.dirty = true;
 });
 onAction("rm-answer", (el) => {
-  readAnswers();
+  readKitAnswers();
   S.lead.package.application_answers.splice(+el.dataset.i, 1);
-  renderLeadTab();
+  drawLeadTab();
   S.dirty = true;
 });
-onAction("copy-answer", (el) => copy($(`[data-aa="${el.dataset.i}"]`).value));
+onAction("copy-answer", (el) => copy(lv(`[data-aa="${el.dataset.i}"]`).value));
 // Activity tab
 onAction("save-notes", async () => {
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { notes: $("#notes").value } });
-  toast("Saved", "Notes updated");
+  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { notes: lv("[data-notes]").value } });
+  toast("Saved", "Your notes are updated.");
 });
-onAction("save-fu", async () => {
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { follow_up_at: $("#fu").value || null } });
-  toast("Saved", "Follow-up date set");
+onAction("save-follow-up", async () => {
+  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { follow_up_at: lv("[data-follow-up]").value || null } });
+  toast("Saved", "Follow-up date set.");
   refreshStats();
 });
-onAction("logev", async (el) => {  // a preset event button, or Log with the custom text
-  const text = el.dataset.text || $("#evtext").value;
+onAction("log-event", async (el) => {  // a preset, or Log it with your own text
+  const text = el.dataset.text || lv("[data-event-text]").value.trim();
   if (!text) return;
   await api(`/api/leads/${S.lead.id}/events`, { method: "POST", body: { type: "update", text } });
-  renderLead(S.lead.id);
+  refreshLeadDetails();
 });
-// Questions for this application
+// Questions for this application (Overview tab)
 onAction("lead-gapq", async (el) => {
   el.disabled = true;
-  el.innerHTML = `<span class="spin"></span> Thinking…`;
+  el.innerHTML = `${spinner()} Thinking`;
   try {
     const r = await api(`/api/leads/${S.lead.id}/questions/generate`, { method: "POST" });
-    toast("Questions added", `${r.added} question(s) for this application`);
+    toast("Questions added", `${plural(r.added, "question")} for this application.`);
   } catch (err) {
-    toast("Couldn't generate questions", err.message, "error");
+    toast("Couldn't find questions", err.message, "error");
   }
   await refreshLeadQuestions();
 });
 onAction("lead-answer", async (el) => {
-  const input = el.parentElement.querySelector("[data-lqa]");
+  const input = $("[data-lead-answer]", el.closest(".question-row"));
   if (!input.value.trim()) return;
-  await api("/api/questions/answer", { method: "POST", body: { question: input.dataset.lqa, answer: input.value.trim() } });
-  toast("Answer saved", "Saved to your profile.");
+  await api("/api/questions/answer", { method: "POST", body: { question: input.dataset.leadAnswer, answer: input.value.trim() } });
+  toast("Answer saved", "It's in your profile now too.");
   await refreshLeadQuestions();
 });
 onAction("lead-dismiss", async (el) => {
   await api("/api/questions/dismiss", { method: "POST", body: { question: el.dataset.q } });
   await refreshLeadQuestions();
 });
-onAction("lead-apply", async (el) => {
+onAction("lead-apply-answers", async (el) => {
   await api(`/api/leads/${S.lead.id}/apply-answers`, { method: "POST" });
   el.disabled = true;
-  el.innerHTML = `<span class="spin"></span> Adding your answers and reworking the resume`;
-  toast("Updating resume", "Adding your answers to your profile, then rewriting this resume with them (a minute or two).");
+  el.innerHTML = `${spinner()} Adding your answers and reworking the resume`;
+  toast("Updating the resume", "Adding your answers to your profile, then rewriting this resume with them. A minute or two.");
 });
 onChange(async (el) => {
-  if (el.id !== "rs-theme") return false;  // the Layout menu on the Strategy card
-  const style = { ...(S.lead.package.resume_style || { max_pages: 1 }), theme: el.value };
-  await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { resume_style: style } } });
-  S.lead.package.resume_style = style;
-  if (S.editor) {
-    S.editor.theme = el.value;
-    S.editor.refresh();
+  if (!S.leadView || !S.leadView.box.contains(el)) return false;
+  if (el.matches("[data-lead-status]")) {
+    await setStatus(S.lead.id, el.value);
+  } else if (el.matches("[data-lead-industry]")) {
+    leadChanged(await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { industry: el.value } }));
+    toast("Industry changed", el.value || "Not set");
+  } else if (el.matches("[data-plan]")) {  // an action plan step done or not
+    const pkg = S.lead.package;
+    const done = new Set(pkg.plan_done || []);
+    if (el.checked) done.add(+el.dataset.plan);
+    else done.delete(+el.dataset.plan);
+    pkg.plan_done = [...done];
+    el.nextElementSibling.classList.toggle("done", el.checked);
+    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { plan_done: pkg.plan_done } } });
+  } else if (el.matches("[data-resume-theme]")) {  // the Layout menu on the strategy block
+    const style = { ...(S.lead.package.resume_style || { max_pages: 1 }), theme: el.value };
+    await api(`/api/leads/${S.lead.id}`, { method: "PATCH", body: { package: { resume_style: style } } });
+    S.lead.package.resume_style = style;
+    if (S.editor) {
+      S.editor.theme = el.value;
+      S.editor.refresh();
+    }
+    toast("Layout changed", `${humanize(el.value)}. The PDF and Word downloads use it too.`);
+    recheckResume(S.lead.id);
+  } else {
+    return false;
   }
-  toast("Layout changed", `${el.value}: PDF and DOCX exports updated`);
-  recheckResume(S.lead.id);
   return true;
 });
