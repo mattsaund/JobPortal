@@ -6,8 +6,11 @@ What's here:
 - Dates: parse_date() reads the many date formats job boards use, and age_days() says how old a date is.
 - Locations: state_of() works out where a location string is, and LocationMatcher checks a job's locations against the
   user's search area. search/pipeline.py drops jobs outside the area before any AI sees them.
-- Keywords: extract_terms() finds tech terms in a posting, and coverage() measures how many of a job's keywords a resume
-  contains, roughly the way applicant tracking systems scan resumes.
+- Keywords: extract_terms() finds the skills, tools, certifications and licenses a posting (or any document) names, for
+  any field, and coverage() measures how many of a job's keywords a resume contains, roughly the way applicant tracking
+  systems scan resumes.
+- Target roles: TargetMatcher tells whether a job title is near the user's target roles, role families and search
+  queries. It's the rule filters' cheap pre-filter, so AI triage doesn't spend tokens on jobs from unrelated fields.
 
 Nothing here touches the network, the database or the AI, so every function is easy to try out and test (see
 tests/test_core.py)."""
@@ -16,6 +19,7 @@ import html
 import re
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from functools import lru_cache
 from urllib.parse import parse_qs, urlparse
 
 # ---------------------------------------------------------------- places
@@ -379,20 +383,6 @@ def _state_code(entry: str) -> str | None:
 
 # ---------------------------------------------------------------- keywords
 
-# Tech terms extract_terms() looks for when the AI didn't list a job's keywords.
-TECH_TERMS = [
-    "c", "c++", "c#", "rust", "python", "java", "javascript", "typescript", "swift", "go", "ada", "matlab", "simulink",
-    "sql", "html", "css", "react", "node.js", "linux", "unix", "git", "docker", "kubernetes", "aws", "azure", "gcp",
-    "cuda", "vulkan", "pytorch", "tensorflow", "numpy", "pandas", "machine learning", "deep learning", "computer vision",
-    "embedded", "rtos", "microcontroller", "fpga", "verilog", "vhdl", "firmware", "flight software", "gnc", "guidance",
-    "navigation", "controls", "orbital mechanics", "astrodynamics", "kalman", "simulation", "systems engineering",
-    "requirements", "verification", "validation", "test", "ci/cd", "agile", "jira", "rf", "sdr", "dsp",
-    "signal processing", "remote sensing", "gis", "satellite", "spacecraft", "avionics", "ground software",
-    "telemetry", "data analysis", "data science", "statistics", "linear algebra", "rest", "api", "networking",
-    "security", "cybersecurity", "cloud", "devops", "bash", "shell", "ros", "robotics", "autonomy", "mission",
-    "hardware", "soldering", "cad", "3d printing", "llm", "ai", "nlp", "ios", "swiftui", "mobile", "web",
-]
-
 # Letters, digits, + and # count as part of a word, so "c" isn't found inside "c++" or "c#", and "go" isn't found
 # inside "google".
 _WORD_CHARS = "a-z0-9+#"
@@ -404,11 +394,211 @@ def _whole_word(term: str) -> str:
     return rf"(?<![{_WORD_CHARS}]){re.escape(term)}(?![{_WORD_CHARS}])"
 
 
-def extract_terms(text: str) -> list[str]:
-    """The TECH_TERMS found in `text`, in TECH_TERMS order. search/pipeline.py uses them as a job's keywords when the AI
-    didn't list any."""
-    low = (text or "").lower()
-    return [term for term in TECH_TERMS if re.search(_whole_word(term), low)]
+# The vocabulary extract_terms() looks for, grouped by field only to keep it readable: every group is looked for in every
+# text. An entry is the term as it should read, or (term, regex) when the plain term would also match ordinary words (the
+# regex runs on lowercase text). Credentials come first because postings and certificates name them the most exactly.
+VOCABULARY = {
+    "credentials": [
+        ("RN", r"\brn\b|registered nurse"), ("LPN", r"\blpn\b|licensed practical nurse"), ("LVN", r"\blvn\b"),
+        ("CNA", r"\bcna\b|certified nursing assistant"), ("BSN", r"\bbsn\b"), ("NCLEX", r"\bnclex"),
+        ("EMT", r"\bemt\b|emergency medical technician"), ("Paramedic", r"paramedic"), ("BLS", r"\bbls\b|basic life support"),
+        ("ACLS", r"\bacls\b"), ("PALS", r"\bpals\b"), ("CPR", r"\bcpr\b"), ("First aid", r"first aid"),
+        ("CPhT", r"\bcpht\b|certified pharmacy technician"), ("CMA", r"\bcma\b"), ("CPC", r"\bcpc\b|certified professional coder"),
+        ("RHIT", r"\brhit\b"), ("BCBA", r"\bbcba\b"), ("RBT", r"\brbt\b"), ("LCSW", r"\blcsw\b"), ("LPC", r"\blpc\b"),
+        ("CDL Class A", r"class a cdl|cdl[- ]a\b|cdl class a"), ("CDL", r"\bcdl\b|commercial driver'?s licen[cs]e"),
+        ("HAZMAT endorsement", r"hazmat endorsement"), ("Forklift certification", r"forklift (?:certif|operator card)"),
+        ("OSHA 10", r"\bosha[- ]?10\b"), ("OSHA 30", r"\bosha[- ]?30\b"), ("EPA 608", r"\bepa[- ]?608"),
+        ("ASE certification", r"\base\b(?:[- ]certified| certification)"), ("A&P license", r"\ba&p\b"),
+        ("Journeyman license", r"journeym[ae]n (?:licen[cs]e|card)"), ("ServSafe", r"servsafe"), ("Food handler card", r"food handler"),
+        ("TIPS certification", r"\btips (?:certif|trained)"), ("CPA", r"\bcpa\b"), ("CFA", r"\bcfa\b"), ("Series 7", r"\bseries 7\b"),
+        ("PMP", r"\bpmp\b"), ("Six Sigma", r"six sigma"), ("SHRM-CP", r"\bshrm-?cp\b"), ("PHR", r"\bphr\b"), ("Notary public", r"\bnotary"),
+        ("Real estate license", r"real estate licen[cs]e"),
+        ("Teaching license", r"teaching (?:licen[cs]e|certificat)|teacher certification|certified teacher"),
+        ("Praxis", r"\bpraxis\b"), ("CDA", r"\bcda\b|child development associate"), ("TEFL/TESOL", r"\btefl\b|\btesol\b"),
+        ("CompTIA A+", r"comptia a\+|\ba\+ certif"), ("CompTIA Security+", r"security\+"), ("CCNA", r"\bccna\b"),
+        ("AWS certification", r"\baws certified|\baws certification"), ("CISSP", r"\bcissp\b"),
+        ("PE license", r"professional engineer|\bpe licen[cs]e"), ("EIT", r"\beit\b|engineer in training"), ("LEED", r"\bleed\b"),
+        ("Driver's license", r"driver'?s licen[cs]e"), ("Security clearance", r"security clearance|secret clearance"),
+    ],
+    "healthcare": [
+        "patient care", "vital signs", "phlebotomy", "medication administration", ("EHR", r"\behr\b|\bemr\b|electronic (?:health|medical) record"),
+        ("Epic", r"\bepic (?:ehr|emr|systems?|certified|charting|experience)"), "Cerner", "Meditech", ("HIPAA", r"\bhipaa\b"),
+        "triage", "wound care", ("IV therapy", r"\biv (?:therapy|insertion|starts|access)|intravenous"), "charting",
+        "infection control", "medical terminology", ("ICD-10", r"\bicd-?10"), ("CPT coding", r"\bcpt\b"), "medical billing",
+        "medical coding", "telemetry", "dementia care", "home health", "hospice", "pediatrics", "geriatrics", "behavioral health",
+        "case management", "crisis intervention", "care planning", "patient education", "sterile technique", "specimen collection",
+        ("Med-surg", r"\bmed[- ]?surg"), ("ICU", r"\bicu\b"), "dialysis", "physical therapy", "occupational therapy", "radiology",
+        "insurance verification", "prior authorization",
+    ],
+    "trades": [
+        "forklift", "pallet jack", "power tools", "hand tools", ("Blueprint reading", r"blueprint"), "welding",
+        ("MIG welding", r"\bmig\b"), ("TIG welding", r"\btig\b"), "stick welding", ("HVAC", r"\bhvac"), "refrigeration",
+        ("Electrical wiring", r"\bwiring\b"), ("NEC", r"\bnec\b|national electrical code"), "plumbing", "carpentry", "framing",
+        "drywall", "concrete", "roofing", ("CNC", r"\bcnc\b"), "machining", ("Lockout/tagout", r"lockout[/ -]?tagout|\bloto\b"),
+        "preventive maintenance", "troubleshooting", "hydraulics", "pneumatics", ("PLC", r"\bplc\b"), "diesel", "inventory control",
+        "shipping and receiving", "order picking", ("DOT regulations", r"\bdot (?:regulations|physical|compliance|medical)"),
+        ("HAZMAT", r"\bhazmat\b"), "safety compliance", "quality control", ("GD&T", r"\bgd&t\b"), "soldering", "avionics",
+        "landscaping", "irrigation", "heavy equipment", "excavator", ("Crane operation", r"crane operat"), "scaffolding",
+        ("OSHA", r"\bosha\b"),
+    ],
+    "service": [
+        ("POS systems", r"\bpos\b|point of sale"), "cash handling", "food safety", ("Food preparation", r"food prep"),
+        "knife skills", "bartending", "mixology", "espresso", "customer service", "upselling", "merchandising",
+        "visual merchandising", "loss prevention", "housekeeping", "front desk", "reservations", "guest relations", "catering",
+        "baking", "cake decorating", "cosmetology", ("Hair cutting", r"hair ?cut"), ("Hair color", r"hair colou?r"),
+        "massage therapy", "personal training", "lifeguarding",
+    ],
+    "business": [
+        ("Microsoft Excel", r"microsoft excel|\bms excel|\bexcel\b(?! in\b| at\b| as\b)"), ("Microsoft Word", r"microsoft word|\bms word"),
+        ("Microsoft Office", r"microsoft office|\bms office|office 365|microsoft 365"), ("Outlook", r"microsoft outlook"),
+        "Google Workspace", "Google Sheets", "QuickBooks", ("SAP", r"\bsap\b"), "Salesforce", ("CRM", r"\bcrm\b"), ("ERP", r"\berp\b"),
+        "HubSpot", "accounts payable", "accounts receivable", "bookkeeping", "payroll", ("GAAP", r"\bgaap\b"), "financial reporting",
+        "budgeting", "forecasting", "reconciliation", ("Auditing", r"\baudit"), "tax preparation", "data entry",
+        "calendar management", "recruiting", "onboarding", ("HRIS", r"\bhris\b"), ("ADP", r"\badp\b"),
+        ("Workday", r"\bworkday (?:hcm|hris|experience|system)"), "cold calling", "lead generation", "negotiation",
+        "account management", "contract management", "compliance", "risk management", "project management", "scrum", "kanban",
+        ("Lean", r"\blean (?:manufacturing|principles|methodolog)"), ("SEO", r"\bseo\b"), ("SEM", r"\bsem\b"),
+        "Google Analytics", "Google Ads", "social media marketing", "email marketing", "content creation", "copywriting",
+        "public relations", "event planning", "market research", "legal research", "Westlaw", ("LexisNexis", r"\blexis"),
+        "litigation", "contract drafting", ("E-discovery", r"\be-?discovery"),
+    ],
+    "education": [
+        "lesson planning", "classroom management", "curriculum development", "differentiated instruction", ("IEP", r"\biep\b"),
+        "special education", ("ESL", r"\besl\b|english as a second language"), "tutoring", "early childhood education",
+        "child development", "student engagement", "behavior management", "Google Classroom", ("Canvas", r"\bcanvas (?:lms|learning)"),
+        "Blackboard", "instructional design", "literacy", "phonics",
+    ],
+    "creative": [
+        ("Adobe Creative Suite", r"adobe creative (?:suite|cloud)"), "Photoshop", ("Illustrator", r"adobe illustrator"), "InDesign",
+        ("Premiere Pro", r"premiere pro|adobe premiere"), "After Effects", "Lightroom", "Figma", "Canva", "Final Cut Pro",
+        "DaVinci Resolve", "Pro Tools", "Logic Pro", "Ableton", "Blender", ("Maya", r"autodesk maya"), "typography", "branding",
+        "photography", "videography", "video editing", "copy editing", ("AP style", r"\bap style"), "storytelling", "illustration",
+        "animation", "graphic design", "UX design", "UI design", "drawing", "painting", "music production", "sound design",
+        "lighting design", "stage management", "set design",
+    ],
+    "science": [
+        ("Laboratory techniques", r"lab(?:oratory)? techniques"), ("PCR", r"\bpcr\b"), "cell culture", "microscopy",
+        "chromatography", ("HPLC", r"\bhplc\b"), "spectroscopy", ("GC-MS", r"\bgc-?ms\b"), ("GLP", r"\bglp\b"),
+        ("GMP", r"\bgmp\b|good manufacturing practice"), ("SPSS", r"\bspss\b"), ("SAS", r"\bsas\b"), ("Stata", r"\bstata\b"),
+        ("R", r"\brstudio\b|\br programming|\bin r\b"), "statistics", "data analysis", ("GIS", r"\bgis\b|arcgis"),
+        ("Field work", r"field ?work"), "sample collection", "lab safety", "experimental design", "environmental compliance",
+        "water quality", "animal handling",
+    ],
+    "public": [
+        "grant writing", "fundraising", "community outreach", "volunteer management", "program evaluation", "policy analysis",
+        "public speaking", "de-escalation", "report writing", "emergency response", "conflict resolution", ("Spanish", r"\bspanish\b"),
+        "bilingual", ("ASL", r"\basl\b|american sign language"),
+    ],
+    "tech": [
+        "Python", "Java", "JavaScript", "TypeScript", "C++", "C#", "Rust", ("SQL", r"\bsql\b"), "HTML", "CSS", "Node.js", "Linux",
+        "Unix", "Git", "Docker", "Kubernetes", ("AWS", r"\baws\b"), "Azure", ("GCP", r"\bgcp\b"), "CUDA", "PyTorch", "TensorFlow",
+        "NumPy", "pandas", "MATLAB", "Simulink", "machine learning", "deep learning", "computer vision", "RTOS", "microcontroller",
+        "FPGA", "Verilog", "VHDL", "firmware", "CI/CD", "Jira", "data science", "linear algebra", "signal processing",
+        "cybersecurity", "DevOps", "LLM", "NLP", "SwiftUI", "Tableau", "Power BI", "Kotlin", "PHP", "Ruby", "Terraform",
+        "ServiceNow", "Active Directory",
+    ],
+}
+# Tech terms that are also everyday words ("go", "rest", "shell", "security"). They only count in a text that is clearly
+# technical: one that names at least two of the "tech" terms above.
+TECH_WEAK = ["C", "Go", "Ada", "Swift", "React", "REST", "API", "testing", "web", "mobile", "shell", "Bash", "cloud", "security",
+             "networking", "hardware", "embedded", "controls", "requirements", "verification", "validation", "simulation",
+             "systems engineering", "agile", "RF", "DSP", "remote sensing", "robotics", "ROS", "CAD", "3D printing", "AI", "iOS"]
+
+
+def _vocabulary_patterns(entries) -> list[tuple[str, re.Pattern]]:
+    """(term, compiled regex) for each vocabulary entry: its own regex, or the term as a whole word."""
+    out = []
+    for entry in entries:
+        term, pattern = entry if isinstance(entry, tuple) else (entry, _whole_word(entry.lower()))
+        out.append((term, re.compile(pattern)))
+    return out
+
+
+_VOCAB = [(field, _vocabulary_patterns(entries)) for field, entries in VOCABULARY.items()]
+_TECH_WEAK = _vocabulary_patterns(TECH_WEAK)
+# "X certification", "certified X", "licensed X": the X a posting or certificate names (checked on the original text, so a
+# capitalized name can be told from ordinary words).
+_CREDENTIAL_PHRASE_RE = re.compile(
+    r"\b((?:[A-Z][\w+&/-]*|\d+)(?: (?:[A-Z][\w+&/-]*|of|in|and|\d+)){0,5}) (?:[Cc]ertification|[Cc]ertificate|[Ll]icen[cs]e|"
+    r"[Ll]icensure|[Cc]redential)\b"
+    r"|\b(?:[Cc]ertified|[Ll]icensed|[Rr]egistered) ((?:[A-Z][\w+&/-]*)(?: [A-Z][\w+&/-]*){0,4})")
+# Phrases on requirement lines that introduce what the job asks for: "experience with X", "proficient in X, Y and Z".
+_ASKS_FOR_RE = re.compile(r"\b(?:experience (?:with|in|using|operating)|proficien(?:t|cy) (?:in|with)|knowledge of|familiar(?:ity)? "
+                          r"with|skilled (?:in|with)|ability to operate|trained in|expertise in|working knowledge of)\s+([^.;:!?()\n]{2,140})",
+                          re.I)
+# Requirement phrases too vague to be a keyword, phrase endings that describe a setting rather than a skill, and words to
+# drop from the front of a phrase.
+_VAGUE = {"team", "teams", "others", "people", "customers", "clients", "the public", "deadlines", "details", "all ages",
+          "a variety", "various", "multiple", "computers", "a computer", "basic computer skills", "it", "this", "them"}
+_VAGUE_END = re.compile(r"\b(?:environment|setting|settings|industry|role|position|field|capacity|manner|basis)$", re.I)
+_ADJECTIVES = re.compile(r"^(?:the|a|an|basic|strong|excellent|good|solid|proven|demonstrated|general|advanced|working|some|"
+                         r"hands-on|current|common|standard|relevant|related|similar|various)\s+", re.I)
+# Words a credential phrase may start with that aren't part of the credential's name ("a Valid CPR Certification").
+_CREDENTIAL_LEAD = {"This", "The", "A", "An", "Your", "Our", "Valid", "Current", "Active", "Any", "Of", "In", "And", "Required"}
+
+
+def _asked_phrases(text: str) -> list[str]:
+    """What the posting's requirement lines ask for, as short phrases: "experience with point of sale systems and cash
+    handling" gives "point of sale systems" and "cash handling". Phrases longer than four words, vague ones and ones that
+    describe a setting ("a fast-paced environment") are skipped."""
+    out = []
+    for match in _ASKS_FOR_RE.finditer(text):
+        for part in re.split(r",|\band/or\b|\band\b|\bor\b|\bas well as\b|\bincluding\b|\bsuch as\b", match.group(1), flags=re.I):
+            phrase = clean(_ADJECTIVES.sub("", clean(part).strip(" -")))
+            if (2 <= len(phrase) <= 40 and len(phrase.split()) <= 4 and phrase.lower() not in _VAGUE
+                    and not _VAGUE_END.search(phrase) and not phrase[0].isdigit()):
+                out.append(phrase)
+    return out
+
+
+def _credential_phrases(text: str) -> list[str]:
+    """Certifications and licenses named in the usual ways ("Pharmacy Technician Certification", "Certified Welder",
+    "Licensed Massage Therapist"), without a leading word such as "a" or "valid"."""
+    out = []
+    for match in _CREDENTIAL_PHRASE_RE.finditer(text):
+        words = match.group(0).split()
+        while words and words[0] in _CREDENTIAL_LEAD:
+            words = words[1:]
+        name = " ".join(words)
+        # "Training and Certification" or "Department of Licensing" names an office, not a credential.
+        if len(words) >= 2 and len(name) <= 60 and words[-2].lower() not in ("and", "of", "in"):
+            out.append(name)
+    return out
+
+
+def _covered(term: str, kept: list[str]) -> bool:
+    """True when `term` repeats a kept term: the same, ignoring case, or either one found as whole words in the other."""
+    key = term.lower()
+    return any(key == k.lower() or re.search(_whole_word(key), k.lower()) or re.search(_whole_word(k.lower()), key) for k in kept)
+
+
+def extract_terms(text: str, limit: int = 25) -> list[str]:
+    """Keywords for any field, found in a job posting (or a certificate, a transcript, any document): at most `limit`.
+
+    In order: the credentials and licenses it names (VOCABULARY's "credentials", then phrases such as "Pharmacy
+    Technician Certification"); the terms of every field's vocabulary it uses, with the everyday-word tech terms
+    (TECH_WEAK) only in a clearly technical text; then what its requirement lines ask for ("experience with point of sale
+    systems"). Repeats are dropped, ignoring case, and so is a phrase already covered by a term found earlier.
+    search/packages.py uses them as a job's keywords when the AI didn't list any, and candidate/documents.py as the
+    skills a document shows."""
+    text = text or ""
+    low = text.lower()
+    found: list[str] = []
+    for field, patterns in _VOCAB:
+        hits = [term for term, pattern in patterns if pattern.search(low)]
+        found += hits
+        if field == "credentials":
+            found += _credential_phrases(text)
+    if sum(1 for term, pattern in dict(_VOCAB)["tech"] if pattern.search(low)) >= 2:
+        found += [term for term, pattern in _TECH_WEAK if pattern.search(low)]
+    found += _asked_phrases(text)
+    out: list[str] = []
+    for term in found:
+        if len(out) >= limit:
+            break
+        if not _covered(term, out):
+            out.append(term)
+    return out
 
 
 # Words too common to count when a keyword phrase is compared word by word.
@@ -456,3 +646,128 @@ def coverage(keywords: list[str], text: str) -> tuple[float, list[str], list[str
         (hit if any(_phrase_hit(a, low, stems) for a in alternatives) else miss).append(k)
     total = len(hit) + len(miss)
     return (round(len(hit) / total, 3) if total else 0.0), hit, miss
+
+
+# ---------------------------------------------------------------- target roles (the rule filters' cheap pre-filter)
+
+# Words in a target phrase that say nothing about the field: levels, job types, schedules, places and connectors.
+_TARGET_FILLER = {
+    "and", "or", "the", "of", "for", "with", "in", "at", "to", "a", "an", "on", "by", "&", "senior", "sr", "junior", "jr", "entry",
+    "level", "mid", "new", "grad", "graduate", "intern", "internship", "interns", "co", "op", "coop", "remote", "hybrid", "onsite",
+    "part", "time", "full", "fulltime", "parttime", "contract", "temporary", "temp", "seasonal", "per", "diem", "prn", "summer",
+    "fall", "spring", "winter", "i", "ii", "iii", "iv", "1", "2", "3", "4", "job", "jobs", "role", "roles", "position", "positions",
+    "opening", "openings", "hiring", "work", "career", "careers", "opportunity", "opportunities", "near", "me", "local",
+    "experienced", "early", "first", "year", "years", "shift", "night", "day", "weekend", "nights", "days", "weekends",
+}
+# Words that name a kind of position in any field. A target phrase only uses them when it has no more telling word, so
+# "Medical Assistant" is matched by "medical" (a "Teaching Assistant" isn't a medical assistant) and "Assistant Manager" by
+# "assistant" and "manager".
+_GENERIC_ROLE_WORDS = {
+    "manager", "management", "specialist", "assistant", "associate", "coordinator", "technician", "tech", "representative", "rep",
+    "officer", "director", "consultant", "administrator", "admin", "clerk", "worker", "operator", "agent", "supervisor", "lead",
+    "head", "member", "team", "staff", "professional", "aide", "helper", "attendant", "advisor", "adviser", "planner", "executive",
+    "partner", "generalist", "expert", "trainee", "apprentice", "fellow", "leader", "president", "vice", "vp", "chief", "owner",
+    "services", "service", "support", "operations",
+}
+# Other words for the same work, so a target "Registered Nurse" also finds "RN - Med Surg" and "Software Developer" finds
+# "Backend Engineer". The keys are stems (see _role_stem); _ROLE_ALIASES is filled in from the plain words below.
+_ALIAS_WORDS = {
+    "nurse": ["rn", "lpn", "lvn", "cna", "bsn", "np"], "software": ["developer", "programmer", "swe", "sde", "engineer"],
+    "developer": ["software", "programmer", "swe", "engineer"], "programmer": ["developer", "software", "engineer"],
+    "physician": ["doctor", "md", "hospitalist"], "doctor": ["physician", "md"], "attorney": ["lawyer", "counsel", "esq"],
+    "lawyer": ["attorney", "counsel"], "chef": ["cook", "culinary", "kitchen"], "cook": ["chef", "culinary", "kitchen"],
+    "server": ["waiter", "waitress", "banquet"], "driver": ["cdl", "trucker", "courier", "chauffeur", "delivery"],
+    "teacher": ["educator", "instructor", "tutor", "faculty", "paraprofessional"], "educator": ["teacher", "instructor"],
+    "instructor": ["teacher", "educator", "trainer"], "accountant": ["cpa", "bookkeeper"], "bookkeeper": ["accounting", "accountant"],
+    "caregiver": ["aide", "hha", "cna", "dsp", "companion"], "human": ["hr"], "hr": ["recruiter", "recruiting", "talent"],
+    "it": ["technical", "helpdesk", "desktop", "sysadmin", "network"], "qa": ["quality", "tester"], "quality": ["qa", "qc"],
+    "emt": ["paramedic", "ems"], "paramedic": ["emt", "ems"], "pharmacy": ["cpht"], "artist": ["art", "illustrator"],
+    "writer": ["copywriter", "editor", "author"], "welder": ["fabricator"], "mechanic": ["automotive", "diesel"],
+    "warehouse": ["forklift", "picker", "packer", "shipping", "receiving"], "cashier": ["retail", "checkout"],
+    "retail": ["store", "cashier"], "barista": ["coffee", "cafe"], "housekeeper": ["housekeeping", "custodian", "janitor", "cleaner"],
+    "janitor": ["custodian", "housekeeping", "cleaner"], "custodian": ["janitor", "housekeeping", "cleaner"],
+    "counselor": ["therapist", "clinician"], "therapist": ["counselor", "clinician"], "social": ["lcsw", "msw", "caseworker"],
+    "paralegal": ["legal"], "dental": ["dentist", "hygienist"], "hygienist": ["dental", "rdh"],
+}
+# Endings _role_stem() drops, longest first, so "nurse" and "nursing", "teacher" and "teaching", "therapist" and "therapy"
+# come out the same.
+_ROLE_SUFFIXES = ("ational", "ations", "ation", "icians", "ician", "ments", "ment", "ings", "ing", "ists", "ist", "ers", "er",
+                  "ors", "or", "ies", "ics", "ant", "ance", "ence", "ent", "ive", "ity", "ed", "al", "st", "es", "s", "y", "e", "ic")
+_TOKEN_RE = re.compile(r"[a-z0-9+#&]+")
+
+
+@lru_cache(maxsize=20000)  # the same title and description words come back in job after job
+def _role_stem(word: str) -> str:
+    """A rough stem for comparing job-title words: one common ending dropped, as long as four letters remain."""
+    for suffix in _ROLE_SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+            return word[:-len(suffix)]
+    return word
+
+
+_ROLE_ALIASES = {_role_stem(word): aliases for word, aliases in _ALIAS_WORDS.items()}
+# Place words in a search query ("nurse jobs Columbus OH") aren't about the work, so they're never target words.
+_PLACE_WORDS = {code.lower() for code in STATES} | set(NAME_TO_ABBR) | {city for city in CITY_STATE if " " not in city}
+
+
+class TargetMatcher:
+    """Tells whether a job is near what the user is after: their target roles, the profile's role families and the
+    search queries (search/plan.target_phrases). search/pipeline.RuleFilters uses it as the cheap pre-filter before AI
+    triage, which costs tokens for every job it reads.
+
+    It's lenient on purpose, since a dropped job is a job the user never sees:
+    - Each phrase gives its telling words ("Registered Nurse" gives registered and nurse). Generic role words such as
+      "assistant" or "manager" are used only when a phrase has nothing more telling. Levels, job types and places never
+      count.
+    - Words are compared by stem, so "nurse" finds "Nursing Assistant" and "teacher" finds "Teaching Fellow". Short words
+      (three letters or fewer, such as RN or IT) must match a whole word.
+    - A few aliases add other words for the same work (_ALIAS_WORDS): RN for nurse, developer for software.
+    - A title passes with any one target word. A title without one still passes when the description uses two different
+      target words.
+    `places` is the user's search area ("Columbus, OH", "Remote"): its words are left out too, since queries often name
+    the city. With no phrases at all the matcher is empty (bool() is False), and the pipeline lets every job through."""
+
+    def __init__(self, phrases: list[str], places: list[str] | None = None):
+        ignore = _TARGET_FILLER | _PLACE_WORDS | {w for place in places or [] for w in _TOKEN_RE.findall(str(place).lower())}
+        terms: set[str] = set()
+        for phrase in phrases or []:
+            words = [w for w in _TOKEN_RE.findall(str(phrase).lower()) if w not in ignore]
+            telling = [w for w in words if w not in _GENERIC_ROLE_WORDS]
+            for word in telling or words:
+                term = word if len(word) <= 3 else _role_stem(word)
+                terms.add(term)
+                for alias in _ROLE_ALIASES.get(term, []):
+                    terms.add(alias if len(alias) <= 3 else _role_stem(alias))
+        self.short = {t for t in terms if len(t) <= 3}  # whole words only
+        self.stems = terms - self.short
+        # Stems of five or more letters also match a longer or shorter stem that starts the same way ("electric" and
+        # "electr"). Such a pair always shares its first five letters, so the stems are filed by those.
+        self.by_start: dict[str, list[str]] = {}
+        for stem in self.stems:
+            if len(stem) >= 5:
+                self.by_start.setdefault(stem[:5], []).append(stem)
+
+    def __bool__(self) -> bool:
+        return bool(self.short or self.stems)
+
+    def hits(self, text: str) -> set[str]:
+        """The target words found in `text` (as their stems)."""
+        found = set()
+        for token in set(_TOKEN_RE.findall((text or "").lower())):
+            if len(token) <= 3:
+                if token in self.short:
+                    found.add(token)
+                continue
+            stem = _role_stem(token)
+            if stem in self.stems:
+                found.add(stem)
+            if len(stem) >= 5:
+                found.update(t for t in self.by_start.get(stem[:5], []) if stem.startswith(t) or t.startswith(stem))
+        return found
+
+    def matches(self, title: str, description: str = "") -> bool:
+        """True when the title uses a target word, or the first 1,500 characters of the description use two of them.
+        Always True for an empty matcher."""
+        if not self:
+            return True
+        return bool(self.hits(title)) or len(self.hits((description or "")[:1500])) >= 2

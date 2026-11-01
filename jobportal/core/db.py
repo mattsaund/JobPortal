@@ -50,7 +50,7 @@ import threading
 from datetime import datetime, timezone
 
 from jobportal.core.config import DATA, DB_PATH, OLD_STATUSES
-from jobportal.core.genres import classify_industry
+from jobportal.core.genres import OLD_INDUSTRIES, classify_industry
 
 _lock = threading.RLock()  # held for every query; re-entrant, so code holding it can call q() and ex()
 _conn: sqlite3.Connection | None = None  # the shared connection, opened by conn()
@@ -171,6 +171,10 @@ def _migrate(c: sqlite3.Connection) -> None:
     # not a column change, and it finds nothing to change once it has run.
     for old, new in OLD_STATUSES.items():
         c.execute("UPDATE leads SET app_status=? WHERE app_status=?", (new, old))
+    # v0.3.0 also replaced the tech-heavy industry list with one for every field (genres.OLD_INDUSTRIES says what each old
+    # name became). Another row update that finds nothing to change once it has run.
+    for old, new in OLD_INDUSTRIES.items():
+        c.execute("UPDATE leads SET industry=? WHERE industry=?", (new, old))
     # v0.3.0 dropped the Equity mining page. Its only saved value was the list of snoozed moves, which nothing reads now.
     c.execute("DELETE FROM kv WHERE key='crm.snoozed'")
 

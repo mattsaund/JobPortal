@@ -10,6 +10,7 @@ import pytest
 from jobportal.ai import client as ai
 from jobportal.candidate import profile
 from jobportal.core import db, settings
+from jobportal.core.levels import title_filters
 from jobportal.core.textutil import fingerprint
 from jobportal.search import collectors, packages, pipeline
 from jobportal.search.collectors import ats, feeds, hunt, linkedin
@@ -17,10 +18,13 @@ from jobportal.search.collectors.base import Ctx, RawJob
 from jobportal.search.pipeline import RuleFilters
 
 
-def make_cfg(**locations) -> dict:
-    """Default settings with a search area of Ohio and Pittsburgh, plus any location settings given."""
+def make_cfg(levels=("internship", "entry"), **locations) -> dict:
+    """Default settings with a search area of Ohio and Pittsburgh, the given experience levels (a student's, unless a test
+    says otherwise) with the title filters they imply, and any location settings given."""
     cfg = settings.get()
     cfg["locations"].update({"allowed": ["Ohio", "Pittsburgh, PA"], **locations})
+    cfg["search"]["levels"] = list(levels)
+    cfg["filters"]["title_include"], cfg["filters"]["title_exclude"] = title_filters(levels)
     return cfg
 
 
@@ -83,10 +87,35 @@ def test_strict_titles_need_a_word_for_the_users_levels():
     assert verdict(cfg, job(title="Software Engineer", source="linkedin", strict_titles=False)) == "pass"
 
 
-def test_tech_gate_skips_social_posts():
-    cfg = make_cfg()
-    assert verdict(cfg, job(title="Barista Intern")) == "not a tech role"
-    assert verdict(cfg, job(title="Barista Intern", source="reddit", strict_titles=False)) == "pass"
+def test_target_roles_gate_job_board_titles_but_not_social_posts():
+    cfg = make_cfg(levels=["entry", "mid"])
+    assert verdict(cfg, job(title="Software Engineer")) == "pass"  # no targets yet: nothing is assumed, everything passes
+    db.kv_set("profile.answers", {"target_roles": ["Barista", "Line Cook"]})
+    profile.save("search_plan", {"role_families": ["Food service"], "queries": ["coffee shop jobs"], "dream_companies": [], "notes": ""})
+    for title in ("Barista", "Prep Cook", "Food Service Worker", "Coffee Bar Attendant"):
+        assert verdict(cfg, job(title=title)) == "pass", title
+    assert verdict(cfg, job(title="Software Engineer")) == "outside your target roles"
+    assert verdict(cfg, job(title="Software Engineer", source="reddit", strict_titles=False)) == "pass"  # a post's headline
+    assert verdict(cfg, job(title="Shift Lead", description="Make espresso drinks, prep food and cook breakfast.")) == "pass"
+    cfg["filters"]["require_target_match"] = False
+    assert verdict(cfg, job(title="Software Engineer")) == "pass"
+
+
+def test_filters_work_for_any_career():
+    def from_linkedin(title: str) -> RawJob:  # titles LinkedIn already narrowed to the levels, so only the exclusions apply
+        return job(title=title, source="linkedin", strict_titles=False)
+
+    db.kv_set("profile.answers", {"target_roles": ["Registered Nurse"]})
+    nurse = make_cfg(levels=["entry"])
+    assert verdict(nurse, job(title="Staff Nurse, New Grad Residency")) == "pass"  # "staff" isn't a senior word here
+    assert verdict(nurse, from_linkedin("Nurse Manager")) == "too senior / excluded title"
+    assert verdict(nurse, from_linkedin("RN Case Manager")) == "pass"  # front-line work, despite "manager"
+    db.kv_set("profile.answers", {"target_roles": ["Electrician"]})
+    apprentice = make_cfg(levels=["apprenticeship"])
+    assert verdict(apprentice, job(title="Electrician Apprentice")) == "pass"
+    assert verdict(apprentice, from_linkedin("Journeyman Electrician")) == "too senior / excluded title"
+    db.kv_set("profile.answers", {"target_roles": ["Kindergarten Teacher"]})
+    assert verdict(make_cfg(levels=["entry"]), from_linkedin("Teacher - Grade 3")) == "pass"  # a grade, not a level
 
 
 def test_excluded_companies_keywords_old_and_incomplete_postings():
@@ -233,7 +262,7 @@ def triage_answer(score_for) -> callable:
             score = score_for(item)
             results.append({"id": item["id"], "score": score, "verdict": "strong" if score >= 60 else "no", "eligibility": "eligible",
                             "category": "internship", "summary": "", "reasons": [], "red_flags": [], "genres": ["robotics"],
-                            "industry": "Robotics & Manufacturing"})
+                            "industry": "Manufacturing"})
         return {"results": results}
     return answer
 
@@ -286,7 +315,7 @@ def test_retag_industries_saves_only_valid_answers_for_leads_it_sent(fake_ai):
 
 
 PACKAGE_OUT = {
-    "title": "Software Engineering Intern", "company": "Example Robotics", "location": "Columbus, OH", "industry": "Robotics & Manufacturing",
+    "title": "Software Engineering Intern", "company": "Example Robotics", "location": "Columbus, OH", "industry": "Manufacturing",
     "fit": {"score": 82, "summary": "", "strengths": [], "gaps": [], "eligibility_notes": ""}, "posting_status": "open",
     "apply_url": "https://jobs.example.com/apply", "deadline": "", "job_summary": "", "keywords": ["Python"],
     "resume_strategy": {"archetype": "general", "theme": "modern", "section_order": [], "summary": "", "projects": [], "skills_grouping": "",
@@ -318,7 +347,7 @@ def no_rendering(monkeypatch):
 def ready_to_search():
     """A finished setup (resume, standard answers, built profile) and settings with every real source turned off."""
     db.kv_set("profile.resume", {"text": "# Jordan Rivera", "name": "resume.md"})
-    db.kv_set("profile.answers", {"_saved_at": db.now(), "target_roles": ["Software Engineer"]})
+    db.kv_set("profile.answers", {"_saved_at": db.now(), "target_roles": ["Software Engineer", "Data Analyst"]})
     db.kv_set("profile.built_at", db.now())
     cfg = make_cfg(allowed=["Ohio"])
     for source in cfg["sources"].values():
@@ -390,7 +419,7 @@ def test_build_package_saves_the_package_and_marks_the_lead_ready(fake_ai, no_re
     lead = db.lead_row(db.one("SELECT * FROM leads WHERE id=?", (lead_id,)))
     assert summary["stage"] == "ready" and summary["score"] == 82
     assert lead["title"] == "Software Engineering Intern" and lead["company"] == "Example Robotics"  # the placeholders were replaced
-    assert lead["apply_url"] == "https://jobs.example.com/apply" and lead["industry"] == "Robotics & Manufacturing"
+    assert lead["apply_url"] == "https://jobs.example.com/apply" and lead["industry"] == "Manufacturing"
     assert lead["resume_md"].endswith("Python, SQL") and lead["package"]["resume_style"] == {"theme": "modern", "max_pages": 1}
     assert "resume_md" not in lead["package"] and "_tokens" not in lead["package"]
     assert "Build internal tools" in lead["description"]  # the short pasted text was replaced by the full posting
@@ -516,7 +545,7 @@ def test_linkedin_search_runs_to_the_end(monkeypatch):
 
 
 def test_hunt_rotates_missions_and_respects_levels():
-    cfg = settings.get()
+    cfg = make_cfg()
     cfg["sources"]["ai_hunt"].update(missions_per_run=2, missions=[
         {"id": "a", "name": "A", "prompt": ""}, {"id": "b", "name": "B", "prompt": ""}, {"id": "c", "name": "C", "prompt": ""},
         {"id": "off", "name": "Off", "prompt": "", "enabled": False},

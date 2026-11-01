@@ -112,8 +112,38 @@ def test_html_to_text():
     assert textutil.html_to_text(None) == ""
 
 
+def test_keywords_for_any_field():
+    # Whole words only: "c" isn't found inside "c++", and "go" isn't found inside "google".
+    tech = textutil.extract_terms("We use Python and C++ at Google, with some Go. C is a plus.")
+    assert {"Python", "C++", "Go", "C"} <= set(tech)
+    # Tech words that are everyday words don't count in a posting that isn't about tech.
+    assert textutil.extract_terms("Go the extra mile, rest assured, and test the web forms.") == []
+    # Credentials and licenses come first, then every field's vocabulary, then what the requirement lines ask for.
+    nursing = textutil.extract_terms("CNA certification and BLS required. Experience with patient care and vital signs.")
+    assert nursing[:2] == ["CNA", "BLS"] and {"patient care", "vital signs"} <= set(nursing)
+    trucking = textutil.extract_terms("Valid Class A CDL and OSHA 10. Ability to operate a forklift and pallet jack.")
+    assert {"CDL Class A", "OSHA 10", "forklift", "pallet jack"} <= set(trucking) and "CDL" not in trucking  # no repeats
+    kitchen = textutil.extract_terms("ServSafe required. Experience with point of sale systems and cash handling.")
+    assert {"ServSafe", "POS systems", "cash handling"} <= set(kitchen)
+    assert "Pharmacy Technician Certification" in textutil.extract_terms("Must hold a Pharmacy Technician Certification.")
+    office = textutil.extract_terms("Proficient in Microsoft Excel and QuickBooks. You will excel in a fast-paced environment.")
+    assert office[:2] == ["Microsoft Excel", "QuickBooks"] and not any("environment" in term for term in office)
+
+
+def test_target_roles_match_leniently():
+    nurse = textutil.TargetMatcher(["Registered Nurse", "new grad RN Columbus OH"], places=["Columbus, OH"])
+    assert nurse.matches("RN - Med Surg") and nurse.matches("Nursing Assistant") and nurse.matches("Charge Nurse")
+    assert not nurse.matches("Software Engineer") and not nurse.matches("Columbus Store Manager")  # places never count
+    assert nurse.matches("Clinician II", "Join our RN team providing nursing care.")  # two target words in the description
+    tech = textutil.TargetMatcher(["Software Engineer"])
+    assert tech.matches("Backend Developer") and not tech.matches("Cashier")
+    trades = textutil.TargetMatcher(["Apprentice Electrician"])
+    assert trades.matches("Journeyman Electrician") and trades.matches("Electrical Helper") and not trades.matches("Election Clerk")
+    assert textutil.TargetMatcher(["Assistant Manager"]).matches("Assistant Store Manager")  # only generic words: they count
+    assert not textutil.TargetMatcher([]) and textutil.TargetMatcher([]).matches("Anything")  # no targets: everything passes
+
+
 def test_keywords_and_coverage():
-    assert textutil.extract_terms("We use C++ and Go at Google. C is a plus.") == ["c", "c++", "go"]
     resume = "Wrote Python services on GCP with Kubernetes. Added unit tests."
     share, hit, miss = textutil.coverage(["Python", "AWS / GCP", "Kubernetes (K8s)", "unit testing", "Rust"], resume)
     assert share == 0.8 and miss == ["Rust"] and "unit testing" in hit  # "tests" counts for "testing"
@@ -122,11 +152,19 @@ def test_keywords_and_coverage():
 
 def test_genres_and_industries():
     assert genres.classify("Site Reliability Engineer") == ["cloud_devops"]
-    assert genres.classify("Barista") == []
+    assert genres.classify("Registered Nurse") == ["nursing"] and genres.classify("Electrician Apprentice") == ["skilled_trades"]
+    assert genres.classify("Barista") == ["food_hospitality"] and genres.classify("Paralegal") == ["legal"]
+    assert genres.classify("Lorem ipsum") == []
     assert genres.classify("Data Engineer", genres=[{"id": "x", "label": "X", "keywords": "data(("}]) == []  # a bad regex doesn't raise
-    assert genres.classify_industry("Example Aerospace", "Software Intern") == "Space & Aerospace"
-    assert genres.classify_industry("Example Bank", "Data Analyst") == "Fintech & Finance"
-    assert genres.classify_industry("Example Co", "Barista", industries=["Cybersecurity", "Other"]) == "Other"
+    assert {genres.group_of(g) for g in genres.DEFAULT_GENRES} == set(genres.GROUPS)  # every field group has genres
+    assert genres.classify_industry("Example Aerospace", "Software Intern") == "Aerospace & Defense"
+    assert genres.classify_industry("Example Bank", "Data Analyst") == "Finance & Insurance"
+    assert genres.classify_industry("Riverside Hospital", "Registered Nurse") == "Healthcare & Biotech"
+    assert genres.classify_industry("Example Co", "Line Cook", "Our restaurant serves brunch.") == "Restaurants & Food Service"
+    # Benefits boilerplate, and big employers' names that are also ordinary words, don't decide the industry.
+    assert genres.classify_industry("Example Co", "Analyst", "Health insurance, medical and dental. Meet your targets.") == "Other"
+    assert genres.classify_industry("Example Co", "Barista", industries=["Technology & Software", "Other"]) == "Other"
+    assert set(genres.OLD_INDUSTRIES.values()) <= set(genres.DEFAULT_INDUSTRIES)  # every old name has a home
 
 
 # ---------------------------------------------------------------- the database
@@ -165,7 +203,7 @@ def test_old_databases_are_upgraded():
     assert github["found"] == [{"source": "github", "label": "GitHub SimplifyJobs/Summer2027-Internships, Software",
                                 "url": "https://github.com/SimplifyJobs/Summer2027-Internships"}]
     assert linkedin["found"] == [{"source": "linkedin", "label": "LinkedIn search", "url": "https://example.com/jobs/2"}]
-    assert (github["industry"], linkedin["industry"]) == ("Space & Aerospace", "Fintech & Finance")
+    assert (github["industry"], linkedin["industry"]) == ("Aerospace & Defense", "Finance & Insurance")
     assert github["dream_manual"] is None and github["tokens"] == 0
     upgraded = {t: columns(t) for t in ("leads", "runs", "ai_calls", "candidates")}
 
@@ -174,6 +212,12 @@ def test_old_databases_are_upgraded():
     assert {t: columns(t) for t in upgraded} == upgraded
     db.close()
     db.conn()  # opening again changes nothing and doesn't fail
+
+
+def test_old_industry_names_are_renamed():
+    lead_id = db.ex("INSERT INTO leads(fingerprint, title, company, industry) VALUES('fp', 'Analyst', 'Example Co', 'Fintech & Finance')")
+    db.close()  # reopening runs the migration
+    assert db.one("SELECT industry FROM leads WHERE id=?", (lead_id,))["industry"] == "Finance & Insurance"
 
 
 def test_lead_helpers():
@@ -200,8 +244,11 @@ def test_settings_merge_over_defaults():
     assert settings.resume_playbook({"resume_playbook": ""}) == settings.default_playbook()
 
 
-def test_new_default_boards_are_offered_once():
-    defaults = config.DEFAULT_SETTINGS["sources"]["ats_boards"]["boards"]
+def test_new_default_boards_are_offered_once(monkeypatch):
+    # No company boards ship by default (each person adds their own), so pretend a later version added two.
+    defaults = [{"name": "Example Health", "ats": "greenhouse", "slug": "examplehealth"},
+                {"name": "Example Builders", "ats": "lever", "slug": "example-builders"}]
+    monkeypatch.setitem(config.DEFAULT_SETTINGS["sources"]["ats_boards"], "boards", defaults)
     assert settings.migrate_defaults() == []  # nothing saved yet, so the defaults already apply
     cfg = settings.get()
     cfg["sources"]["ats_boards"]["boards"] = [dict(defaults[0]), {"name": "Example Robotics", "ats": "lever", "slug": "example-robotics"}]
@@ -214,6 +261,28 @@ def test_new_default_boards_are_offered_once():
     settings.save(cfg)
     assert settings.migrate_defaults() == []
     assert defaults[1]["name"] not in {b["name"] for b in settings.get()["sources"]["ats_boards"]["boards"]}
+
+
+def test_tech_only_defaults_from_older_versions_are_retired():
+    from jobportal.core.genres import LEGACY_INDUSTRIES
+    old_genres = [{"id": "swe", "label": "Software Engineering", "keywords": "software"}, {"id": "cyber", "label": "Cybersecurity"}]
+    db.kv_set("settings", {"analysis": {"genres": old_genres}, "industries": LEGACY_INDUSTRIES,
+                           "filters": {"require_tech_title": False, "tech_title": ["software"], "exclude_companies": ["Example Staffing"]},
+                           "sources": {"reddit": {"enabled": True, "subreddits": ["forhire", "jobbit", "hiring", "cscareerquestions",
+                                                                                "internships", "EngineeringStudents", "remotejs", "techjobs"]},
+                                       "mastodon": {"enabled": True, "instances": ["mastodon.social", "example.social"]}}})
+    assert "genres for every field" in settings.migrate_defaults()
+    cfg = settings.get()
+    assert cfg["analysis"]["genres"] == config.DEFAULT_SETTINGS["analysis"]["genres"]
+    assert cfg["industries"] == config.DEFAULT_SETTINGS["industries"]
+    assert cfg["filters"]["require_target_match"] is False and "tech_title" not in cfg["filters"]  # the user had it off
+    assert cfg["filters"]["exclude_companies"] == ["Example Staffing"]  # their own choices stay
+    assert cfg["sources"]["reddit"]["subreddits"] == config.DEFAULT_SETTINGS["sources"]["reddit"]["subreddits"]
+    assert cfg["sources"]["mastodon"]["instances"] == ["mastodon.social", "example.social"]  # edited, so kept
+    assert settings.migrate_defaults() == []  # nothing left to change
+    db.kv_set("settings", {"industries": ["Fintech & Finance", "Education", "Finance & Insurance"]})  # a list the user edited
+    settings.migrate_defaults()
+    assert settings.get()["industries"] == ["Finance & Insurance", "Education"]
 
 
 # ---------------------------------------------------------------- live events
