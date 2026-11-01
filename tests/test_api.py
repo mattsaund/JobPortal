@@ -82,7 +82,7 @@ def test_setup_flow(client, fake_ai, sample_resume):
     fake_ai.responses["onboarding-prefill"] = {"name": "Jordan Rivera", "target_roles": ["Software Engineer"], "levels": ["entry"]}
     fake_ai.responses["library-import"] = {"resume_md": sample_resume, "suggested_name": "Jordan Rivera"}
     fake_ai.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
-    fake_ai.responses["analysis"] = {"genres": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
+    fake_ai.responses["analysis"] = {"roles": [], "suggested_roles": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
                                          "search_steering": {"emphasize": [], "deemphasize": [], "add_queries": [], "add_companies": [], "notes": ""}}
     r = client.put("/api/onboarding/resume?filename=resume.md", content=sample_resume.encode())
     assert r.status_code == 200, r.text
@@ -383,6 +383,11 @@ def test_dropping_several_files_picks_the_main_resume(client, fake_ai, sample_re
     assert out["picked"] == "full resume.md" and out["resume"]["filename"] == "full resume.md"
     assert sorted(d["name"] for d in client.get("/api/profile/documents").json()) == ["Food handler certificate.txt", "short resume.md"]
     assert client.post("/api/profile/documents/auto-main").json()["picked"] is None  # there's a main resume now
+    for _ in range(50):  # the editable copy in Settings, Resumes is saved in the background
+        if client.get("/api/library").json():
+            break
+        time.sleep(0.05)
+    assert [item["name"] for item in client.get("/api/library").json()] == ["full resume"]
 
 
 def test_skipping_application_sent_still_records_the_date(client, fake_ai):
@@ -413,3 +418,14 @@ def test_a_lead_never_gets_an_empty_status_or_an_unknown_kind(client):
     assert client.get(f"/api/leads/{lead['id']}").json()["app_status"] == "ready"
     assert client.post("/api/leads/manual", json={"title": "Chef", "company": "Example Bistro", "kind": "gig"}).status_code == 400
     assert client.post("/api/leads/manual", json={"title": "Chef", "company": "Example Bistro", "kind": "event"}).json()["kind"] == "event"
+
+
+def test_old_leads_past_application_sent_get_an_applied_date(client):
+    from jobportal.core import db
+    from jobportal.search import packages
+    ids = {status: packages.insert_lead({"fingerprint": f"fp-{status}", "title": "Role", "company": "Example Co", "app_status": status,
+                                         "updated_at": "2026-09-14T10:00:00+00:00"})
+           for status in ("ready", "applied", "interviewing", "accepted", "rejected")}
+    db.close()  # the next query reopens the database, which runs the migration
+    dates = {status: db.one("SELECT applied_at FROM leads WHERE id=?", (i,))["applied_at"] for status, i in ids.items()}
+    assert dates == {"ready": None, "applied": "2026-09-14", "interviewing": "2026-09-14", "accepted": "2026-09-14", "rejected": None}

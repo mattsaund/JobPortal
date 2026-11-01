@@ -152,9 +152,12 @@ async def pick_main_resume():
     if not best:
         return {"resume": None, "picked": None}
     try:
-        return {"resume": await documents.make_main(best["id"]), "picked": best["name"]}
+        resume = await documents.make_main(best["id"])
     except ValueError as e:  # extract.ExtractError: too short to be a resume
         raise HTTPException(400, str(e))
+    # Like a resume imported on its own, the first main resume also goes into Settings, Resumes as an editable copy.
+    _keep_copy_in_library(profile.resume()["text"], best["name"])
+    return {"resume": resume, "picked": best["name"]}
 
 
 @router.delete("/api/profile/documents/{doc_id}")

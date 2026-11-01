@@ -21,7 +21,7 @@ def test_starts_with_zero_data():
 def _setup(fake_ai, sample_resume):
     fake_ai.responses["onboarding-prefill"] = {}
     fake_ai.responses["profile-build"] = copy.deepcopy(PROFILE_OUT)
-    fake_ai.responses["analysis"] = {"genres": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
+    fake_ai.responses["analysis"] = {"roles": [], "suggested_roles": [], "summary": "", "top_priorities": [], "profile_suggestions": [],
                                          "search_steering": {"emphasize": [], "deemphasize": [], "add_queries": [], "add_companies": [], "notes": ""}}
     asyncio.run(onboarding.import_resume("resume.md", data=sample_resume.encode()))
     onboarding.save_answers(STANDARD_ANSWERS)

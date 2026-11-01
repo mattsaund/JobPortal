@@ -274,3 +274,13 @@ def test_the_funnel_counts_responses_only_among_applications():
     _lead("Charge Nurse", status="rejected")  # moved to Rejected without ever being marked as applied
     steps = {step["stage"]: step["n"] for step in analysis.market()["funnel"]}
     assert steps["Applied"] == 1 and steps["Responses"] == 1 and steps["Interviews"] == 1
+
+
+def test_a_damaged_package_doesnt_break_the_page():
+    good = _lead("Registered Nurse", missed=("telemetry",))
+    bad = _lead("Charge Nurse")
+    db.ex("UPDATE leads SET package=? WHERE id=?", ("{not json", bad))
+    other = _lead("Clinic Nurse")
+    db.update_lead(other, package={"coverage": {"hit": [None, 7], "miss": "telemetry"}})  # the wrong shapes inside
+    numbers = analysis.market()
+    assert good and numbers["packaged_leads"] == 1 and numbers["gaps"][0]["skill"] == "telemetry"

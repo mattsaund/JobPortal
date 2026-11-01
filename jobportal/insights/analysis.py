@@ -302,10 +302,45 @@ def experience_titles(record: str) -> list[str]:
 _POSTING_KINDS = ("posting", "program")
 
 
+LEAD_COLUMNS = "id, title, kind, score, stage, app_status, source, applied_at, industry, resume_md IS NOT NULL AS has_resume"
+
+
 def _leads() -> list[dict]:
-    """Every saved lead, with the columns the page counts."""
-    return db.q("SELECT id, title, kind, score, stage, app_status, source, package, applied_at, industry, "
-                "resume_md IS NOT NULL AS has_resume FROM leads")
+    """Every saved lead, with the columns the page counts and its package's keyword coverage as "coverage" (see _coverage).
+
+    SQLite reads just the coverage out of each package, so the tailored documents, emails and research in it are never
+    loaded. A SQLite build without JSON support, or a damaged package, makes the query fail: then each package is read
+    here instead, and a damaged one counts as having no coverage."""
+    try:
+        rows = db.q(f"SELECT {LEAD_COLUMNS}, json_extract(package, '$.coverage') AS coverage FROM leads")
+    except sqlite3.OperationalError:
+        rows = db.q(f"SELECT {LEAD_COLUMNS}, package AS coverage FROM leads")
+        for row in rows:
+            try:
+                package = json.loads(row["coverage"] or "{}")
+            except ValueError:
+                package = {}
+            row["coverage"] = package.get("coverage") if isinstance(package, dict) else None
+    for row in rows:
+        row["coverage"] = _coverage(row["coverage"])
+    return rows
+
+
+def _coverage(raw) -> dict:
+    """A package's keyword coverage as {"hit": [...], "miss": [...]}, from the JSON text SQLite returns or a parsed dict.
+    Anything else (no package yet, damaged JSON, keywords that aren't text) gives empty lists, so one bad package can't
+    break the page."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = None
+    if not isinstance(raw, dict):
+        return {"hit": [], "miss": []}
+    def words(key: str) -> list[str]:
+        value = raw.get(key)
+        return [w.strip() for w in value if isinstance(w, str) and w.strip()] if isinstance(value, list) else []
+    return {"hit": words("hit"), "miss": words("miss")}
 
 
 def _backlog() -> list[tuple[str, str]]:
@@ -488,8 +523,8 @@ def _skill_coverage(leads: list[dict], roles_of: dict[int, list[str]]) -> dict:
     for lead in leads:
         if lead["app_status"] == "trashed":
             continue
-        coverage = json.loads(lead["package"] or "{}").get("coverage") or {}
-        if not coverage:
+        coverage = lead["coverage"]
+        if not coverage["hit"] and not coverage["miss"]:
             continue
         packaged += 1
         for keyword in (coverage.get("hit") or []) + (coverage.get("miss") or []):

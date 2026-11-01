@@ -3,7 +3,8 @@ standard answers: experience levels, target roles, search queries, dream compani
 
 Every collector reads its search words from here, and the rule filters (pipeline.RuleFilters) read the dream companies and
 the target phrases. The web routes use plan_dreams and all_dreams for the Dream list (in Settings, Search), and
-insights/analysis.py uses field_weights to pick the genres the Analysis page shows. Nothing here writes anything.
+insights/analysis.py reads target_roles and target_phrases for the job titles on the Analysis radar. Nothing here writes
+anything.
 
 Two sources feed it: the settings (cfg["search"]: the levels from Settings, Search and the extra queries from the Sources
 dialog, plus the Dream list) and the profile's search plan (profile section "search_plan", built from the resume and

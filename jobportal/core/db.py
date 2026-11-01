@@ -51,7 +51,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 
-from jobportal.core.config import DATA, DB_PATH, OLD_STATUSES
+from jobportal.core.config import APPLIED_STATUSES, DATA, DB_PATH, OLD_STATUSES
 from jobportal.core.genres import OLD_INDUSTRIES, classify_industry
 
 _lock = threading.RLock()  # held for every query; re-entrant, so code holding it can call q() and ex()
@@ -173,6 +173,10 @@ def _migrate(c: sqlite3.Connection) -> None:
     # not a column change, and it finds nothing to change once it has run.
     for old, new in OLD_STATUSES.items():
         c.execute("UPDATE leads SET app_status=? WHERE app_status=?", (new, old))
+    # Reaching Application sent or later records when the user applied (config.APPLIED_STATUSES). Older leads moved past it
+    # without one get the day they last changed, so the Tracker's and Analysis's counts line up. Finds nothing once it ran.
+    c.execute(f"UPDATE leads SET applied_at=substr(updated_at, 1, 10) WHERE applied_at IS NULL AND updated_at IS NOT NULL "
+              f"AND app_status IN ({','.join('?' * len(APPLIED_STATUSES))})", APPLIED_STATUSES)
     # v0.3.0 also replaced the tech-heavy industry list with one for every field (genres.OLD_INDUSTRIES says what each old
     # name became). Another row update that finds nothing to change once it has run.
     for old, new in OLD_INDUSTRIES.items():

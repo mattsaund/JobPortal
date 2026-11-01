@@ -4,8 +4,8 @@ Genres describe the work itself (nursing, teaching, skilled trades, software, ..
 genre belongs to one field group (GROUPS), such as healthcare or the skilled trades. AI triage tags each lead with up to
 three genres, and classify() is the keyword fallback. search/pipeline.py also uses classify() to count demand per genre
 and to mix work types when it picks what to triage next. search/plan.py classifies the user's own target roles, role
-families and queries to learn their fields, which is how the Analysis page and the field-specific sources adapt to each
-person. The list is the "analysis.genres" setting, which no page edits. Keep each genre's id the same, or the Analysis
+families and queries to learn their fields, which is how the field-specific sources and AI hunt missions adapt to each
+person. (The Analysis radar shows job titles, not genres: see insights/analysis.py.) The list is the "analysis.genres" setting, which no page edits. Keep each genre's id the same, or the Analysis
 history stops lining up.
 
 Industries describe what the employer does (Healthcare & Biotech, Retail & E-commerce, ...). The list is the "industries"
@@ -18,7 +18,8 @@ other one out (for example "theat(?:er|re)")."""
 import re
 from functools import lru_cache
 
-# The field groups, in the order the Analysis page offers them when it has nothing else to go on. Each genre names one.
+# The field groups: the broadest kinds of work. Each genre names one, and search/plan.py turns the user's fields into
+# groups to switch field-specific sources and AI hunt missions on (a research mission only for science fields, and so on).
 GROUPS = {
     "healthcare": "Healthcare",
     "education": "Education",
