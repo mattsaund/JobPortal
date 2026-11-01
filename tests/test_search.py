@@ -915,6 +915,17 @@ def test_the_muse_searches_a_states_largest_cities():
     assert all(len(cities) >= 2 for state, cities in textutil.MAJOR_CITIES.items() if state != "DC")
 
 
+def test_a_nationwide_search_area_is_no_remote_permission_and_no_place_name():
+    ctx = Ctx(make_cfg(allowed=["Anywhere in the US"]), lambda *a, **k: None)
+    # The location filter drops remote jobs unless Remote itself is allowed, so the remote boards must not run for them.
+    assert not feeds._remote_allowed(ctx)
+    assert asyncio.run(feeds.remote_boards(ctx)) == []
+    assert feeds._places(ctx) == ["United States"]  # what Adzuna's place search can read
+    ctx.cfg["locations"]["allowed"] = ["Remote", "Ohio", "Anywhere", "United States"]
+    assert feeds._remote_allowed(ctx) and feeds._places(ctx) == ["Ohio", "United States"]
+    asyncio.run(ctx.close())
+
+
 def test_we_work_remotely_items():
     xml = """<rss><channel><item><title>Example Health: Patient Support Specialist</title><region>USA Only</region>
 <link>https://weworkremotely.com/remote-jobs/example-health-patient-support</link><description>&lt;p&gt;Help patients.&lt;/p&gt;</description>

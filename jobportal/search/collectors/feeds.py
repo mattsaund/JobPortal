@@ -23,7 +23,7 @@ from urllib.parse import quote, urlencode
 
 from jobportal.core.genres import DEFAULT_GENRES
 from jobportal.core.levels import early_career, muse_levels, posting_regex
-from jobportal.core.textutil import MAJOR_CITIES, NAME_TO_ABBR, STATES, clean, html_to_text, parse_date
+from jobportal.core.textutil import MAJOR_CITIES, NAME_TO_ABBR, REMOTE_RE, STATES, LocationMatcher, clean, html_to_text, parse_date
 from jobportal.search import plan
 from jobportal.search.collectors.base import NATIONWIDE, Ctx, RawJob
 
@@ -98,8 +98,27 @@ def _field_values(ctx: Ctx, table: dict[str, list[str]], top: int = 4) -> list[s
 
 
 def _remote_allowed(ctx: Ctx) -> bool:
-    """True when the search area allows remote work."""
-    return any(re.search(r"remote|anywhere", a, re.I) for a in ctx.cfg["locations"]["allowed"])
+    """True when the search area allows remote work, decided the way the location filter decides it
+    (textutil.LocationMatcher): "Anywhere in the US" covers every state but not remote jobs, so it doesn't count here.
+    Otherwise the remote boards would collect jobs the filter then drops, every one."""
+    return LocationMatcher(ctx.cfg["locations"]["allowed"]).allow_remote
+
+
+def _places(ctx: Ctx) -> list[str]:
+    """The allowed locations an aggregator's location search can take, sorted the way LocationMatcher sorts them: a
+    nationwide entry ("Anywhere in the US") becomes "United States", since a place search can't read the phrase, and the
+    remote entries are left out. Repeats are dropped."""
+    out: list[str] = []
+    for entry in ctx.cfg["locations"]["allowed"]:
+        if NATIONWIDE.fullmatch(entry.lower().strip()):
+            place = "United States"
+        elif REMOTE_RE.search(entry):
+            continue
+        else:
+            place = entry.strip()
+        if place and place not in out:
+            out.append(place)
+    return out
 
 
 def _level_words(ctx: Ctx) -> list[str]:
@@ -535,14 +554,15 @@ async def rss(ctx: Ctx) -> list[RawJob]:
 
 # ------------------------------------------------------------------ Optional aggregators (the user's own API key)
 async def adzuna(ctx: Ctx) -> list[RawJob]:
-    """Adzuna, a job aggregator with a free API key (Settings, Sources: app_id and app_key); skipped without one. Searches
-    the first four queries in every allowed place except remote ones (the whole United States when only remote is allowed):
-    the first page of Adzuna's US search, 50 results, posted within the last 45 days."""
+    """Adzuna, a job aggregator with a free API key (the Sources dialog: app_id and app_key); skipped without one. Searches
+    the first four queries in every allowed place (_places: remote entries left out, a nationwide one as the United
+    States, and the whole United States when only remote is allowed): the first page of Adzuna's US search, 50 results,
+    posted within the last 45 days."""
     sc = ctx.cfg["sources"]["adzuna"]
     if not (sc.get("app_id") and sc.get("app_key")):
         return []
     out = []
-    places = [a for a in ctx.cfg["locations"]["allowed"] if not re.search("remote", a, re.I)] or ["United States"]
+    places = _places(ctx) or ["United States"]
     for what in _queries(ctx, 4):
         for where in places:
             params = {"app_id": sc["app_id"], "app_key": sc["app_key"], "what": what, "where": where, "max_days_old": 45,
@@ -563,14 +583,14 @@ async def adzuna(ctx: Ctx) -> list[RawJob]:
 
 async def serpapi(ctx: Ctx) -> list[RawJob]:
     """Google Jobs results through SerpAPI, a paid service used with the user's own API key; skipped without one. Searches
-    "<query> <place>" for the first three queries in up to four allowed places, leaving remote places out (so a remote-only
-    search area searches nothing here). English results for the United States. The first apply link Google offers becomes
-    the posting URL."""
+    "<query> <place>" for the first three queries in up to four allowed places (_places: remote ones left out, so a
+    remote-only search area searches nothing here). English results for the United States. The first apply link Google
+    offers becomes the posting URL."""
     sc = ctx.cfg["sources"]["serpapi"]
     if not sc.get("api_key"):
         return []
     out = []
-    places = [a for a in ctx.cfg["locations"]["allowed"] if not re.search("remote", a, re.I)][:4]
+    places = _places(ctx)[:4]
     for q in _queries(ctx, 3):
         for where in places:
             params = {"engine": "google_jobs", "q": f"{q} {where}", "api_key": sc["api_key"], "hl": "en", "gl": "us"}
