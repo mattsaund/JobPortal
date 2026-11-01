@@ -385,7 +385,7 @@ class LocationMatcher:
             return True
 
         # 5. The state, read with the remote words taken out, so "Remote, OH" counts as Ohio.
-        where = state_of(REMOTE_RE.sub("", loc))
+        where = _named_state(REMOTE_RE.sub("", loc))
         if where and where in self.states:
             return True
         # A known place that isn't chosen (another state, or FOREIGN), or a remote job Remote didn't allow, is outside.
@@ -407,6 +407,17 @@ class LocationMatcher:
         if all(r is False for r in results):
             return False
         return None
+
+
+def _named_state(loc: str) -> str | None:
+    """state_of(), except that a state named after the last comma wins: "Kansas City, Missouri" is in Missouri, and so are
+    "Delaware, Ohio" (Ohio) and "Missouri City, Texas" (Texas). state_of() reads state names in table order, so the
+    city's own state word comes first there, and it can't change, because job fingerprints are built from its answers.
+    The location filter reads places with this instead. A code must be written in capitals, as state_of() requires."""
+    tail = loc.rsplit(",", 1)[1].strip() if "," in loc else ""
+    if tail in STATES:
+        return tail
+    return NAME_TO_ABBR.get(tail.lower()) or state_of(loc)
 
 
 def _state_code(entry: str) -> str | None:

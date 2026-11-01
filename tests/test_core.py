@@ -408,3 +408,9 @@ def test_location_edge_cases_that_used_to_drop_good_jobs():
     assert LocationMatcher(["Remote"]).match_one("Remote, Canada") is False
     assert state_of("Columbus, OH, on-site") == "OH" and LocationMatcher(["Ohio"]).match_one("Columbus, OH, on-site") is True
     assert state_of("Toronto, ON") == "FOREIGN"  # real province codes are still foreign
+    # Cities named after another state: the state after the comma wins in the filter. state_of() keeps its old answer,
+    # because saved leads' fingerprints were built from it.
+    for place, state in (("Kansas City, Missouri", "Missouri"), ("Delaware, Ohio", "Ohio"), ("Missouri City, Texas", "TX")):
+        assert LocationMatcher([state]).match_one(place) is True, place
+    assert LocationMatcher(["Kansas"]).match_one("Kansas City, Missouri") is False
+    assert state_of("Kansas City, Missouri") == "KS"
