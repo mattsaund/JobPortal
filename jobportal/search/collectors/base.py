@@ -48,8 +48,9 @@ class RawJob:
     posted_at: str | None = None  # ISO date (YYYY-MM-DD)
     deadline: str | None = None  # ISO date when the source gives one
     apply_url: str | None = None  # a direct application link, when it differs from url
-    # "posting" (one specific opening), "program" (an internship, fellowship or rotational program), "event" (a career fair
-    # or info session) or "intel" (a strong hiring signal with no posting yet). Only the AI hunt reports the last three.
+    # "posting" (one specific opening), "program" (an internship, apprenticeship, fellowship or training program), "event"
+    # (a career fair, hiring event or info session) or "intel" (a strong hiring signal with no posting yet). Only the AI
+    # hunt reports the last three.
     # The too-senior title filter only applies to postings.
     kind: str = "posting"
     category_hint: str = ""  # the source's own category ("internship", "Full-time"), used when triage doesn't pick one

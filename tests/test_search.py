@@ -603,6 +603,84 @@ def test_dream_bypass_covers_the_us_only():
     assert filters.check(job("Toronto, ON"))[1] == "outside the US"
 
 
+def _targets(roles: list[str], families: list[str] = ()) -> None:
+    """Set the user's target roles (standard answers) and the profile plan's role families."""
+    db.kv_set("profile.answers", {"target_roles": roles})
+    profile.save("search_plan", {"role_families": list(families), "queries": [], "dream_companies": [], "notes": ""})
+
+
+def test_sources_learn_the_users_fields_from_their_targets():
+    from jobportal.search import plan
+    cfg = make_cfg(levels=["internship", "entry"], allowed=["Ohio", "Remote"])
+    assert not plan.in_tech(cfg) and plan.fields(cfg) == []  # no targets: no field is assumed, tech least of all
+    _targets(["Registered Nurse", "Patient Care Technician"], ["Nursing", "Home health"])
+    assert plan.fields(cfg)[0] == "nursing" and plan.groups(cfg)[0] == "healthcare" and not plan.in_tech(cfg)
+    ctx = Ctx(cfg, lambda *a, **k: None)
+    instances, tags = feeds._mastodon_plan(ctx)
+    assert "nursingjobs" in tags and "techjobs" not in tags and "hachyderm.io" not in instances
+    assert "internship" in tags and "remotejobs" in tags  # an internship search with Remote allowed
+    assert "techjobs" not in feeds._reddit_subreddits(ctx) and "RemoteJobs" in feeds._reddit_subreddits(ctx)
+    assert feeds._wwr_feeds(ctx) == [feeds.WWR_FEED.format(feeds.WWR_OTHER)]
+    _targets(["Software Engineer", "Data Analyst"])
+    assert plan.in_tech(cfg)
+    instances, tags = feeds._mastodon_plan(ctx)
+    assert "techjobs" in tags and "hachyderm.io" in instances and "techjobs" in feeds._reddit_subreddits(ctx)
+    _targets(["Graphic Designer"])
+    assert {"DesignJobs", "HungryArtists"} <= set(feeds._reddit_subreddits(ctx))
+    asyncio.run(ctx.close())
+
+
+def test_tech_only_sources_skip_themselves_for_other_fields():
+    from jobportal.search.collectors import github_lists
+    _targets(["Line Cook", "Barista"])
+    logs = []
+    ctx = Ctx(make_cfg(), lambda source, msg, level="info": logs.append(msg))
+
+    async def no_network(*args, **kwargs):
+        raise AssertionError("a skipped source must not make requests")
+
+    ctx.request = no_network
+    assert asyncio.run(github_lists.collect(ctx)) == [] and asyncio.run(feeds.hackernews(ctx)) == []
+    assert all("aren't in tech" in line for line in logs)
+    asyncio.run(ctx.close())
+
+
+def test_the_muse_searches_the_users_fields(monkeypatch):
+    _targets(["Pastry Chef", "Line Cook"])
+    asked = []
+
+    async def fake_get_json(url, **kw):
+        asked.append(url)
+        return {"results": [], "page_count": 1}
+
+    ctx = Ctx(make_cfg(levels=["entry"]), lambda *a, **k: None)
+    ctx.get_json = fake_get_json
+    asyncio.run(feeds.themuse(ctx))
+    assert "category=Food+and+Hospitality+Services" in asked[0] and "level=Entry+Level" in asked[0]
+    asyncio.run(ctx.close())
+
+
+def test_we_work_remotely_items():
+    xml = """<rss><channel><item><title>Example Health: Patient Support Specialist</title><region>USA Only</region>
+<link>https://weworkremotely.com/remote-jobs/example-health-patient-support</link><description>&lt;p&gt;Help patients.&lt;/p&gt;</description>
+<pubDate>Tue, 27 Oct 2026 10:00:00 +0000</pubDate></item></channel></rss>"""
+    assert feeds._wwr_items(xml) == [{"title": "Example Health: Patient Support Specialist", "region": "USA Only",
+                                      "link": "https://weworkremotely.com/remote-jobs/example-health-patient-support",
+                                      "description": "Help patients.", "date": "2026-10-27"}]
+    assert feeds._wwr_items("not xml") == []
+
+
+def test_hunt_missions_for_some_fields_only():
+    cfg = make_cfg()
+    cfg["sources"]["ai_hunt"].update(missions_per_run=0, missions=[
+        {"id": "all", "name": "Everyone", "prompt": ""}, {"id": "labs", "name": "Labs", "prompt": "", "only_groups": ["science"]}])
+    assert [m["id"] for m in hunt.pick_missions(cfg, all_missions=True)] == ["all", "labs"]  # fields unknown: nothing skipped
+    _targets(["Retail Sales Associate", "Cashier"])
+    assert [m["id"] for m in hunt.pick_missions(cfg, all_missions=True)] == ["all"]
+    _targets(["Research Assistant"])
+    assert [m["id"] for m in hunt.pick_missions(cfg, all_missions=True)] == ["all", "labs"]
+
+
 def test_role_words_follow_the_profile_plan_switch():
     from jobportal.candidate import profile
     from jobportal.core import settings

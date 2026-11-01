@@ -1,11 +1,11 @@
-"""Community internship and new-grad lists on GitHub (SimplifyJobs and its forks).
+"""Community tech internship and new-grad lists on GitHub (SimplifyJobs and its forks).
 
 These repositories keep every listing in one JSON file (.github/scripts/listings.json), served as a plain file by
-raw.githubusercontent.com, so no API key is needed. Settings, Sources holds the file addresses. The lists only cover
-internships and new-grad roles, so this source skips itself unless the user searches at one of those levels."""
+raw.githubusercontent.com, so no API key is needed. Settings, Sources holds the file addresses. The lists only cover tech
+internships and new-grad roles (software, data, hardware, product, quant), so this source skips itself unless the user's
+targets are in tech (plan.in_tech) and they search at internship or entry level."""
 import re
 
-from jobportal.core.levels import EARLY
 from jobportal.core.textutil import parse_date
 from jobportal.search import plan
 from jobportal.search.collectors.base import Ctx, RawJob
@@ -16,7 +16,10 @@ async def collect(ctx: Ctx) -> list[RawJob]:
 
     Titles skip the level check (strict_titles=False) because every listing is already an internship or a new-grad role.
     found_url points at the repository, where the user can see the whole list."""
-    if not set(plan.levels(ctx.cfg)) & EARLY:
+    if not plan.in_tech(ctx.cfg):
+        ctx.log("github", "skipped: these lists only carry tech internships and new-grad roles, and your targets aren't in tech")
+        return []
+    if not set(plan.levels(ctx.cfg)) & {"internship", "entry"}:
         ctx.log("github", "skipped: these lists only cover internships and new-grad roles, which aren't in your levels")
         return []
     out = []
