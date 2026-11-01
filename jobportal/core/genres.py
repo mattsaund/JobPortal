@@ -9,7 +9,7 @@ person. The list is the "analysis.genres" setting, which no page edits. Keep eac
 history stops lining up.
 
 Industries describe what the employer does (Healthcare & Biotech, Retail & E-commerce, ...). The list is the "industries"
-setting (Settings page, "Industries"). AI triage normally picks a lead's industry, and classify_industry() is the
+setting (Settings, Search, "Industries"). AI triage normally picks a lead's industry, and classify_industry() is the
 fallback when it doesn't, and the way db.py fills in leads stored before industries existed.
 
 Both classifiers are plain keyword matching: fast, free, and good enough to sort by. They never call the AI. Patterns are

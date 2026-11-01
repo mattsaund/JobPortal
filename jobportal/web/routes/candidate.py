@@ -1,5 +1,5 @@
-"""The user's side: setup (import a resume and any extra documents, answer the standard questions), the Profile page, and
-the questions JobPortal asks along the way.
+"""The user's side: setup (import a resume and any extra documents, answer the standard questions), the profile
+(Settings, Profile), and the questions JobPortal asks along the way.
 
 These are the only ways JobPortal learns about the user. Nothing else feeds the profile: not saved resumes, not leads, not
 anything found on the web."""
@@ -20,13 +20,14 @@ router = APIRouter()
 
 @router.get("/api/onboarding")
 def onboarding_state():
-    """Everything the setup page needs: the questions, the saved answers and resume, and what's still missing."""
+    """Everything setup needs (Home, and Settings, Profile): the questions, the saved answers and resume, and what's
+    still missing."""
     return onboarding.state()
 
 
 def _keep_copy_in_library(text: str, filename: str) -> None:
-    """Also keep an editable copy of the imported resume on the Resumes page. It's a convenience: the copy never feeds the
-    profile, and a failure here never affects setup."""
+    """Also keep an editable copy of the imported resume in Settings, Resumes. It's a convenience: the copy never feeds
+    the profile, and a failure here never affects setup."""
     async def save():
         item = await library.import_text(text, filename)
         bus.publish("toast", {"title": "Saved to your resume collection", "body": item.get("name", "")})
@@ -164,7 +165,7 @@ def remove_document(doc_id: str):
 
 @router.put("/api/profile/{key}")
 def edit_profile_section(key: str, body: dict):
-    """The user corrects a profile section by hand on the Profile page."""
+    """The user corrects a profile section by hand in Settings, Profile."""
     try:
         profile.save(key, body["value"])
     except KeyError:

@@ -14,8 +14,8 @@ Key ideas:
 - The dashboard always saves the whole document (it loads GET /api/settings, edits it, and sends it back with PUT), so
   save() replaces what is stored instead of merging.
 
-Who calls it: almost every package reads settings with get(). web/routes/settings.py saves and resets them for the
-Settings and Sources pages, and web/server.py runs migrate_defaults() at startup."""
+Who calls it: almost every package reads settings with get(). web/routes/settings.py saves and resets them for
+Settings and the Sources dialog, and web/server.py runs migrate_defaults() at startup."""
 import copy
 import hashlib
 
@@ -55,7 +55,7 @@ def get() -> dict:
     """The current settings: what the user saved, merged over config.DEFAULT_SETTINGS.
 
     Returns a new dict on every call, so callers may change it (for example to save it back). An empty AI hunt mission
-    list is filled with the built-in missions, so the Sources page always has missions to show."""
+    list is filled with the built-in missions, so the Sources dialog always has missions to show."""
     # Imported here, not at the top of the file: ai/prompts.py imports this module, so a top-level import would be a loop.
     from jobportal.ai.prompts import DEFAULT_MISSIONS
     merged = _merge(copy.deepcopy(DEFAULT_SETTINGS), db.kv_get("settings", {}))
@@ -74,8 +74,9 @@ def save(new: dict) -> dict:
 def reset_section(path: str) -> dict:
     """Put one part of the settings back to its default and return get().
 
-    `path` is a dotted key, for example "sources.ai_hunt.missions" (the Sources page's "Reset to defaults" button). The
-    key is deleted from the stored settings, so the default shows through again. A path that isn't stored changes nothing."""
+    `path` is a dotted key, for example "sources.ai_hunt.missions" (the Sources dialog's button that puts the built-in
+    missions back). The key is deleted from the stored settings, so the default shows through again. A path that isn't
+    stored changes nothing."""
     stored = db.kv_get("settings", {})
     *parents, last = path.split(".")
     node = stored
@@ -93,7 +94,7 @@ def default_playbook() -> str:
 
 
 def resume_playbook(cfg: dict | None = None) -> str:
-    """The resume playbook in use: the user's own text from Settings, "Resumes" when they saved one, otherwise the
+    """The resume playbook in use: the user's own text from Settings, Resumes when they saved one, otherwise the
     built-in playbook. Pass the settings as `cfg` when you already have them, to skip reading them again."""
     cfg = cfg or get()
     return (cfg.get("resume_playbook") or "").strip() or default_playbook()

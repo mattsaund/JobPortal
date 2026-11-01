@@ -1,15 +1,16 @@
 """Company job boards: applicant tracking systems (ATS) that publish openings at public addresses. Supported: Greenhouse,
 Lever, Ashby, Workday, UKG (UltiPro), iCIMS and SmartRecruiters. No API keys are needed.
 
-Each board in Settings, Sources (cfg["sources"]["ats_boards"]["boards"]) names its system ("ats") and either a slug (the
+Each board in the Sources dialog (cfg["sources"]["ats_boards"]["boards"]) names its system ("ats") and either a slug (the
 company's id on that system, for example "example-robotics") or its careers page URL. HANDLERS maps each system to the
 function that reads that kind of board, and collect() reads every enabled board, eight at a time. detect() turns a careers
-page link into a board entry; that is how the Sources page adds a company from a pasted link (see sources.py).
+page link into a board entry; that is how the Sources dialog adds a company from a pasted link (see sources.py).
 
 Most systems return every opening in one request. Workday and iCIMS need a search word, so they are searched once per term
-from search_terms(). Postings from a board the user starred on the Sources page carry dream=True. strict_titles stays True:
-these are real job titles, so the rule filters check them against the user's levels. Several systems leave descriptions
-out of their lists; collectors/details.py fetches those later, one posting at a time, using what meta keeps."""
+from search_terms(). Postings from a board the user starred in the Sources dialog carry dream=True. strict_titles stays
+True: these are real job titles, so the rule filters check them against the user's levels. Several systems leave
+descriptions out of their lists; collectors/details.py fetches those later, one posting at a time, using what meta
+keeps."""
 import asyncio
 import re
 from urllib.parse import quote_plus, urlparse

@@ -154,7 +154,7 @@ def test_dream_companies_may_skip_the_search_area():
     assert verdict(cfg, far_dream) == "pass" and far_dream.dream
     cfg["locations"]["dream_bypass"] = False
     assert verdict(cfg, job(company="Example Robotics", location="Austin, TX")) == "outside your locations"
-    # A company board the user starred on the Sources page counts as a dream company too.
+    # A company board the user starred in the Sources dialog counts as a dream company too.
     assert verdict(make_cfg(dream_bypass=True), job(location="Austin, TX", dream=True)) == "pass"
 
 

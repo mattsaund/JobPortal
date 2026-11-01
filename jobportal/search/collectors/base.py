@@ -3,8 +3,8 @@ all share.
 
 A collector is an async function `collect(ctx) -> list[RawJob]` (see collectors/__init__.py). The search run (pipeline.py)
 makes one Ctx per run and hands it to every collector, so they share one connection pool, one request limit per site and one
-stop flag. The Sources page checks (sources.py) and a package built outside a run (packages.py) make their own short-lived
-Ctx.
+stop flag. The Sources dialog's checks (sources.py) and a package built outside a run (packages.py) make their own
+short-lived Ctx.
 
 Nothing here touches the database or the AI."""
 import asyncio
@@ -55,7 +55,8 @@ class RawJob:
     kind: str = "posting"
     category_hint: str = ""  # the source's own category ("internship", "Full-time"), used when triage doesn't pick one
     source_detail: str = ""  # readable origin for the Leads page, such as "Greenhouse: Example Robotics"
-    dream: bool = False  # from a company board starred on the Sources page; the rule filters also set it for the Dream list
+    # From a company board starred in the Sources dialog; the rule filters also set it for the Dream list.
+    dream: bool = False
     # True means the title must contain a word for the user's levels (Settings filters.title_include) to pass the rule
     # filters. Sources that already narrow results to those levels (LinkedIn, The Muse, the internship lists) set it to
     # False, and so do sources whose titles rarely name a level (USAJobs) or aren't job titles at all (social posts, feeds,
@@ -91,7 +92,7 @@ class RawJob:
 
 
 class Ctx:
-    """The HTTP client that collectors share during one search run or one Sources page check.
+    """The HTTP client that collectors share during one search run or one check in the Sources dialog.
 
     It is polite by design. At most PER_HOST_LIMIT requests run at once per site (host_limit() lowers that for strict sites),
     rate-limit and server-busy answers are retried after a growing pause, and every request checks the run's stop flag first,

@@ -2,11 +2,12 @@
 standard answers: experience levels, target roles, search queries, dream companies, and the fields all of these point at.
 
 Every collector reads its search words from here, and the rule filters (pipeline.RuleFilters) read the dream companies and
-the target phrases. The web routes use plan_dreams and all_dreams for the Dream list page, and insights/analysis.py uses
-field_weights to pick the genres the Analysis page shows. Nothing here writes anything.
+the target phrases. The web routes use plan_dreams and all_dreams for the Dream list (in Settings, Search), and
+insights/analysis.py uses field_weights to pick the genres the Analysis page shows. Nothing here writes anything.
 
-Two sources feed it: the settings (Settings, Search: cfg["search"], plus the Dream list) and the profile's search plan
-(profile section "search_plan", built from the resume and answers). The setting search.use_profile_plan turns the plan's
+Two sources feed it: the settings (cfg["search"]: the levels from Settings, Search and the extra queries from the Sources
+dialog, plus the Dream list) and the profile's search plan (profile section "search_plan", built from the resume and
+answers). The setting search.use_profile_plan turns the plan's
 queries, role families and dream companies off.
 
 Key idea for the fields: nothing assumes a field. field_weights() runs the genre classifier (core/genres.py) over the
@@ -54,8 +55,8 @@ def target_roles() -> list[str]:
 
 
 def all_queries(cfg: dict) -> list[str]:
-    """Search queries: the user's own (Settings, Search) plus the profile plan's, without repeats. Falls back to the target
-    roles when there are none."""
+    """Search queries: the user's own (the Sources dialog) plus the profile plan's, without repeats. Falls back to the
+    target roles when there are none."""
     plan = _plan().get("queries", []) if cfg["search"].get("use_profile_plan", True) else []
     return _dedupe(list(cfg["search"].get("queries", [])) + list(plan)) or target_roles()
 
@@ -81,14 +82,14 @@ def target_phrases(cfg: dict) -> list[str]:
 
 
 def plan_dreams(cfg: dict) -> list[str]:
-    """Dream companies the profile plan suggested, minus the ones the user removed on the Dream list page."""
+    """Dream companies the profile plan suggested, minus the ones the user removed from the Dream list."""
     excluded = {x.strip().lower() for x in cfg.get("dream_exclude", [])}
     plan = _plan().get("dream_companies", []) if cfg["search"].get("use_profile_plan", True) else []
     return [x for x in plan if x.strip().lower() not in excluded]
 
 
 def all_dreams(cfg: dict) -> list[str]:
-    """Every dream company: the ones in settings (from the standard questions and the Dream list page), then the profile
+    """Every dream company: the ones in settings (from the standard questions and the Dream list), then the profile
     plan's, without repeats."""
     return _dedupe(list(cfg.get("dream_companies", [])) + plan_dreams(cfg))
 

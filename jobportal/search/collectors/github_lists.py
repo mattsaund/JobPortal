@@ -1,9 +1,9 @@
 """Community tech internship and new-grad lists on GitHub (SimplifyJobs and its forks).
 
 These repositories keep every listing in one JSON file (.github/scripts/listings.json), served as a plain file by
-raw.githubusercontent.com, so no API key is needed. Settings, Sources holds the file addresses. The lists only cover tech
-internships and new-grad roles (software, data, hardware, product, quant), so this source skips itself unless the user's
-targets are in tech (plan.in_tech) and they search at internship or entry level."""
+raw.githubusercontent.com, so no API key is needed. The settings (sources.github_lists.urls) hold the file addresses.
+The lists only cover tech internships and new-grad roles (software, data, hardware, product, quant), so this source
+skips itself unless the user's targets are in tech (plan.in_tech) and they search at internship or entry level."""
 import re
 
 from jobportal.core.textutil import parse_date

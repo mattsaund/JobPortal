@@ -95,7 +95,7 @@ def title_filters(levels, roles: list[str] | None = None) -> tuple[list[str], li
     drop apprentice and trainee titles. An exclude word found in a target role is left out, so "Staff Accountant", "Lead
     Teacher" or "Associate Product Manager" still get through.
 
-    candidate/onboarding.py saves the result as the title filter settings, which the Settings page shows for editing."""
+    candidate/onboarding.py saves the result as the title filter settings, which Settings, Search shows for editing."""
     picked = set(clean(levels))
     roles = [r.strip() for r in (roles or []) if r and r.strip()]
     include: list[str] = []

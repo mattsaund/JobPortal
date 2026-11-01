@@ -6,10 +6,12 @@ the next profile build together with the resume, so the profile, and the search 
 user has done. That's how a certificate the resume never mentions can still lead to jobs that ask for it, and why more
 documents mean a wider spread of job matches.
 
-Where they're added: the setup page (the resume step) and Profile, Resume and documents. Each file is read with
-documents/extract.py and kept as text in "profile.documents", and a copy of the file goes in the data folder (documents/).
-Adding or removing one stamps "profile.documents_changed_at". profile.answers_watcher() then rebuilds the profile once the
-user has paused for a minute, so dropping ten files at once means one rebuild, not ten.
+Where they're added: on Home, by dropping files on it or through its documents card (web/static/js/components/
+documents.js). A drop of several files before there's a main resume makes the best resume among them the main one
+(best_resume, make_main). Each file is read with documents/extract.py and kept as text in "profile.documents", and a copy
+of the file goes in the data folder (documents/). Adding or removing one stamps "profile.documents_changed_at".
+profile.answers_watcher() then rebuilds the profile once the user has paused for a minute, so dropping ten files at once
+means one rebuild, not ten.
 
 Reading a document's details ("parsed"): what it is (kind), its title ("AWS Certified Cloud Practitioner", "Dean's List"),
 who issued it, when it was issued and when it expires ("YYYY-MM", "YYYY" or ""), up to eight skills or topics it shows, and
@@ -24,8 +26,8 @@ parse_pending(), which the server runs at startup and after a sign-in. Neither r
 title or an issuer. The profile build reads each document's details as a DETAILS line above its text (for_prompt), so
 licenses, certifications and awards land in the profile's record reliably.
 
-Not to be confused with saved resumes on the Resumes page (candidate/library.py): that's a collection of resume versions to
-reuse, and it never feeds the profile."""
+Not to be confused with saved resumes in Settings, Resumes (candidate/library.py): that's a collection of resume
+versions to reuse, and it never feeds the profile."""
 import asyncio
 import hashlib
 import re

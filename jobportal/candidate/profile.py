@@ -1,7 +1,8 @@
 """The candidate profile: everything JobPortal knows about the user, kept in one place.
 
-Every search, score and document is made from it. Triage and the AI hunt read a short digest(). Application packages, resume
-revisions and the Analysis page read the full_context(). The Profile page shows overview() and saves hand edits with save().
+Every search, score and document is made from it. Triage and the AI hunt read a short digest(). Application packages,
+resume revisions and the Analysis page read the full_context(). Settings, Profile shows overview() and saves hand edits
+with save().
 
 Where it comes from (these are the only inputs):
   1. The resume the user imports, their main resume. onboarding.import_resume() stores it as "profile.resume".
@@ -39,7 +40,7 @@ How it changes:
   - The writing sample changes, and learn_voice() rewrites the voice section.
   The standard answers always win over what the AI read from the resume: their facts are copied back after every build and
   update. save() keeps each section's previous version in the profile_history table, and every build, update and voice
-  change adds an entry to the changelog on the Profile page.
+  change adds an entry to the changelog in Settings, Profile.
 
 Side effects: builds and updates call the AI, write to the database and publish live events (core/bus.py) so open dashboard
 pages update. When one finishes it starts background work: re-scoring leads, learning the voice and refreshing the analysis.
@@ -87,7 +88,7 @@ MAX_OPEN_QUESTIONS = 40  # ask() adds nothing past this many open questions, so 
 MIN_SAMPLE_CHARS = 200  # learn_voice() needs at least this much of the user's own writing
 
 _lock = asyncio.Lock()  # one build or update at a time
-# What the profile is doing right now. The sidebar and the setup page show it (see status_snapshot()).
+# What the profile is doing right now. The sidebar and Home show it (see status_snapshot()).
 status: dict = {"busy": False, "phase": "", "error": None}
 
 
@@ -103,7 +104,7 @@ def get_all() -> dict:
 
 
 def save(key: str, value) -> None:
-    """Replace one section. The previous version goes into profile_history first, so the Profile page can restore it.
+    """Replace one section. The previous version goes into profile_history first, so Settings, Profile can restore it.
     Raises KeyError when key isn't a section."""
     if key not in KEYS:
         raise KeyError(key)
@@ -151,13 +152,13 @@ def ready_to_search() -> str:
     """What's missing before a search can run, worded for the user, or "" when nothing is. search/pipeline.py checks this
     before every run."""
     if not resume():
-        return "Import your resume first (Profile -> Setup)."
+        return "Import your resume first: drop it on Home."
     if not standard_answers().get("_saved_at"):
-        return "Answer the standard job questions first (Profile -> Setup)."
+        return "Answer the standard job questions first. Home asks them one at a time."
     if not is_built():
         if status["busy"]:
             return "Your profile is still being built. Try again in a minute."
-        return "Your profile hasn't been built yet. Open Profile and click Rebuild profile."
+        return "Your profile hasn't been built yet. Open Settings, Profile and click Build again."
     return ""
 
 
@@ -298,7 +299,8 @@ def _save_questions(qs: list[dict]) -> None:
 
 @_one_at_a_time
 def ask(question: str, why: str, field: str = "", source: str = "JobPortal", lead_id: int | None = None) -> bool:
-    """Add an open question to Profile -> Questions. Returns True if it was added.
+    """Add an open question to the ones JobPortal asks (on Home, and in Settings, Profile, "Answers along the way").
+    Returns True if it was added.
 
     A question asked before in any form (see _qkey()) is skipped, even one that was answered or dismissed. Nothing is added
     once MAX_OPEN_QUESTIONS are open. Application packages pass lead_id, so the question also shows on that lead."""
@@ -465,7 +467,7 @@ def _prompt_head() -> str:
 async def _working(phase: str, failure_title: str):
     """Hold the profile lock while a build or update runs, and show its progress in the dashboard.
 
-    If the work fails, the error is kept in status["error"] (the setup page shows it) and shown as a toast, then raised
+    If the work fails, the error is kept in status["error"] (Home shows it) and shown as a toast, then raised
     again for the caller."""
     async with _lock:
         status["error"] = None
@@ -569,7 +571,8 @@ def _save_result(mode: str, reason: str, out: dict, read: list[dict]) -> dict:
 
 
 def _log_change(mode: str, reason: str, sections: list[str], changes: list[str], tokens: int) -> dict:
-    """Add an entry to the changelog the Profile page shows (newest first, 60 kept) and tell open dashboards. Returns it."""
+    """Add an entry to the changelog Settings, Profile shows (newest first, 60 kept) and tell open dashboards. Returns
+    it."""
     entry = {"ts": db.now(), "mode": mode, "reason": reason, "sections": sections, "changes": changes, "tokens": tokens}
     db.kv_set("profile.changelog", ([entry] + changelog())[:60])
     bus.publish("profile", entry)
@@ -660,7 +663,7 @@ def _count_entries(md: str, section_re: str) -> int:
 
 
 def overview() -> dict:
-    """Everything the Profile page's Overview tab shows: who the user is, what the profile knows, the voice, the build
+    """Everything the overview in Settings, Profile shows: who the user is, what the profile knows, the voice, the build
     history, and how much JobPortal has made from the profile so far."""
     from jobportal.candidate.onboarding import label_of
     p = get_all()

@@ -1,4 +1,5 @@
-"""Search runs and sources: start and stop a run, the Runs page (history, logs, AI call log), and the Sources page checks."""
+"""Search runs and sources: start and stop a run, the run history (Settings, History: runs, logs, the AI call log), and
+the Sources dialog's checks."""
 import json
 
 from fastapi import APIRouter, HTTPException
@@ -32,7 +33,7 @@ async def stop_run():
 
 @router.get("/api/runs")
 def runs():
-    """The last 60 runs, newest first, for the Runs page."""
+    """The last 60 runs, newest first, for Settings, History."""
     rows = db.q("SELECT * FROM runs ORDER BY id DESC LIMIT 60")
     for row in rows:
         row["stats"] = json.loads(row["stats"] or "{}")

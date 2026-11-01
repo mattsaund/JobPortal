@@ -7,7 +7,7 @@ from jobportal.core import levels
 
 def passes(title: str, lv, roles=None) -> bool:
     """Whether a title gets through the title filters for these levels and roles. An empty include list lets any title
-    through, as the Settings page promises ("blank = any title")."""
+    through, as Settings, Search promises ("leave empty for any title")."""
     inc, exc = levels.title_filters(lv, roles)
     t = title.lower()
     ok_inc = not inc or re.search("|".join(f"(?:{p})" for p in inc), t, re.I)

@@ -38,7 +38,7 @@ RESUME_DIR = DATA / "resume"  # the resume file the user imported during setup
 HOST = "127.0.0.1"  # the server only listens on this computer, never on the network
 PORT = int(os.environ.get("JOBPORTAL_PORT") or 8788)
 
-# Reasoning effort choices for each AI stage (Settings, "AI: ChatGPT"). Models come from the signed-in ChatGPT account.
+# Reasoning effort choices for each AI stage (Settings, AI). Models come from the signed-in ChatGPT account.
 EFFORTS = ["low", "medium", "high"]
 
 # Where the user is with each application. "new" is every lead's starting status: found, ranked and on the Leads page, but
@@ -55,12 +55,12 @@ STATUS_LABELS = {"new": "New", "ready": "Ready to apply", "applied": "Applicatio
 OLD_STATUSES = {"saved": "ready", "assessment": "interviewing", "offer": "accepted", "ghosted": "rejected", "withdrawn": "rejected"}
 
 # Company job boards searched by default: none. Which companies are worth reading depends entirely on the person (a nurse
-# in Ohio and a designer in Denver share no employers), so the user adds their own: the Sources page turns any pasted
+# in Ohio and a designer in Denver share no employers), so the user adds their own: the Sources dialog turns any pasted
 # careers URL into a board (POST /api/sources/detect, search/sources.py), and the AI hunt's "Dream companies" mission
 # checks the careers sites of the user's dream companies either way. Each entry has a name and an "ats", the hiring
 # system the board runs on. Greenhouse, Lever and Ashby boards are found by "slug" (the company's id in that system's
-# public API). Workday, UKG and iCIMS boards are found by "url". The Sources page adds "enabled" and "dream" switches to
-# an entry. core/settings.migrate_defaults() offers any board added here later to existing users once.
+# public API). Workday, UKG and iCIMS boards are found by "url". The Sources dialog adds "enabled" and "dream" switches
+# to an entry. core/settings.migrate_defaults() offers any board added here later to existing users once.
 ATS_BOARDS: list[dict] = []
 
 # The title filters for the default levels (every level, so nothing is assumed), used until the user saves the standard
@@ -70,7 +70,7 @@ _TITLE_INCLUDE, _TITLE_EXCLUDE = title_filters(DEFAULT_LEVELS)
 # Every setting and its default. settings.get() returns these merged with what the user saved. Comments name the page
 # where each setting is edited. Settings with no page keep their default unless code changes them.
 DEFAULT_SETTINGS = {
-    # Settings page, "AI: ChatGPT". Every AI request names a stage, and the stage picks the model and reasoning effort.
+    # Settings, AI. Every AI request names a stage, and the stage picks the model and reasoning effort.
     "ai": {
         "model": "",  # the default model; "" means the first model the signed-in ChatGPT account lists
         "stages": {  # per stage: "model" ("" uses the default above) and "effort" (one of EFFORTS)
@@ -85,7 +85,7 @@ DEFAULT_SETTINGS = {
         },
         "max_parallel": 3,  # "Parallel agents": how many AI requests may run at the same time
     },
-    # Settings page, "Runs" (and "Resumes" for resume_review). How much one search run does.
+    # How much one search run does: Settings, Search, "How much each search does" (resume_review: Settings, Resumes).
     "run": {
         "max_triage": 600,  # most jobs the AI scores per run; the rest wait in a backlog for the next run
         "triage_batch": 20,  # jobs per AI triage request
@@ -96,15 +96,15 @@ DEFAULT_SETTINGS = {
         "max_age_days": 90,  # postings older than this are dropped
         "auto_run_hours": 0,  # start a full run every N hours (0 = off); web/server.py checks once a minute
     },
-    # The search area: where jobs may be. Filled in from the standard answers, then edited in the search area editor (the
-    # Leads page header, or Settings, "Search area"). search/pipeline.py checks every job with textutil.LocationMatcher.
+    # The search area: where jobs may be. Filled in from the standard answers, then edited in the search area editor
+    # (Home's "Where to search", or Settings, Search). search/pipeline.py checks every job with textutil.LocationMatcher.
     "locations": {
         "allowed": [],  # plain text: states ("Ohio" or "OH"), cities ("Pittsburgh, PA"), "Remote", "Anywhere in the US"
-        "dream_bypass": True,  # dream companies skip the search area (search area editor and Dream list page)
-        "dream_jobs_bypass": False,  # dream job titles skip it too (Dream list page)
+        "dream_bypass": True,  # dream companies skip the search area (the search area editor and the Dream list)
+        "dream_jobs_bypass": False,  # dream job titles skip it too (the Dream list)
         "unknown_policy": "ai",  # a job whose location can't be told: "ai" lets AI triage decide, "drop" removes it
     },
-    # Settings page, "Filters": the rule filters every job passes before any AI sees it (search/pipeline.py).
+    # Settings, Search, "Filters": the rule filters every job passes before any AI sees it (search/pipeline.py).
     "filters": {
         # Regexes for job-board titles. A title must match one include pattern ([] = any title) and no exclude pattern.
         # Saving the standard answers rebuilds both from the levels and target roles (levels.title_filters).
@@ -117,8 +117,8 @@ DEFAULT_SETTINGS = {
         "exclude_keywords": [],  # "Drop if description contains" (saving the standard answers adds clearance phrases)
     },
     "search": {
-        "queries": [],  # Sources page, "Your extra queries": search terms for LinkedIn, The Muse and the aggregators
-        "use_profile_plan": True,  # Sources page: also search the queries and dream companies the profile derived
+        "queries": [],  # the Sources dialog, "Your own search terms": for LinkedIn, The Muse and the aggregators
+        "use_profile_plan": True,  # the Sources dialog: also search the queries and dream companies the profile derived
         "levels": list(DEFAULT_LEVELS),  # experience levels to search, from the standard answers (levels.py)
     },
     # How the profile keeps itself current (candidate/profile.py). No page edits these.
@@ -130,15 +130,16 @@ DEFAULT_SETTINGS = {
     },
     # Work-type genres: the spokes of the Analysis radar, also tagged on every lead. No page edits them (genres.py).
     "analysis": {"genres": DEFAULT_GENRES},
-    "industries": DEFAULT_INDUSTRIES,  # Settings page, "Industries": the list every lead is tagged from (genres.py)
-    # The Dream list page. Leads that match get the dream flag, which never changes their score.
+    "industries": DEFAULT_INDUSTRIES,  # Settings, Search, "Industries": the list every lead is tagged from (genres.py)
+    # The Dream list (Settings, Search). Leads that match get the dream flag, which never changes their score.
     "dream_companies": [],  # companies the user added (saving the standard answers sets it to their dream companies)
     "dream_jobs": [],  # title phrases that make a job a dream job at any company
     "dream_exclude": [],  # profile-suggested dream companies the user removed
-    # The Sources page: every job source, each with an "enabled" switch. search/collectors/ reads these. Sources that only
-    # carry one field's jobs adapt to the user (search/plan.py works out their fields from their targets): the GitHub lists
-    # and Hacker News carry tech jobs, so they skip themselves for everyone else, and Reddit, Mastodon, The Muse and the
-    # remote boards add communities, hashtags, categories and feeds for the user's fields on top of the general ones here.
+    # The Sources dialog on Leads: every job source, each with an "enabled" switch. search/collectors/ reads these.
+    # Sources that only carry one field's jobs adapt to the user (search/plan.py works out their fields from their
+    # targets): the GitHub lists and Hacker News carry tech jobs, so they skip themselves for everyone else, and Reddit,
+    # Mastodon, The Muse and the remote boards add communities, hashtags, categories and feeds for the user's fields on
+    # top of the general ones here.
     "sources": {
         # Community tech internship and new-grad lists. Used only when the user's targets are in tech and their levels
         # include internship or entry level.
@@ -171,6 +172,6 @@ DEFAULT_SETTINGS = {
         # run rotates through (0 = all). An empty missions list is filled from ai/prompts.DEFAULT_MISSIONS by settings.get().
         "ai_hunt": {"enabled": True, "depth": "standard", "missions_per_run": 7, "missions": []},
     },
-    "prompts": {},  # Settings page, "Prompts (advanced)": system prompt overrides by name ("triage", "package", ...)
-    "resume_playbook": "",  # Settings page, "Resumes": the user's own playbook; "" uses resources/resume_playbook.md
+    "prompts": {},  # Settings, AI, "Prompts (advanced)": system prompt overrides by name ("triage", "package", ...)
+    "resume_playbook": "",  # Settings, Resumes: the user's own playbook; "" uses resources/resume_playbook.md
 }

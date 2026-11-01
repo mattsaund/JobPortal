@@ -272,7 +272,7 @@ async def themuse(ctx: Ctx) -> list[RawJob]:
 # ------------------------------------------------------------------ USAJobs
 async def usajobs(ctx: Ctx) -> list[RawJob]:
     """USAJobs, the federal government's job board, through its search API. It needs a free API key and the email address the
-    key was issued to (Settings, Sources); without them this source skips itself. The API wants that email as the
+    key was issued to (the Sources dialog); without them this source skips itself. The API wants that email as the
     User-Agent and the key in an Authorization-Key header.
 
     Searches the first six queries. Users searching at internship or entry level also get the student and recent-graduate
@@ -534,9 +534,9 @@ def _parse_feed(xml: str) -> list[dict]:
 
 
 async def rss(ctx: Ctx) -> list[RawJob]:
-    """The user's own RSS or Atom feeds (Settings, Sources). Each feed is a plain URL or {"url", "name"}. Every item becomes a
-    job titled with the item's headline. Titles skip the level check (strict_titles=False) because headlines aren't
-    structured job titles."""
+    """The user's own RSS or Atom feeds (the Sources dialog). Each feed is a plain URL or {"url", "name"}. Every item
+    becomes a job titled with the item's headline. Titles skip the level check (strict_titles=False) because headlines
+    aren't structured job titles."""
     out = []
     for feed in ctx.cfg["sources"]["rss"].get("feeds", []):
         url = feed["url"] if isinstance(feed, dict) else feed

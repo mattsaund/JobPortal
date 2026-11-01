@@ -1,15 +1,16 @@
-"""The resume library behind the Resumes page: resume versions the user keeps, edits, downloads and applies to leads.
+"""The resume library behind Settings, Resumes: resume versions the user keeps, edits, downloads and applies to leads.
 
 Saved resumes are storage only. They never feed the profile and are never used as a template. JobPortal learns about the
-user only from the imported resume, the standard answers and questions asked along the way (see candidate/profile.py), and
-every tailored resume is written fresh from the profile. A saved resume reaches a lead only when the user applies it on
-purpose (search/pipeline.py, use_saved_resume). The editable copy that setup can keep of the imported resume is storage too.
+user only from the imported resume, the extra documents, the standard answers and the questions asked along the way (see
+candidate/profile.py), and every tailored resume is written fresh from the profile. A saved resume reaches a lead only
+when the user applies it on purpose (search/packages.py, use_saved_resume). The editable copy that setup can keep of the
+imported resume is storage too.
 
 Each item is one row in the resume_library table: a name, the resume in JobPortal's markdown format (ai/prompts.RESUME_FORMAT),
 a style (theme and page limit), tags, notes, and where it came from (source, lead_id, original_file). Downloads are rendered
 on demand into LIB_DIR/<id>/ by documents/exports.py and deleted whenever the item changes.
 
-Called by web/routes/library.py (the Resumes page) and web/routes/candidate.py (the copy of a newly imported resume)."""
+Called by web/routes/library.py (Settings, Resumes) and web/routes/candidate.py (the copy of a newly imported resume)."""
 import asyncio
 import json
 import shutil

@@ -10,8 +10,9 @@ Key ideas:
 - The candidate can be anyone: any field (healthcare, the trades, teaching, the arts, retail, government, tech...), any
   level from internship or apprenticeship to management, and any schooling. Prompts never assume a field, a degree or a
   student, and their examples come from many fields. The profile says who the candidate is.
-- Users can override the main system prompts in Settings -> Prompts. Callers fetch them through system(name, default),
-  so an override wins over the built-in text. web/routes/settings.py serves the built-in ones to that page.
+- Users can override the main system prompts in Settings, AI, "Prompts (advanced)". Callers fetch them through
+  system(name, default), so an override wins over the built-in text. web/routes/settings.py serves the built-in ones to
+  that page.
 - Some prompts contain placeholders such as {today} or {locations}. Callers fill them with str.replace(), not
   str.format(), so any other braces in the text are safe.
 - A schema lists the fields of a result. ai/client.py sends the model back to fill in any field listed in "required"
@@ -21,8 +22,8 @@ from jobportal.core import settings as settings_mod
 
 def system(name: str, default: str) -> str:
     """The system prompt for `name` ("triage", "hunt", "package", "revise", "profile", "analysis", "resume_review" or
-    "documents"): the user's override from Settings -> Prompts when there is one, else `default` (the built-in prompt).
-    Reads settings."""
+    "documents"): the user's override from Settings, AI, "Prompts (advanced)" when there is one, else `default` (the
+    built-in prompt). Reads settings."""
     return settings_mod.get().get("prompts", {}).get(name) or default
 
 
@@ -136,7 +137,7 @@ SEARCH BUDGET: {budget}. Breadth is the whole point, so do not stop early. Vary 
 when a search turns up a thread or list, open it and mine every relevant mention.
 Return up to 30 high-quality leads, best first."""
 
-# The search budget for each hunt depth (the Depth menu on the Sources page), written into {budget} above.
+# The search budget for each hunt depth (the "How deep" menu in the Sources dialog), written into {budget} above.
 HUNT_DEPTH = {
     "quick": "about 8 searches and 3+ pages opened",
     "standard": "about 15-20 searches and 8+ pages opened",
@@ -171,9 +172,9 @@ HUNT_SCHEMA = {
 # ---------------------------------------------------------------- application packages
 
 # The application package for one qualified lead: tailored resume, cover letter, emails, contacts, application answers,
-# interview prep and more. search/pipeline.py fills {research} and {contacts_rule} (the _ON or _OFF texts below, following
-# the run.package_web_research setting), {resume_format} (RESUME_FORMAT) and {playbook} (the resume playbook). Then it adds
-# today's date, the INDUSTRIES list and the full candidate profile.
+# interview prep and more. search/packages.py (_package_system) fills {research} and {contacts_rule} (the _ON or _OFF
+# texts below, following the run.package_web_research setting), {resume_format} (RESUME_FORMAT) and {playbook} (the
+# resume playbook). Then it adds today's date, the INDUSTRIES list and the full candidate profile.
 PACKAGE_SYSTEM = """You are an elite career strategist, recruiter and resume writer who knows how hiring works in every field (healthcare,
 the trades, education, the arts, hospitality, business, government, tech and more), working for one candidate. Build the strongest
 possible, fully truthful application package for the job below, written the way people in this job's field write.

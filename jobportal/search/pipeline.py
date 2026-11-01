@@ -319,7 +319,7 @@ class Pipeline:
 
     # ------------------------------------------------------------ logging and live counters
     def log(self, source: str, msg: str, level: str = "info") -> None:
-        """Add a line to this run's log (the run_log table, shown on the Runs page) and to the live console."""
+        """Add a line to this run's log (the run_log table, shown in Settings, History) and to the live console."""
         ts = db.now()
         db.ex("INSERT INTO run_log(run_id, ts, level, source, msg) VALUES(?,?,?,?,?)", (self.run_id, ts, level, source, msg))
         bus.publish("log", {"run_id": self.run_id, "source": source, "level": level, "msg": msg, "ts": ts})

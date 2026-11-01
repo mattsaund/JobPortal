@@ -39,11 +39,12 @@ The tables (columns not listed are plain and named for what they hold):
                      cost_usd          always 0. Left from before v0.1.0, when JobPortal counted dollars, not tokens
   events           a lead's history (status changes, notes, packages built), shown on the lead page
   runs             one row per search run: mode, status, stats (JSON counters) and tokens. cost_usd is always 0
-  run_log          the log lines of each run, shown on the Runs page
+  run_log          the log lines of each run, shown in Settings, History
   candidates       the triage backlog: jobs that passed the rule filters but haven't been scored yet (RawJob as JSON)
   ai_calls         one row per AI request: purpose, model, effort, tokens, how long it took and any error. Open
                    /api/ai_calls to look at it while developing. cost_usd is always 0
-  resume_library   saved resumes on the Resumes page (candidate/library.py). Storage only: they never feed the profile"""
+  resume_library   saved resumes in Settings, Resumes (candidate/library.py). Storage only: they never feed the
+                   profile"""
 import json
 import re
 import sqlite3

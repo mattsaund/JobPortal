@@ -46,7 +46,7 @@ def meta():
 
 @router.get("/api/stats")
 def stats():
-    """The numbers on the sidebar and the Leads page header, plus the live run state."""
+    """The numbers behind the sidebar's badges and Home's stats, plus the live run state."""
     count = lambda sql, args=(): db.one(sql, args)["n"]  # noqa: E731
     week_ago = (date.today() - timedelta(days=7)).isoformat()
     today = date.today().isoformat()

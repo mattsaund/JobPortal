@@ -1,4 +1,4 @@
-"""The two checks on the Sources page (web/routes/search.py calls them). Neither one saves anything.
+"""The two checks in the Sources dialog on Leads (web/routes/search.py calls them). Neither one saves anything.
 
 detect_board finds the company job board behind a careers page address, so the user can add a company by pasting a link. It
 uses collectors/ats.py to recognize the board and read it once. test_collector runs one source by itself, with the current

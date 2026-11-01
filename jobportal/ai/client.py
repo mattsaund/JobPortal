@@ -86,8 +86,9 @@ def usage_high() -> bool:
 
 
 def _semaphore(n: int) -> asyncio.Semaphore:
-    """The shared limit on how many AI tasks run at once (Settings, max_parallel). When the setting changes, a new
-    semaphore replaces the old one, and tasks that already hold the old one simply finish under it."""
+    """The shared limit on how many AI tasks run at once (ai.max_parallel: Settings, AI, "AI tasks at the same time").
+    When the setting changes, a new semaphore replaces the old one, and tasks that already hold the old one simply finish
+    under it."""
     global _sem, _sem_size
     if _sem is None or _sem_size != n:
         _sem, _sem_size = asyncio.Semaphore(n), n
@@ -145,7 +146,7 @@ def _json_object(text: str) -> dict | None:
 async def models(force: bool = False) -> list[str]:
     """The ids of the models the signed-in account may use, in the order OpenAI lists them.
 
-    The Settings page fills its model menus from this list, and run() uses the first id when Settings names no model.
+    Settings, AI fills its model menus from this list, and run() uses the first id when Settings names no model.
     The list is cached for MODELS_CACHE_SECONDS, and force=True fetches it again. Network call on a cache miss.
     Raises NotSignedIn or AIError (also when OpenAI can't be reached or answers with something other than a JSON object)."""
     if not force and _models["ids"] and time.time() - _models["at"] < MODELS_CACHE_SECONDS:

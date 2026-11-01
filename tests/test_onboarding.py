@@ -109,7 +109,7 @@ def test_saving_answers_again_keeps_edits_made_on_other_pages():
     from jobportal.core import settings
     onboarding.save_answers(STANDARD_ANSWERS)
     cfg = settings.get()
-    cfg["dream_companies"].append("Example Labs")  # added on the Dream list page
+    cfg["dream_companies"].append("Example Labs")  # added to the Dream list in Settings
     cfg["locations"]["allowed"] = ["Ohio", "Remote"]  # changed in the search area editor
     settings.save(cfg)
     onboarding.save_answers({**STANDARD_ANSWERS, "phone": "(555) 010-0123"})  # an unrelated fix

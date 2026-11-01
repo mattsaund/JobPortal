@@ -23,8 +23,8 @@ async def run_analysis():
 
 @router.get("/api/dreams")
 def get_dreams():
-    """The Dream list page. Companies come from two places: the ones the user added, and the ones the profile's search plan
-    suggested (minus any the user removed)."""
+    """The Dream list (in Settings, Search). Companies come from two places: the ones the user added, and the ones the
+    profile's search plan suggested (minus any the user removed)."""
     cfg = settings.get()
     suggested = (profile.get("search_plan") or {}).get("dream_companies", [])
     removed = cfg.get("dream_exclude", [])
