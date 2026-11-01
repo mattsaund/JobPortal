@@ -234,11 +234,12 @@ async function expandLead(id, tab, scroll) {
   }
 }
 
-// Closes a card and drops its details. A lead that left the filter while it was open goes away now.
+// Closes a card and drops its details. A lead that left the filter while it was open goes away now. A card that's gone
+// already (deleted for good) still has its details forgotten, so live updates stop redrawing them off screen.
 function collapseLead(id) {
-  const card = $(`.job-card[data-id="${id}"]`);
+  const card = $(`.job-card[data-id="${id}"]`), box = S.leadView?.box;
+  if (box && (!box.isConnected || box.closest(".job-card") === card)) closeLeadDetails();
   if (!card) return;
-  if (S.leadView?.box.closest(".job-card") === card) closeLeadDetails();
   if (!inFilterCard(card)) {
     card.remove();
     return;
