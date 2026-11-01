@@ -350,7 +350,7 @@ function renderContactsTab(box, l, pkg) {
         ${c.email ? `<button class="text-button" type="button" data-act="copytext" data-text="${esc(c.email)}">Copy</button>` : ""}</div></div></td>
       <td><div class="cell-stack">${input(i, "linkedin", c.linkedin, "LinkedIn link")}${input(i, "notes", c.notes, "Notes")}<div class="cell-row">${links(c)}</div></div></td>
       <td><textarea class="why" data-cf="why" data-i="${i}" rows="4" aria-label="Why them">${esc(c.why || "")}</textarea></td>
-      <td>${contactStatusSelect(l.id, i, c.status)}</td>
+      <td>${contactStatusSelect(l.id, i, c.status, c.name)}</td>
       <td><button class="icon-button" type="button" data-act="rm-contact" data-i="${i}" aria-label="Remove ${esc(c.name)}">${icon("trash")}</button></td></tr>`;
   const table = contacts.length ? `<div class="table-wrap"><table class="table"><thead><tr><th>Name, title, organization</th><th>Email</th><th>LinkedIn and notes</th>
       <th>Why them</th><th>Status</th><th><span class="sr-only">Remove</span></th></tr></thead><tbody>${contacts.map(row).join("")}</tbody></table></div>`
