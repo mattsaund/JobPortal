@@ -40,7 +40,8 @@ STATES = {
 NAME_TO_ABBR = {v.lower(): k for k, v in STATES.items()}  # "ohio" -> "OH"
 
 # Cities that postings often name without their state, mapped to the state. state_of() checks them in this order and the
-# first match wins. search/collectors/feeds.py also takes a state's first few cities from here as search locations.
+# first match wins. Job fingerprints are built from state_of(), so an entry here should never be removed or changed (see
+# fingerprint()). Search locations come from MAJOR_CITIES instead.
 CITY_STATE = {
     # Washington, DC area, Maryland, Virginia, Pennsylvania and Delaware
     "baltimore": "MD", "columbia": "MD", "greenbelt": "MD", "laurel": "MD", "annapolis": "MD", "annapolis junction": "MD",
@@ -57,7 +58,7 @@ CITY_STATE = {
     "philadelphia": "PA", "pittsburgh": "PA", "king of prussia": "PA", "valley forge": "PA", "harrisburg": "PA",
     "state college": "PA", "lancaster": "PA", "allentown": "PA", "york": "PA", "mechanicsburg": "PA",
     "wilmington": "DE", "dover": "DE", "washington dc": "DC", "washington d.c.": "DC",
-    # Other big metros, tech hubs and space and defense hubs
+    # Other big metros and places postings name often
     "nyc": "NY", "new york city": "NY", "brooklyn": "NY", "manhattan": "NY", "sf": "CA", "south sf": "CA",
     "san francisco": "CA", "bay area": "CA", "los angeles": "CA", "la": "CA", "san jose": "CA", "palo alto": "CA",
     "mountain view": "CA", "sunnyvale": "CA", "menlo park": "CA", "san diego": "CA", "pasadena": "CA", "hawthorne": "CA",
@@ -68,6 +69,35 @@ CITY_STATE = {
     "cape canaveral": "FL", "titusville": "FL", "merritt island": "FL", "orlando": "FL", "melbourne, fl": "FL",
     "phoenix": "AZ", "tucson": "AZ", "salt lake city": "UT", "albuquerque": "NM", "detroit": "MI", "minneapolis": "MN",
     "portland": "OR", "raleigh": "NC", "durham": "NC", "nashville": "TN", "miami": "FL", "tampa": "FL",
+}
+# The largest cities of every state and DC, biggest first: the places a search covers when the user names only a state
+# (search/collectors/feeds.py turns "Ohio" into these for The Muse, whose location filter wants cities).
+MAJOR_CITIES = {
+    "AL": ["Birmingham", "Huntsville", "Montgomery", "Mobile"], "AK": ["Anchorage", "Fairbanks", "Juneau"],
+    "AZ": ["Phoenix", "Tucson", "Mesa", "Scottsdale"], "AR": ["Little Rock", "Fayetteville", "Fort Smith"],
+    "CA": ["Los Angeles", "San Diego", "San Jose", "San Francisco", "Sacramento", "Fresno"],
+    "CO": ["Denver", "Colorado Springs", "Aurora", "Boulder"], "CT": ["Hartford", "New Haven", "Stamford", "Bridgeport"],
+    "DE": ["Wilmington", "Dover", "Newark"], "FL": ["Miami", "Orlando", "Tampa", "Jacksonville"],
+    "GA": ["Atlanta", "Savannah", "Augusta"], "HI": ["Honolulu", "Hilo"], "ID": ["Boise", "Meridian", "Idaho Falls"],
+    "IL": ["Chicago", "Naperville", "Rockford", "Springfield"], "IN": ["Indianapolis", "Fort Wayne", "Evansville"],
+    "IA": ["Des Moines", "Cedar Rapids", "Iowa City"], "KS": ["Wichita", "Overland Park", "Kansas City", "Topeka"],
+    "KY": ["Louisville", "Lexington", "Bowling Green"], "LA": ["New Orleans", "Baton Rouge", "Shreveport", "Lafayette"],
+    "ME": ["Portland", "Bangor", "Augusta"], "MD": ["Baltimore", "Columbia", "Rockville", "Frederick", "Annapolis"],
+    "MA": ["Boston", "Worcester", "Springfield", "Cambridge"], "MI": ["Detroit", "Grand Rapids", "Ann Arbor", "Lansing"],
+    "MN": ["Minneapolis", "Saint Paul", "Rochester", "Duluth"], "MS": ["Jackson", "Gulfport", "Hattiesburg"],
+    "MO": ["Kansas City", "St. Louis", "Springfield", "Columbia"], "MT": ["Billings", "Missoula", "Bozeman", "Helena"],
+    "NE": ["Omaha", "Lincoln"], "NV": ["Las Vegas", "Reno", "Henderson"], "NH": ["Manchester", "Nashua", "Concord"],
+    "NJ": ["Newark", "Jersey City", "Trenton", "Princeton"], "NM": ["Albuquerque", "Santa Fe", "Las Cruces"],
+    "NY": ["New York", "Buffalo", "Rochester", "Albany", "Syracuse"], "NC": ["Charlotte", "Raleigh", "Durham", "Greensboro"],
+    "ND": ["Fargo", "Bismarck", "Grand Forks"], "OH": ["Columbus", "Cleveland", "Cincinnati", "Dayton", "Toledo"],
+    "OK": ["Oklahoma City", "Tulsa", "Norman"], "OR": ["Portland", "Salem", "Eugene", "Bend"],
+    "PA": ["Philadelphia", "Pittsburgh", "Harrisburg", "Allentown"], "RI": ["Providence", "Warwick", "Newport"],
+    "SC": ["Charleston", "Columbia", "Greenville"], "SD": ["Sioux Falls", "Rapid City"],
+    "TN": ["Nashville", "Memphis", "Knoxville", "Chattanooga"], "TX": ["Houston", "Dallas", "Austin", "San Antonio", "Fort Worth"],
+    "UT": ["Salt Lake City", "Provo", "Ogden"], "VT": ["Burlington", "Montpelier"],
+    "VA": ["Richmond", "Virginia Beach", "Arlington", "Norfolk", "Alexandria"], "WA": ["Seattle", "Spokane", "Tacoma", "Bellevue"],
+    "WV": ["Charleston", "Morgantown", "Huntington"], "WI": ["Milwaukee", "Madison", "Green Bay"],
+    "WY": ["Cheyenne", "Casper", "Laramie"], "DC": ["Washington"],
 }
 # Text that names another country or region (EMEA, APAC, LATAM), or a Canadian province code after a comma ("Toronto,
 # ON"). Country names are case-insensitive. Province codes must be uppercase, so ", on-site" isn't read as Ontario.

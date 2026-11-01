@@ -198,7 +198,7 @@ def digest() -> str:
         f"WORK ARRANGEMENT: {label_of('work_modes', answers.get('work_modes') or []) or 'any'}",
         f"SKILLS: {_field(facts, 'skills')}",
         # Many jobs need a license or certification on day one (RN, CDL, a teaching license), so triage needs to see them.
-        f"LICENSES AND CERTIFICATIONS: {'; '.join(answers.get('licenses') or []) or 'none stated (the record below may list some)'}",
+        f"LICENSES AND CERTIFICATIONS: {'; '.join(answers.get('licenses') or []) or 'none listed in the standard answers'}",
         f"PROJECTS AND ROLES: {names}",
         f"ROLE FAMILIES TO PURSUE: {'; '.join(plan.get('role_families', []))}",
     ]

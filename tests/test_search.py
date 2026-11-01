@@ -9,7 +9,7 @@ import pytest
 
 from jobportal.ai import client as ai
 from jobportal.candidate import profile
-from jobportal.core import db, settings
+from jobportal.core import db, settings, textutil
 from jobportal.core.levels import title_filters
 from jobportal.core.textutil import fingerprint
 from jobportal.search import collectors, packages, pipeline
@@ -658,6 +658,14 @@ def test_the_muse_searches_the_users_fields(monkeypatch):
     asyncio.run(feeds.themuse(ctx))
     assert "category=Food+and+Hospitality+Services" in asked[0] and "level=Entry+Level" in asked[0]
     asyncio.run(ctx.close())
+
+
+def test_the_muse_searches_a_states_largest_cities():
+    assert feeds._muse_locations(["Maryland", "Remote", "DC", "Pittsburgh, PA"]) == [
+        "Baltimore, MD", "Columbia, MD", "Rockville, MD", "Frederick, MD", "Annapolis, MD", "Flexible / Remote", "Washington, DC",
+        "Pittsburgh, PA"]
+    assert set(textutil.MAJOR_CITIES) == set(textutil.STATES)  # every state and DC
+    assert all(len(cities) >= 2 for state, cities in textutil.MAJOR_CITIES.items() if state != "DC")
 
 
 def test_we_work_remotely_items():

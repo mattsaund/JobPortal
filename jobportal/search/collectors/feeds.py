@@ -23,7 +23,7 @@ from urllib.parse import quote, urlencode
 
 from jobportal.core.genres import DEFAULT_GENRES
 from jobportal.core.levels import early_career, muse_levels, posting_regex
-from jobportal.core.textutil import CITY_STATE, NAME_TO_ABBR, STATES, clean, html_to_text, parse_date
+from jobportal.core.textutil import MAJOR_CITIES, NAME_TO_ABBR, STATES, clean, html_to_text, parse_date
 from jobportal.search import plan
 from jobportal.search.collectors.base import NATIONWIDE, Ctx, RawJob
 
@@ -204,8 +204,8 @@ async def hackernews(ctx: Ctx) -> list[RawJob]:
 # ------------------------------------------------------------------ The Muse
 def _muse_locations(allowed: list[str]) -> list[str]:
     """Turn the allowed locations into values The Muse's location filter knows, which are "City, ST" names. A state becomes
-    up to six well-known cities in it (from core/textutil.CITY_STATE), DC becomes "Washington, DC", anything remote becomes
-    "Flexible / Remote" (The Muse's name for remote work), and anything else is passed as typed."""
+    its largest cities (core/textutil.MAJOR_CITIES), DC becomes "Washington, DC", anything remote becomes "Flexible /
+    Remote" (The Muse's name for remote work), and anything else is passed as typed."""
     out = []
     for a in allowed:
         low = a.lower().strip()
@@ -216,8 +216,7 @@ def _muse_locations(allowed: list[str]) -> list[str]:
         if re.search(r"\bd\.?c\.?\b", low):
             state = "DC"
         if state:
-            cities = [c for c, s in CITY_STATE.items() if s == state and c not in ("washington dc", "washington d.c.")][:6]
-            out += [f"{c.title()}, {state}" for c in cities] + (["Washington, DC"] if state == "DC" else [])
+            out += [f"{city}, {state}" for city in MAJOR_CITIES.get(state, [])]
         else:
             out.append(a)
     return out
