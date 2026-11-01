@@ -272,7 +272,8 @@ function stageTag(l) {
 // Where and when: the location, when it was posted, the deadline and where it was found.
 function leadMeta(l) {
   const items = [`<span>${icon("pin")}${esc(l.location || "Location not given")}</span>`];
-  if (l.posted_at) items.push(`<span>${icon("clock")}Posted ${ago(l.posted_at)}</span>`);
+  const posted = ago(l.posted_at);  // "" when the posting gave a date that can't be read
+  if (posted) items.push(`<span>${icon("clock")}Posted ${posted}</span>`);
   const days = daysUntil(l.deadline);
   if (days != null) {
     const text = days < 0 ? "Deadline passed" : days === 0 ? "Due today" : days === 1 ? "Due tomorrow" : `Due in ${days} days`;

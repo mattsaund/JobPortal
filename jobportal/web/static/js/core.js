@@ -142,9 +142,11 @@ function typingIn(el) {
 
 // ---------------------------------------------------------------- formatting
 // "today", "1d ago", "12d ago" or "3mo ago" for an ISO date or timestamp. A bare date (2026-10-29) counts from noon.
+// "" for no date, or for one that can't be read (a scraped "posted" field can hold anything).
 function ago(iso) {
   if (!iso) return "";
   const time = new Date(iso.length <= 10 ? iso + "T12:00:00" : iso).getTime();
+  if (isNaN(time)) return "";
   const days = (Date.now() - time) / 86400000;
   if (days < 1) return "today";
   if (days < 2) return "1d ago";
