@@ -128,3 +128,23 @@ def test_rejects_empty_and_unknown_files():
         extract.extract_text("r.txt", b"too short")
     with pytest.raises(extract.ExtractError):
         extract.extract_text("photo.png", b"\x89PNG" + b"0" * 200)
+
+
+@pytest.mark.parametrize("exit_code, written", [
+    # What LibreOffice writes for a damaged .doc it opens as plain text: the raw bytes, with control bytes shown as "#".
+    (0, ("ÐÏ#à¡±#á" + "#" * 16 + ";###þ?\t" + "#" * 30).encode() * 20),
+    (1, None),  # the conversion failed and wrote nothing
+])
+def test_a_doc_libreoffice_cannot_read_is_refused(monkeypatch, exit_code, written):
+    import subprocess
+    from pathlib import Path
+
+    def fake_soffice(cmd, **kwargs):
+        if written is not None:
+            (Path(cmd[cmd.index("--outdir") + 1]) / "resume.txt").write_bytes(written)
+        return subprocess.CompletedProcess(cmd, exit_code, b"", b"")
+
+    monkeypatch.setattr(extract.osutil, "find_soffice", lambda: "soffice")
+    monkeypatch.setattr(extract.subprocess, "run", fake_soffice)
+    with pytest.raises(extract.ExtractError, match="LibreOffice couldn't read old.doc"):
+        extract.extract_text("old.doc", b"\xd0\xcf\x11\xe0" + b"\x00" * 600)
