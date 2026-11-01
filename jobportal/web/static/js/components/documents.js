@@ -5,8 +5,8 @@
    your resume's text, replace the main resume with one file, see the text read from it, make another document the main
    resume, have one read again, or remove it.
    APIs: PUT /api/profile/documents?filename= (one file as the body), POST /api/profile/documents/auto-main,
-   POST /api/profile/documents/{id}/main and /parse, DELETE /api/profile/documents/{id}, POST /api/onboarding/resume-text
-   and PUT /api/onboarding/resume?filename=. A "documents" event carries the new list (live.js). */
+   POST /api/profile/documents/{id}/main and /parse, DELETE /api/profile/documents/{id}, POST /api/onboarding/resume-text,
+   PUT /api/onboarding/resume?filename= and POST /api/profile/build. A "documents" event carries the new list (live.js). */
 "use strict";
 
 // The upload in progress: { done, total, name } while files go up, { reading: true } while the main resume is read.
@@ -30,25 +30,36 @@ function uploadNote() {
 }
 const showUploadNote = () => $$("[data-doc-progress]").forEach((el) => (el.innerHTML = uploadNote()));
 
-// The "Your documents" panel: the drop zone and the list, main resume first.
+// The "Your documents" panel: the drop zone and the list, main resume first. "Or paste your resume's text" shows only
+// until there's a main resume.
 function documentsPanel() {
-  const paste = S.onboarding?.resume ? "" : `<button class="text-button" type="button" data-act="paste-resume">Or paste your resume's text ${icon("arrow")}</button>`;
   return `<div class="tool-heading"><span class="tool-icon blue">${icon("file")}</span>
       <div><h2>Your documents</h2><p>Everything here goes into your profile.</p></div></div>
     ${documentsDropZone(false)}
     <div data-doc-list>${documentsList()}</div>
-    ${paste}`;
+    <button class="text-button" type="button" data-act="paste-resume" data-doc-paste${S.onboarding?.resume ? " hidden" : ""}>Or paste your resume's text ${icon("arrow")}</button>`;
+}
+
+// Draws the panel into el the first time, and after that only its list and the paste button. The drop zone stays in
+// the page: a live update while its file picker is open would otherwise drop the files you pick.
+function renderDocumentsPanel(el) {
+  if (!el) return;
+  if (!$("[data-doc-list]", el)) {
+    el.innerHTML = documentsPanel();
+    return;
+  }
+  renderDocumentLists();
+  $("[data-doc-paste]", el).hidden = !!S.onboarding?.resume;
 }
 
 // The list: the main resume, then each document with what kind it is and what was read from it.
 function documentsList() {
   const resume = S.onboarding?.resume, docs = S.documents || [];
-  const accept = esc(S.onboarding?.accept || "");
   const main = resume ? `<li class="doc main"><span class="doc-icon">${icon("file")}</span><div class="doc-body">
       <div class="doc-name"><strong title="${esc(resume.filename)}">${esc(resume.filename)}</strong><span class="tag green">MAIN RESUME</span></div>
       <small>Added ${esc(fmtTs(resume.imported_at))}</small>
       <div class="doc-actions"><button class="text-button" type="button" data-act="resume-read">What it read</button>
-        <label class="text-button">Replace<input type="file" data-replace-resume accept="${accept}" hidden></label>
+        <button class="text-button" type="button" data-act="resume-replace">Replace</button>
         <button class="text-button" type="button" data-act="paste-resume">Paste text instead</button></div></div></li>` : "";
   if (!main && !docs.length) return `<p class="muted-note">Nothing yet. Start with your resume.</p>`;
   return `<ul class="doc-list">${main}${docs.map(documentRow).join("")}</ul>`;
@@ -72,8 +83,12 @@ function documentRow(doc) {
         <button class="text-button danger" type="button" data-act="doc-remove" data-id="${esc(doc.id)}" data-name="${esc(doc.name)}">Remove</button></div></div></li>`;
 }
 
-// Redraws every document list on the page (Home has one in its panel).
-const renderDocumentLists = () => $$("[data-doc-list]").forEach((el) => (el.innerHTML = documentsList()));
+// Redraws every document list on the page (Home has one in its panel). A focused button gets the focus back.
+const renderDocumentLists = () => $$("[data-doc-list]").forEach((el) => {
+  const focus = focusKey(el);
+  el.innerHTML = documentsList();
+  refocus(el, focus);
+});
 
 // Sends the files one at a time. Then, with no main resume yet, the server makes the best resume among the documents the
 // main one, and its answers fill in your questions. A summary toast says what happened.
@@ -132,6 +147,21 @@ async function replaceResume(file) {
   await reloadOnboarding();
 }
 
+// Opens the system's file picker for one file and calls pick with it. The input isn't part of any list: a live update
+// that redraws the list while the picker is open can't take your choice with it.
+function pickOneFile(accept, pick) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = accept;
+  input.hidden = true;
+  input.addEventListener("change", () => {
+    input.remove();
+    if (input.files[0]) pick(input.files[0]);
+  });
+  document.body.appendChild(input);  // some browsers open a picker only for an input that's in the page
+  input.click();
+}
+
 // The paste dialog: your resume as plain text, read like a file.
 function pasteResumeDialog() {
   const dialog = openDialog(`<h2>Paste your resume</h2><p>Copy all the text from your resume and paste it here.</p>
@@ -143,13 +173,9 @@ function pasteResumeDialog() {
 
 // ---------------------------------------------------------------- actions
 onDrop("documents", (files) => addDocuments(files));
-onChange(async (el) => {
-  if (!el.matches("[data-replace-resume]")) return false;
-  const file = el.files[0];
-  el.value = "";
-  if (file) await replaceResume(file);
-  return true;
-});
+onAction("resume-replace", () => pickOneFile(S.onboarding?.accept || "", (file) => {
+  replaceResume(file).catch((err) => toast("Couldn't replace your resume", err.message, "error"));
+}));
 onAction("paste-resume", () => pasteResumeDialog());
 onAction("resume-read", () => {  // the text JobPortal read from the main resume (the server sends the first 4,000 characters)
   const ob = S.onboarding, more = (ob.resume?.chars || 0) > 4000 ? " The first 4,000 characters are shown." : "";

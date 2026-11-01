@@ -170,10 +170,11 @@ function renderHomeStats() {
 // ---------------------------------------------------------------- questions for you
 // The cards in the feed, in order: the drop zone (until there's a resume), the profile build (while it runs, when it
 // failed, or just after it's done), then the one thing to do next. Each card has a key; keep marks the ones with inputs,
-// which stay as they are (with whatever you typed) while their key stays the same.
+// which stay as they are (with whatever you typed) while their key stays the same. The resume card is kept too: its
+// file picker may be open, and a new card in its place would lose the files you pick.
 function feedCards() {
   const cards = [];
-  if (!S.onboarding?.resume) cards.push({ key: "resume", html: resumeCard() });
+  if (!S.onboarding?.resume) cards.push({ key: "resume", keep: true, html: resumeCard() });
   const build = buildCard();
   if (build) cards.push(build);
   const next = nextCard();
@@ -399,8 +400,7 @@ function homeDataChanged() {
   renderHomeHeading();
   renderFeed();
   renderProfilePanel();
-  const docs = $("#home-docs");
-  if (docs && !docs.contains(document.activeElement)) docs.innerHTML = documentsPanel();
+  renderDocumentsPanel($("#home-docs"));
   renderAreaPanel();
 }
 
