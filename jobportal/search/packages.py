@@ -32,6 +32,8 @@ from jobportal.core.config import APPLIED_STATUSES, CACHE, LEADS_DIR
 from jobportal.core.genres import DEFAULT_INDUSTRIES
 from jobportal.core.textutil import coverage, extract_terms, fingerprint, url_key
 from jobportal.documents import render, resumecheck
+from jobportal.documents.render import DEFAULT_STYLE
+from jobportal.documents.revise import resume_writer_system
 from jobportal.search.collectors import details
 from jobportal.search.collectors.base import SOCIAL_SOURCES, Ctx
 
@@ -40,7 +42,6 @@ from jobportal.search.collectors.base import SOCIAL_SOURCES, Ctx
 LIST_FIELDS = ("id, title, company, location, kind, category, source, sources, source_detail, posted_at, deadline, score, "
                "verdict, stage, stage_error, app_status, dream, ats_coverage, url, apply_url, created_at, updated_at, "
                "follow_up_at, applied_at, tokens, triage, found, industry, (COALESCE(resume_md, '') != '') AS has_resume")
-DEFAULT_STYLE = {"theme": "classic", "max_pages": 1}  # resume layout and page limit when nothing else picked one
 # The rendered resume in a lead's folder: the PDF, its Word copy (made on first download) and the PDF's fit info.
 RENDERED_RESUME = ("resume.pdf", "resume.docx", "resume.fit")
 # Sources whose title, company and location are guesses from a post or a headline, or placeholders for a job added by
@@ -277,13 +278,6 @@ async def build_package(lead_id: int, run_id: int | None = None, ctx: Ctx | None
 # ---------------------------------------------------------------- checking and rendering resumes
 
 
-def _resume_writer_system(prompt_name: str, default: str, cfg: dict) -> str:
-    """Instructions for an AI that rewrites a resume: the task prompt (Settings can override it), the resume format rules,
-    the resume playbook and the full candidate profile."""
-    return (f"{prompts.system(prompt_name, default)}\n\n{prompts.RESUME_FORMAT}\n\n=== RESUME PLAYBOOK ===\n"
-            f"{settings_mod.resume_playbook(cfg)}\n\n=== CANDIDATE PROFILE ===\n{profile_mod.full_context()}")
-
-
 async def check_resume(md: str, keywords: list[str], style: dict, archetype: str = "") -> dict:
     """Score a resume with the fixed-rule checks in documents/resumecheck.py: ATS safety, length, skills the profile backs,
     keyword coverage and style. The page count is one of the checks, so the resume is rendered to a throwaway PDF first.
@@ -328,7 +322,7 @@ JOB DESCRIPTION (excerpt):
 RESUME TO REVIEW:
 {resume_md}"""
     try:
-        out = await ai.run(prompt, system=_resume_writer_system("resume_review", prompts.RESUME_REVIEW_SYSTEM, cfg),
+        out = await ai.run(prompt, system=resume_writer_system("resume_review", prompts.RESUME_REVIEW_SYSTEM, cfg),
                            schema=prompts.RESUME_REVIEW_SCHEMA, stage="revise", purpose="resume-review", run_id=run_id,
                            lead_id=lead["id"], label=f"resume critic: {lead['company'][:24]}", timeout=900)
     except ai.UsageLimitError:
@@ -388,7 +382,7 @@ INSTRUCTION: {instruction}
 
 CURRENT DOCUMENT:
 {current_md}"""
-    out = await ai.run(prompt, system=_resume_writer_system("revise", prompts.REVISE_SYSTEM, settings_mod.get()),
+    out = await ai.run(prompt, system=resume_writer_system("revise", prompts.REVISE_SYSTEM, settings_mod.get()),
                        schema=prompts.REVISE_SCHEMA, stage="revise", purpose=purpose, lead_id=lead["id"], label=label, timeout=900)
     md, review, critic_tokens = await polish_resume(lead, out["text"], package.get("keywords") or [], package.get("resume_strategy") or {}, style)
     return md, review, out.get("_tokens", 0) + critic_tokens, out.get("change_summary", "")

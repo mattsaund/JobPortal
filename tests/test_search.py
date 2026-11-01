@@ -564,6 +564,16 @@ def test_a_reworked_resume_keeps_package_edits_saved_while_the_ai_worked(fake_ai
     assert package["contacts"] == [{"name": "Riley Chen"}] and package["resume_from_library"] == 1
 
 
+def test_revising_a_lead_resume_follows_the_playbook_and_its_page_limit(fake_ai):
+    from jobportal.documents import revise
+    lead_id = packages.add_manual_lead("https://jobs.example.com/18", "x" * 700, "Data Intern", "Contoso")
+    db.update_lead(lead_id, resume_md="# Jordan Rivera", package={"resume_style": {"theme": "modern", "max_pages": 2}})
+    fake_ai.responses["revise:resume"] = {"text": "# Jordan Rivera", "change_summary": "Shorter"}
+    asyncio.run(revise.revise_lead_document(packages._load_lead(lead_id), "resume", "Make it shorter", "# Jordan Rivera"))
+    call = fake_ai.calls[-1]
+    assert "=== RESUME PLAYBOOK ===" in call["system"] and "layout modern, page limit 2" in call["prompt"]
+
+
 def test_use_saved_resume_as_is(no_rendering):
     lead_id = packages.add_manual_lead("https://jobs.example.com/13", "x" * 700, "Data Intern", "Contoso")
     db.update_lead(lead_id, package={"keywords": ["Python", "SQL"]})

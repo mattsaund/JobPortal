@@ -19,9 +19,9 @@ from jobportal.ai import client as ai, prompts
 from jobportal.core import db
 from jobportal.core.config import DATA
 from jobportal.documents import extract
+from jobportal.documents.render import DEFAULT_STYLE  # a saved resume's layout until the user picks one
 
 LIB_DIR = DATA / "library"
-DEFAULT_STYLE = {"theme": "classic", "max_pages": 1}
 
 IMPORT_SYSTEM = """Convert the extracted text of ONE resume into the markdown format below. Preserve the content exactly: same wording,
 dates, titles, bullets, order and sections. Only repair text-extraction damage (broken lines, hyphenation, merged columns, stray page

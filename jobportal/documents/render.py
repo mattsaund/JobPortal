@@ -200,6 +200,8 @@ h2 { font-size: calc(12pt * var(--s, 1)); font-variant: small-caps; letter-spaci
 """,
 }
 THEMES = list(RESUME_THEMES)
+# A resume's layout and page limit when nothing chose them: a package's resume_style, a saved resume's style.
+DEFAULT_STYLE = {"theme": "classic", "max_pages": 1}
 
 # The text scales the fit loop tries, largest first. lead.js mirrors this list for the editor preview.
 FIT_SCALES = (1.0, 0.97, 0.94, 0.91, 0.88, 0.86)
