@@ -216,6 +216,17 @@ def test_imported_files_are_read_away_from_the_server_loop(client, monkeypatch, 
     assert where == ["worker thread"] * 3
 
 
+def test_saved_resume_routes_refuse_what_they_cannot_do(client, fake_ai):
+    from jobportal.core import db
+    item = client.post("/api/library", json={"md": "# Jordan Rivera\n\n## Skills\n- Python", "name": "General"}).json()
+    assert client.post(f"/api/library/{item['id']}/revise", json={"instruction": "  "}).status_code == 400  # no AI call
+    assert not fake_ai.calls
+    assert client.put("/api/library/999", json={"name": "Nothing here"}).status_code == 404
+    assert client.delete("/api/library/999").status_code == 404
+    db.ex("UPDATE resume_library SET style=? WHERE id=?", ('"modern"', item["id"]))  # a style that isn't an object
+    assert client.get(f"/api/library/{item['id']}/html").status_code == 200  # read as the default layout, not a 500
+
+
 def test_manual_lead_needs_a_link_or_text(client, fake_ai):
     assert client.post("/api/leads/manual", json={}).status_code == 400
     lead = client.post("/api/leads/manual", json={"url": "https://jobs.example.com/9"}).json()

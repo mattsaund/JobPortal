@@ -33,14 +33,16 @@ IMPORT_SCHEMA = {"type": "object", "properties": {"resume_md": {"type": "string"
 
 def _decode(row: dict | None) -> dict | None:
     """A database row with its JSON columns turned back into Python: style into a dict and tags into a list. A missing or
-    broken value reads as empty."""
+    broken value, or one of the wrong kind (the API stores what it's sent), reads as empty, so the preview and downloads
+    can always read the style."""
     if not row:
         return None
-    for column, empty in (("style", {}), ("tags", [])):
+    for column, kind in (("style", dict), ("tags", list)):
         try:
-            row[column] = json.loads(row.get(column) or "null") or empty
+            value = json.loads(row.get(column) or "null")
         except json.JSONDecodeError:
-            row[column] = empty
+            value = None
+        row[column] = value if isinstance(value, kind) else kind()
     return row
 
 
