@@ -35,7 +35,7 @@ document.addEventListener("change", async (e) => {
   }
 });
 
-// Reloading or closing with unsaved edits (an editor, a form, Settings or Sources) asks first.
+// Reloading or closing with unsaved edits (an editor, a form, an answer on Home, Settings or Sources) asks first.
 window.addEventListener("beforeunload", (e) => {
   if (S.dirty || S.cfgDirty) {
     e.preventDefault();

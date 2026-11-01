@@ -7,7 +7,8 @@
      documents (components/documents.js) and where the search looks.
    APIs: GET /api/onboarding, PATCH /api/onboarding/answers (each answer saves on its own), GET /api/leads (the five best
    ready leads), GET /api/settings (the search area), POST /api/questions/answer and /dismiss, POST /api/profile/build.
-   Live events redraw the parts that changed (live.js). */
+   Live events redraw the parts that changed (live.js). A card you're answering stays as it is through them, and an
+   answer you've typed counts as an unsaved edit until it's saved, skipped or dismissed. */
 "use strict";
 
 // The optional standard questions Home asks after the required ones, in this order: the ones that most improve the
@@ -180,7 +181,9 @@ function feedCards() {
   return cards;
 }
 
-// Redraws the feed, keeping the cards whose key hasn't changed, so an answer being typed is never wiped.
+// Redraws the feed, keeping the cards whose key hasn't changed, so an answer being typed is never wiped. A card you've
+// typed in is marked data-edited (see the input listener at the bottom); S.dirty says whether one is still on screen,
+// so it clears itself when that card goes (saved, skipped, dismissed, or answered in another window).
 function renderFeed() {
   const box = $("#home-feed");
   if (!box) return;
@@ -196,6 +199,7 @@ function renderFeed() {
     if (card.progress) $(".feed-progress", el).textContent = card.progress;
     return el;
   }));
+  S.dirty = !!$("[data-edited]", box);
 }
 
 // The one thing to do next: check what was read from your resume, answer a standard question, answer a question asked
@@ -465,4 +469,12 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" || !e.target.matches("#home-feed input[data-qf]")) return;
   e.preventDefault();
   $("[data-act=home-answer]", e.target.closest(".feed-card"))?.click();
+});
+// Typing an answer (or ticking a choice) marks its card as edited: an unsaved edit, so moving away asks first. Picking
+// files in the resume card isn't an edit; they're added at once.
+document.addEventListener("input", (e) => {
+  const card = e.target.type !== "file" && e.target.closest?.("#home-feed > .feed-card");
+  if (!card) return;
+  card.dataset.edited = "1";
+  S.dirty = true;
 });
