@@ -206,6 +206,7 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 | `test_core.py` | config, settings, the database, live updates, location matching and other text helpers |
 | `test_levels.py` | experience levels and title filters |
 | `test_search.py` | the rule filters (levels, locations, the Dream list), dedupe, triage and building packages |
+| `test_analysis.py` | the Analysis page: picking the roles on the radar, their market numbers, the assessment, removing and adding roles |
 | `test_writing.py` | the writing rules in every tracked file: no em dashes or middle dots, American spelling |
 | `test_platform.py` | cross-platform pieces: the command line, the app window, the PDF engine lookup |
 

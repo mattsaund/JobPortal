@@ -507,19 +507,23 @@ def _skill_coverage(leads: list[dict], roles_of: dict[int, list[str]]) -> dict:
 
 
 def _funnel(leads: list[dict]) -> list[dict]:
-    """How many jobs reached each step, from postings scanned (across every run) to offers."""
+    """How many jobs reached each step, from postings scanned (across every run) to accepted offers.
+
+    The last three steps count only applications (leads with an applied date), so every step is a part of the one before
+    it. A lead the user moved straight to Rejected without applying is left out of Responses."""
     scanned = Counter()
     for run in db.q("SELECT stats FROM runs"):
         stats = json.loads(run["stats"] or "{}")
         scanned.update({k: stats.get(k, 0) for k in ("found", "candidates")})
-    statuses = Counter(lead["app_status"] for lead in leads)
+    applied = [lead for lead in leads if lead["applied_at"] is not None]
+    statuses = Counter(lead["app_status"] for lead in applied)
     return [
         {"stage": "Postings scanned", "n": scanned["found"]},
         {"stage": "Passed your filters", "n": scanned["candidates"]},
         {"stage": "AI-triaged", "n": len(leads)},
         {"stage": "Qualified", "n": sum(1 for lead in leads if lead["stage"] in QUALIFIED)},
         {"stage": "Package ready", "n": sum(1 for lead in leads if lead["has_resume"])},
-        {"stage": "Applied", "n": sum(1 for lead in leads if lead["applied_at"] is not None)},
+        {"stage": "Applied", "n": len(applied)},
         {"stage": "Responses", "n": sum(statuses[s] for s in ("interviewing", "accepted", "rejected"))},
         {"stage": "Interviews", "n": statuses["interviewing"] + statuses["accepted"]},
         {"stage": "Accepted", "n": statuses["accepted"]},

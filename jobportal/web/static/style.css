@@ -533,8 +533,8 @@ progress::-moz-progress-bar { background: var(--green); }
 .email-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .email-head small { color: var(--muted); font-size: 11px; }
 .email-card textarea[data-ef=body] { min-height: 200px; }
-.copy-row { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) auto; gap: 12px; align-items: start; padding: 9px 0; border-top: 1px solid var(--border); font-size: 12px; }
-.copy-row:first-of-type { border-top: 0; }
+.copy-row { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) auto; gap: 12px; align-items: start; padding: 9px 0; font-size: 12px; }
+.copy-row + .copy-row { border-top: 1px solid var(--border); }  /* lines between rows only, whatever comes before the first */
 .copy-q { color: var(--muted); }
 .copy-a { white-space: pre-wrap; overflow-wrap: anywhere; }
 .answer-edit { display: grid; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }

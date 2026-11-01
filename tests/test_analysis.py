@@ -266,3 +266,11 @@ def test_an_analysis_saved_by_the_genre_version_reads_as_not_analyzed(client):
     assert r.status_code == 200 and d["latest"] is None and d["outdated"] and d["history"] == [] and d["unscored"] == []
     assert d["roles"] and all(role["fit"] is None and role["fit_before"] is None for role in d["roles"])
     assert settings.get()["analysis"]["genres"]  # the genres stay in settings for triage and the search
+
+
+def test_the_funnel_counts_responses_only_among_applications():
+    applied = _lead("Registered Nurse", status="interviewing")
+    db.update_lead(applied, applied_at="2026-10-20")
+    _lead("Charge Nurse", status="rejected")  # moved to Rejected without ever being marked as applied
+    steps = {step["stage"]: step["n"] for step in analysis.market()["funnel"]}
+    assert steps["Applied"] == 1 and steps["Responses"] == 1 and steps["Interviews"] == 1
