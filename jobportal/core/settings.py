@@ -22,6 +22,7 @@ import hashlib
 from jobportal.core import db
 from jobportal.core.config import DEFAULT_SETTINGS, RESOURCES
 from jobportal.core.genres import LEGACY_GENRE_IDS, LEGACY_INDUSTRIES, OLD_INDUSTRIES
+from jobportal.core.textutil import unique
 
 # Social-source defaults every version before v0.3.0 saved. _retire_tech_defaults() drops a stored list that still equals
 # one of these, so the job-agnostic defaults in config.py show through.
@@ -184,7 +185,7 @@ def _retire_tech_defaults(stored: dict) -> list[str]:
         notes.append("industries for every field")
     elif isinstance(industries, list) and any(name in OLD_INDUSTRIES for name in industries):
         renamed = [OLD_INDUSTRIES.get(name, name) for name in industries]
-        stored["industries"] = [name for i, name in enumerate(renamed) if name not in renamed[:i]]
+        stored["industries"] = unique(renamed)
         notes.append("industry names updated")
     filters = stored.get("filters") or {}
     filters.pop("tech_title", None)

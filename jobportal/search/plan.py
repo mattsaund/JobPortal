@@ -19,6 +19,7 @@ from collections import Counter
 from jobportal.candidate import profile
 from jobportal.core.genres import DEFAULT_GENRES, classify, group_of
 from jobportal.core.levels import clean as clean_levels
+from jobportal.core.textutil import unique
 
 # How much each kind of phrase says about the user's fields: their own target roles most, then the role families the
 # profile build ranked, then dream job titles, then each search query (there are many of those).
@@ -28,13 +29,7 @@ TECH_SHARE = 0.25  # in_tech() needs at least this share of the field weight on 
 
 def _dedupe(items) -> list[str]:
     """Strip each item and drop blanks and repeats, ignoring case. Keeps the first spelling and the original order."""
-    seen, out = set(), []
-    for x in items:
-        k = str(x).strip().lower()
-        if k and k not in seen:
-            seen.add(k)
-            out.append(str(x).strip())
-    return out
+    return unique((text for text in (str(x).strip() for x in items) if text), key=str.lower)
 
 
 def _plan() -> dict:

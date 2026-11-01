@@ -157,6 +157,19 @@ def clean(s) -> str:
     return re.sub(r"\s+", " ", str(s or "")).strip()
 
 
+def unique(items, key=None) -> list:
+    """`items` without repeats, each kept where it first appears. `key` (for example str.lower) decides what counts as a
+    repeat: an item whose key an earlier item already had is dropped. Lists of names, words and patterns all over
+    JobPortal use it."""
+    seen, out = set(), []
+    for item in items:
+        k = key(item) if key else item
+        if k not in seen:
+            seen.add(k)
+            out.append(item)
+    return out
+
+
 # ---------------------------------------------------------------- spotting duplicates
 
 # Words in a company name that don't tell companies apart: legal endings ("Inc", "LLC"), "The", "USA", "Group" and so on.

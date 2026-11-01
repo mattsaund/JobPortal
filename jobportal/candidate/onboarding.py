@@ -32,6 +32,7 @@ from jobportal.core import bus, db, osutil, settings as settings_mod
 from jobportal.core.config import RESUME_DIR
 from jobportal.core.genres import DEFAULT_INDUSTRIES, OLD_INDUSTRIES
 from jobportal.core.levels import LEVELS, title_filters
+from jobportal.core.textutil import unique
 from jobportal.documents import extract
 
 # Answer options as [saved id, label shown]. Saved answers keep the id, so renaming an id breaks answers already saved.
@@ -315,7 +316,7 @@ def _clean_answers(raw: dict) -> dict:
             value = [str(x).strip() for x in (value or []) if str(x).strip()]
             if key == "industries":  # names from before v0.3.0 became new ones (genres.OLD_INDUSTRIES)
                 value = [OLD_INDUSTRIES.get(x, x) for x in value]
-                value = [x for i, x in enumerate(value) if x not in value[:i]]
+                value = unique(value)
             if field["type"] == "multi":
                 known = {option_id for option_id, _ in field.get("options", [])}
                 value = [x for x in value if x in known]

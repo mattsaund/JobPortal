@@ -20,6 +20,8 @@ Key ideas:
   foreman, supervisor)."""
 import re
 
+from jobportal.core.textutil import unique
+
 LEVELS = [  # (id, label shown in the standard questions)
     ("internship", "Internship, co-op or fellowship"),
     ("apprenticeship", "Apprenticeship or trainee program"),
@@ -112,7 +114,7 @@ def title_filters(levels, roles: list[str] | None = None) -> tuple[list[str], li
     if not picked & EARLY:
         exclude += APPRENTICE_WORDS
     exclude = [p for p in exclude if not any(re.search(p, r, re.I) for r in roles)]
-    return _unique(include), _unique(exclude)
+    return unique(include), unique(exclude)
 
 
 def ats_search_terms(levels, queries: list[str] | None = None, limit: int = 8) -> list[str]:
@@ -131,7 +133,7 @@ def ats_search_terms(levels, queries: list[str] | None = None, limit: int = 8) -
     if "entry" in picked:
         words += ["entry level", "new grad", "associate"]
     terms = words[:4] + [q for q in (queries or []) if q]
-    return _unique(terms, key=str.lower)[:limit]
+    return unique(terms, key=str.lower)[:limit]
 
 
 def linkedin_experience(levels) -> str:
@@ -151,7 +153,7 @@ def muse_levels(levels) -> list[str]:
     apprenticeships search its internship and entry levels."""
     names = {"internship": ["Internship"], "apprenticeship": ["Internship", "Entry Level"], "entry": ["Entry Level"],
              "mid": ["Mid Level"], "senior": ["Senior Level"], "lead": ["Management"]}
-    return _unique([name for k in clean(levels) for name in names[k]])
+    return unique([name for k in clean(levels) for name in names[k]])
 
 
 # Words that show a free-text post is about early-career hiring.
@@ -181,16 +183,3 @@ def posting_regex(levels, roles: list[str] | None = None) -> re.Pattern:
     if not words:
         return ANY_JOB_RE
     return re.compile(r"\b(" + "|".join(words) + r")", re.I)
-
-
-def _unique(items: list[str], key=None) -> list[str]:
-    """`items` without repeats, keeping the first of each in order. `key` (for example str.lower) decides what counts as
-    a repeat."""
-    seen: set[str] = set()
-    out = []
-    for item in items:
-        k = key(item) if key else item
-        if k not in seen:
-            seen.add(k)
-            out.append(item)
-    return out

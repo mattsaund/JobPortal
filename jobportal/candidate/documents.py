@@ -39,7 +39,7 @@ from pathlib import Path
 from jobportal.ai import client as ai, prompts, signin
 from jobportal.core import background, bus, db, osutil
 from jobportal.core.config import DATA, RESUME_DIR
-from jobportal.core.textutil import clean, extract_terms
+from jobportal.core.textutil import clean, extract_terms, unique
 from jobportal.documents import extract
 
 DOCS_DIR = DATA / "documents"
@@ -186,7 +186,7 @@ def owner_names() -> list[str]:
                   if line.strip()), "")
     if 2 <= len(first.split()) <= 4 and not re.search(r"[@\d|/:]", first):
         names.append(first)
-    return [n for i, n in enumerate(names) if n and str(n).strip() and n not in names[:i]]
+    return unique(n for n in names if n and str(n).strip())
 
 
 _RECIPIENT_INLINE_RE = re.compile(r"(?:certif(?:y|ies) that|presented to|awarded to|granted to|issued to)\s+"
@@ -202,7 +202,7 @@ def recipients(text: str) -> list[str]:
         nxt = lines[i + 1]
         if _RECIPIENT_RE.search(line) and 2 <= len(nxt.split()) <= 5 and re.fullmatch(r"[A-Za-z .,'-]+", nxt):
             names.append(nxt)
-    return [n for i, n in enumerate(names) if n not in names[:i]]
+    return unique(names)
 
 
 def _mentions_owner(value: str, owners: list[str]) -> bool:

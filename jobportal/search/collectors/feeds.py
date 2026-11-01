@@ -23,7 +23,17 @@ from urllib.parse import quote, urlencode
 
 from jobportal.core.genres import DEFAULT_GENRES
 from jobportal.core.levels import early_career, muse_levels, posting_regex
-from jobportal.core.textutil import MAJOR_CITIES, NAME_TO_ABBR, REMOTE_RE, STATES, LocationMatcher, clean, html_to_text, parse_date
+from jobportal.core.textutil import (
+    MAJOR_CITIES,
+    NAME_TO_ABBR,
+    REMOTE_RE,
+    STATES,
+    LocationMatcher,
+    clean,
+    html_to_text,
+    parse_date,
+    unique,
+)
 from jobportal.search import plan
 from jobportal.search.collectors.base import NATIONWIDE, Ctx, RawJob
 
@@ -325,7 +335,7 @@ def _reddit_subreddits(ctx: Ctx) -> list[str]:
     (REDDIT_FIELD_SUBS), then the remote ones when Remote is allowed. Repeats are dropped, ignoring case."""
     subs = list(ctx.cfg["sources"].get("reddit", {}).get("subreddits") or ["forhire", "jobbit", "hiring"])
     subs += _field_values(ctx, REDDIT_FIELD_SUBS) + (REDDIT_REMOTE_SUBS if _remote_allowed(ctx) else [])
-    return [s for i, s in enumerate(subs) if s.lower() not in {x.lower() for x in subs[:i]}]
+    return unique(subs, key=str.lower)
 
 
 async def reddit(ctx: Ctx) -> list[RawJob]:
@@ -389,10 +399,7 @@ def _mastodon_plan(ctx: Ctx) -> tuple[list[str], list[str]]:
         tags += MASTODON_INTERNSHIP_TAGS
     if _remote_allowed(ctx):
         tags += MASTODON_REMOTE_TAGS
-
-    def unique(items: list[str]) -> list[str]:
-        return [x for i, x in enumerate(items) if x.lower() not in {y.lower() for y in items[:i]}]
-    return unique(instances), unique(tags)
+    return unique(instances, key=str.lower), unique(tags, key=str.lower)
 
 
 async def mastodon(ctx: Ctx) -> list[RawJob]:
