@@ -2,8 +2,8 @@
    letters, awards, transcripts and other resumes. Drop many files or whole folders at once, or pick them; each one is
    read on the server and goes into your next profile build, so the profile (and the jobs it finds) covers everything
    you've done. Without a main resume yet, JobPortal makes the best resume among them the main one. You can also paste
-   your resume's text, replace the main resume with one file, make another document the main resume, have one read
-   again, or remove it.
+   your resume's text, replace the main resume with one file, see the text read from it, make another document the main
+   resume, have one read again, or remove it.
    APIs: PUT /api/profile/documents?filename= (one file as the body), POST /api/profile/documents/auto-main,
    POST /api/profile/documents/{id}/main and /parse, DELETE /api/profile/documents/{id}, POST /api/onboarding/resume-text
    and PUT /api/onboarding/resume?filename=. A "documents" event carries the new list (live.js). */
@@ -47,7 +47,8 @@ function documentsList() {
   const main = resume ? `<li class="doc main"><span class="doc-icon">${icon("file")}</span><div class="doc-body">
       <div class="doc-name"><strong title="${esc(resume.filename)}">${esc(resume.filename)}</strong><span class="tag green">MAIN RESUME</span></div>
       <small>Added ${esc(fmtTs(resume.imported_at))}</small>
-      <div class="doc-actions"><label class="text-button">Replace<input type="file" data-replace-resume accept="${accept}" hidden></label>
+      <div class="doc-actions"><button class="text-button" type="button" data-act="resume-read">What it read</button>
+        <label class="text-button">Replace<input type="file" data-replace-resume accept="${accept}" hidden></label>
         <button class="text-button" type="button" data-act="paste-resume">Paste text instead</button></div></div></li>` : "";
   if (!main && !docs.length) return `<p class="muted-note">Nothing yet. Start with your resume.</p>`;
   return `<ul class="doc-list">${main}${docs.map(documentRow).join("")}</ul>`;
@@ -150,6 +151,11 @@ onChange(async (el) => {
   return true;
 });
 onAction("paste-resume", () => pasteResumeDialog());
+onAction("resume-read", () => {  // the text JobPortal read from the main resume (the server sends the first 4,000 characters)
+  const ob = S.onboarding, more = (ob.resume?.chars || 0) > 4000 ? " The first 4,000 characters are shown." : "";
+  openDialog(`<h2>${esc(ob.resume.filename)}</h2><p>The text JobPortal read from your resume. It's a source of facts, never a template:
+      every tailored resume is written fresh.${more}</p><pre class="posting-text">${esc(ob.resume_preview || "")}</pre>`, { eyebrow: "YOUR MAIN RESUME", wide: true });
+});
 onAction("paste-resume-go", async (el) => {
   const text = $("#paste-text").value.trim();
   if (text.length < 80) {
