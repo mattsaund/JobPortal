@@ -389,15 +389,19 @@ def allowed_locations(a: dict) -> list[str]:
     against the list, and the Search area editor (Leads and Settings pages) changes it later.
     - The states and cities listed under "Where you can work" come first.
     - Answering yes to "Open to jobs anywhere in the United States?" puts "Anywhere in the US" in front.
-    - Picking Remote under "Work arrangement" adds "Remote".
-    - With none of those, the search covers the home state from the contact details, or the whole US without one."""
+    - With neither of those, on-site and hybrid jobs are searched near home: the home state from the contact details, or
+      the whole US without one. That holds when Remote is picked too (the default picks all three arrangements), so
+      skipping the optional places question never leaves a remote-only search. Only a user who picked nothing but Remote
+      gets no home area.
+    - Picking Remote under "Work arrangement" adds "Remote"."""
     allowed = list(a.get("locations") or [])
+    modes = a.get("work_modes") or []
     if a.get("anywhere_us") == "yes":
         allowed.insert(0, "Anywhere in the US")
-    if "remote" in (a.get("work_modes") or []):
+    elif not allowed and (not modes or {"onsite", "hybrid"} & set(modes)):
+        allowed.append(a["state"] if a.get("state") else "Anywhere in the US")
+    if "remote" in modes:
         allowed.append("Remote")
-    if not allowed:
-        allowed = [a["state"]] if a.get("state") else ["Anywhere in the US"]
     return allowed
 
 

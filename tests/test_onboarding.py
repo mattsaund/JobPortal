@@ -78,6 +78,15 @@ def test_answers_drive_settings_facts_and_kit():
 def test_anywhere_and_remote_only_locations():
     assert onboarding.allowed_locations({"anywhere_us": "yes", "work_modes": ["remote"]}) == ["Anywhere in the US", "Remote"]
     assert onboarding.allowed_locations({"state": "Ohio", "work_modes": ["onsite"]}) == ["Ohio"]
+    assert onboarding.allowed_locations({"state": "Ohio", "work_modes": ["remote"]}) == ["Remote"]  # nothing but Remote
+
+
+def test_skipping_the_places_question_still_searches_near_home():
+    # The default work arrangement is all three. Remote alone would drop every on-site job near home.
+    every_mode = onboarding.defaults()["work_modes"]
+    assert onboarding.allowed_locations({"state": "Ohio", "work_modes": every_mode}) == ["Ohio", "Remote"]
+    assert onboarding.allowed_locations({"work_modes": ["hybrid", "remote"]}) == ["Anywhere in the US", "Remote"]  # no home state
+    assert onboarding.allowed_locations({"state": "Ohio", "locations": ["Denver, CO"], "work_modes": every_mode}) == ["Denver, CO", "Remote"]
 
 
 def test_import_resume_stores_file_and_prefills(fake_ai, sample_resume):
