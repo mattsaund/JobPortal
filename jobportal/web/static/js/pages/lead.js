@@ -7,9 +7,10 @@
 
    APIs: GET /api/leads/{id} (the lead with its package), PATCH /api/leads/{id} (every edit), POST /api/preview (the
    editor's live preview), POST /api/leads/{id}/revise, /package, /resume-check, /events, /contacts/{i},
-   /questions/generate and /apply-answers, POST /api/questions/answer and /dismiss, and the downloads under
-   /api/leads/{id}/export/. S.lead is the lead on screen and S.leadView where it's drawn; S.dirty marks unsaved edits. A
-   "lead" event redraws it unless edits are open (refreshLeadDetails, from live.js). */
+   /questions/generate and /apply-answers, POST /api/questions/answer and /dismiss, GET /api/questions, GET /api/profile
+   (the kit's standard answers), POST /api/library (Save to my resumes), and the downloads under /api/leads/{id}/export/.
+   S.lead is the lead on screen and S.leadView where it's drawn; S.dirty marks unsaved edits. A "lead" event redraws
+   it (refreshLeadDetails, from live.js), but never the open tab while it has unsaved edits or you're typing in it. */
 "use strict";
 
 // ---------------------------------------------------------------- showing a lead
@@ -41,44 +42,52 @@ function closeLeadDetails() {
   S.dirty = false;
 }
 
-// Reads the lead again and redraws it on the same tab. fromEvent = a live update: skipped while you have unsaved edits,
-// or when nothing changed.
-async function refreshLeadDetails(fromEvent) {
-  const view = S.leadView;
-  if (!view || (fromEvent && S.dirty)) return;
+// Reads the lead again and redraws it on the same tab. summary = the lead's summary from a live "lead" event: then
+// nothing happens while you have unsaved edits, and nothing is even read when the summary shows no change from what's
+// on screen (the stage, the status and the time of the last update), as after a question was added to it.
+async function refreshLeadDetails(summary) {
+  const view = S.leadView, live = !!summary;
+  if (!view || (live && (S.dirty || sameLead(S.lead, summary)))) return;
   let lead;
   try {
     lead = await api(`/api/leads/${view.id}`);
   } catch (_) {
     return;
   }
-  if (S.leadView !== view || (fromEvent && S.dirty)) return;
-  const same = S.lead && ["stage", "updated_at", "app_status"].every((key) => S.lead[key] === lead[key]);
-  if (fromEvent && same) return;
+  if (S.leadView !== view || (live && (S.dirty || sameLead(S.lead, lead)))) return;
   S.lead = lead;
   drawLeadDetails();
 }
+const sameLead = (a, b) => !!a && ["stage", "updated_at", "app_status"].every((key) => a[key] === b[key]);
 
 // An element inside the lead on screen.
 const lv = (selector) => $(selector, S.leadView.box);
 
-// Draws the lead: the header (in the Tracker's dialog), the actions, the banners, the tabs and the open tab.
+// Draws the lead: the header (in the Tracker's dialog), the actions, the banners, the tabs and the open tab. Drawn
+// again after a change, it replaces only what's above the tabs, and draws the open tab again unless it has unsaved edits
+// or you're typing in it: the tab stays in the page, so its text, cursor and scroll position stay too. A focused button
+// or menu above the tabs gets the focus back in the new HTML.
 function drawLeadDetails() {
   const l = S.lead, view = S.leadView, packaged = !!l.resume_md;
-  const header = view.header ? `<div class="detail-header">${companyLogo(l.company)}
+  const head = (view.header ? `<div class="detail-header">${companyLogo(l.company)}
       <div class="job-title"><h2>${esc(l.title)}</h2><div class="company-line"><span>${esc(l.company)}</span>${stageTag(l)}</div>
         <div class="job-meta">${leadMeta(l)}</div></div>${matchPill(l.score || null)}</div>
-    <div class="tags">${leadTags(l)}</div>` : "";
-  const tabs = DETAIL_TABS.map(([key, label]) => `<button class="tab${view.tab === key ? " active" : ""}" type="button" role="tab"`
-    + ` aria-selected="${view.tab === key}" data-act="lead-tab" data-tab="${key}">${label}</button>`).join("");
-  const kept = S.dirty ? $("[data-lead-body]", view.box) : null;  // a tab with unsaved edits stays as it is
-  view.box.innerHTML = `<div class="lead-details">${header}
-    <div class="detail-actions">${leadActions(l, packaged)}</div>
-    ${leadBanners(l, packaged)}
-    <div class="tabs" role="tablist" aria-label="About this lead">${tabs}</div>
-    <div class="tab-body" data-lead-body></div></div>`;
-  if (kept) lv("[data-lead-body]").replaceWith(kept);
-  else drawLeadTab();
+    <div class="tags">${leadTags(l)}</div>` : "")
+    + `<div class="detail-actions">${leadActions(l, packaged)}</div>${leadBanners(l, packaged)}`;
+  const body = lv("[data-lead-body]");
+  if (!body) {  // the first time
+    const tabs = DETAIL_TABS.map(([key, label]) => `<button class="tab${view.tab === key ? " active" : ""}" type="button" role="tab"`
+      + ` aria-selected="${view.tab === key}" data-act="lead-tab" data-tab="${key}">${label}</button>`).join("");
+    view.box.innerHTML = `<div class="lead-details">${head}<div class="tabs" role="tablist" aria-label="About this lead">${tabs}</div>`
+      + `<div class="tab-body" data-lead-body></div></div>`;
+    drawLeadTab();
+    return;
+  }
+  const details = lv(".lead-details"), tabs = lv(".tabs"), focus = focusKey(details);
+  while (details.firstChild !== tabs) details.firstChild.remove();
+  tabs.insertAdjacentHTML("beforebegin", head);
+  if (!S.dirty && !typingIn(body)) drawLeadTab();
+  refocus(details, focus);
 }
 
 // The actions row. A deleted lead has Restore and Delete forever instead of Delete.
