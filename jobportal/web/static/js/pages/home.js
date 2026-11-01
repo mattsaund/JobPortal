@@ -447,7 +447,12 @@ onAction("home-follow", async (el) => {
     return;
   }
   el.disabled = true;
-  const r = await api("/api/questions/answer", { method: "POST", body: { question: el.dataset.q, answer } });
+  let r;
+  try {
+    r = await api("/api/questions/answer", { method: "POST", body: { question: el.dataset.q, answer } });
+  } finally {
+    el.disabled = false;  // the card is replaced when it worked; when it failed, you can try again
+  }
   S.questions = r.questions;
   followUpsDone++;
   onProfileStatus(r.status);
