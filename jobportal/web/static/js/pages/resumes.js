@@ -4,7 +4,8 @@
    fresh from it. Below the collection: the recruiter review and the resume playbook every tailored resume follows.
    APIs: GET /api/library, POST /api/library, PUT /api/library/import, GET/PUT/DELETE /api/library/{id},
    POST /api/library/{id}/revise, POST /api/library/{id}/apply/{lead id}, GET /api/library/{id}/export/{pdf|docx|md},
-   GET /api/library/{id}/html (the thumbnails), GET /api/resume-playbook and PUT /api/settings. */
+   GET /api/library/{id}/html (the thumbnails), GET /api/leads (the lead picker), GET /api/resume-playbook, and
+   GET and PUT /api/settings (the playbook and the recruiter review switch). */
 "use strict";
 
 // The file types the collection imports, the same as SUPPORTED in documents/extract.py on the server. (Old .doc, .pages
@@ -15,28 +16,20 @@ const LIB_ACCEPT = LIB_TYPES.map((type) => "." + type).join(",");
 
 // What the import is doing, for the line under the drop zone.
 let libProgress = "";
+// Your saved resumes (GET /api/library), as last loaded. The search box and the tags filter these in the page.
+let libItems = [];
 
 // Where a saved resume came from: imported, or saved from a lead (with a link to it).
 const libSource = (item) => (item.source === "imported" ? "Imported" : item.lead_id ? `Saved from <a href="#/leads/${item.lead_id}">a lead</a>` : "Saved");
 
-// The collection, or one resume's editor.
+// The collection, or one resume's editor. The tab is drawn once: searching and picking a tag only show and hide the
+// cards, and an import only redraws the cards. Nothing reloads the thumbnails, and nothing redraws the playbook card,
+// whose edits would be lost.
 async function renderLibrary(box, id) {
   if (id) return renderLibraryItem(box, +id);
   const items = await api("/api/library");
   if (S.route[1] !== "resumes" || S.route[2]) return;
-  const tags = [...new Set(items.flatMap((x) => x.tags || []))].sort();
-  if (S.libTag && !tags.includes(S.libTag)) S.libTag = "";  // that tag is gone
-  const search = S.libQ.toLowerCase();
-  const shown = items.filter((x) => (!S.libTag || (x.tags || []).includes(S.libTag))
-    && (!search || `${x.name} ${(x.tags || []).join(" ")} ${x.notes} ${x.preview}`.toLowerCase().includes(search)));
-  const card = (it) => `<article class="resume-card">
-      <a class="resume-thumb" href="#/settings/resumes/${it.id}" aria-label="Edit ${esc(it.name)}"><iframe loading="lazy" src="/api/library/${it.id}/html?v=${encodeURIComponent(it.updated_at)}" sandbox tabindex="-1" title="${esc(it.name)}"></iframe></a>
-      <div class="resume-body"><a class="resume-name" href="#/settings/resumes/${it.id}">${esc(it.name)}</a>
-        <small>${libSource(it)}, ${esc(humanize(it.style?.theme || "classic"))} layout, ${ago(it.updated_at)}</small>
-        ${(it.tags || []).length ? `<div class="tags">${it.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
-        <div class="button-row"><button class="button primary small" type="button" data-act="lib-use" data-id="${it.id}">Use on a lead</button>
-          <button class="button outline small" type="button" data-act="lib-dl" data-url="/api/library/${it.id}/export/pdf">${icon("download")}PDF</button>
-          <button class="button outline small" type="button" data-act="lib-dl" data-url="/api/library/${it.id}/export/docx">${icon("download")}Word</button></div></div></article>`;
+  libItems = items;
   box.innerHTML = `<div class="stack">
     <section class="panel"><h2>Your saved resumes</h2>
       <p class="panel-note">Import resumes, or save ones you like from a lead, then use them on any job. Tailored resumes are still written fresh
@@ -47,25 +40,72 @@ async function renderLibrary(box, id) {
       <p class="upload-note" id="lib-progress">${libProgress}</p>
       <div class="block-actions"><button class="text-button" type="button" data-act="lib-paste">Or paste a resume's text ${icon("arrow")}</button></div>
       <div class="list-controls"><label class="control"><span>Find</span><input type="search" id="lib-q" placeholder="Names, tags, notes" value="${esc(S.libQ)}"></label>
-        <div class="filters">${tags.map((t) => `<button class="chip${t === S.libTag ? " active" : ""}" type="button" data-act="lib-tag" data-tag="${esc(t)}" aria-pressed="${t === S.libTag}">${esc(t)}</button>`).join("")}</div>
-        <span class="list-count">${shown.length} of ${items.length}</span></div>
-      ${items.length ? `<div class="resume-grid">${shown.map(card).join("")}</div>`
-        : `<div class="empty-state"><h3>No saved resumes yet</h3><p>Drop a resume above, or open a lead's Resume tab and choose Save to my resumes.</p></div>`}</section>
+        <div class="filters" id="lib-tags"></div><span class="list-count" id="lib-count"></span></div>
+      <div id="lib-items"></div></section>
     <section class="panel" id="playbook-card" data-cfg></section></div>`;
-  $("#lib-q").addEventListener("input", debounce((e) => {
+  $("#lib-q").addEventListener("input", (e) => {
     S.libQ = e.target.value;
-    renderLibrary(box).then(() => {  // the tab redraws, so put the cursor back at the end of the search box
-      const input = $("#lib-q");
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
-    });
-  }, 250));
+    filterLibrary();
+  });
+  drawLibraryItems();
   renderPlaybookCard();
+}
+
+// Loads the collection again and redraws its cards (after an import). The search and the tag stay as they are.
+async function reloadLibraryItems() {
+  const items = await api("/api/library");
+  if (!$("#lib-items")) return;
+  libItems = items;
+  drawLibraryItems();
+}
+
+// The cards, one per saved resume, with its thumbnail (GET /api/library/{id}/html, which only loads when it scrolls into
+// view). Then filterLibrary() shows the ones that match.
+function drawLibraryItems() {
+  const box = $("#lib-items");
+  if (!box) return;
+  const card = (it) => `<article class="resume-card" data-id="${it.id}">
+      <a class="resume-thumb" href="#/settings/resumes/${it.id}" aria-label="Edit ${esc(it.name)}"><iframe loading="lazy" src="/api/library/${it.id}/html?v=${encodeURIComponent(it.updated_at)}" sandbox tabindex="-1" title="${esc(it.name)}"></iframe></a>
+      <div class="resume-body"><a class="resume-name" href="#/settings/resumes/${it.id}">${esc(it.name)}</a>
+        <small>${libSource(it)}, ${esc(humanize(it.style?.theme || "classic"))} layout, ${ago(it.updated_at)}</small>
+        ${(it.tags || []).length ? `<div class="tags">${it.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
+        <div class="button-row"><button class="button primary small" type="button" data-act="lib-use" data-id="${it.id}">Use on a lead</button>
+          <button class="button outline small" type="button" data-act="lib-dl" data-url="/api/library/${it.id}/export/pdf">${icon("download")}PDF</button>
+          <button class="button outline small" type="button" data-act="lib-dl" data-url="/api/library/${it.id}/export/docx">${icon("download")}Word</button></div></div></article>`;
+  box.innerHTML = libItems.length ? `<div class="resume-grid">${libItems.map(card).join("")}</div>`
+    : `<div class="empty-state"><h3>No saved resumes yet</h3><p>Drop a resume above, or open a lead's Resume tab and choose Save to my resumes.</p></div>`;
+  filterLibrary();
+}
+
+// Shows the cards that match the search box and the tag (a card that doesn't is hidden, so its thumbnail stays loaded),
+// and redraws the tag chips and the count. A tag that no resume has any more stops filtering.
+function filterLibrary() {
+  const tags = [...new Set(libItems.flatMap((x) => x.tags || []))].sort();
+  if (S.libTag && !tags.includes(S.libTag)) S.libTag = "";
+  const search = S.libQ.toLowerCase();
+  let shown = 0;
+  for (const it of libItems) {
+    const match = (!S.libTag || (it.tags || []).includes(S.libTag))
+      && (!search || `${it.name} ${(it.tags || []).join(" ")} ${it.notes} ${it.preview}`.toLowerCase().includes(search));
+    const card = $(`.resume-card[data-id="${it.id}"]`);
+    if (card) card.hidden = !match;
+    shown += match ? 1 : 0;
+  }
+  setHtml($("#lib-tags"), tags.map((t) => `<button class="chip${t === S.libTag ? " active" : ""}" type="button" data-act="lib-tag" data-tag="${esc(t)}"`
+    + ` aria-pressed="${t === S.libTag}">${esc(t)}</button>`).join(""));
+  $("#lib-count").textContent = `${shown} of ${libItems.length}`;
 }
 
 // How tailored resumes are written: the recruiter review switch and the resume playbook. The playbook saves on its own.
 async function renderPlaybookCard() {
-  const [, playbook] = await Promise.all([loadCfg(), api("/api/resume-playbook")]);
+  let playbook;
+  try {
+    [, playbook] = await Promise.all([loadCfg(), api("/api/resume-playbook")]);
+  } catch (err) {
+    const card = $("#playbook-card");
+    if (card) card.innerHTML = loadError(err);
+    return;
+  }
   const card = $("#playbook-card");
   if (!card) return;
   card.innerHTML = `<h2>How tailored resumes are written</h2>
@@ -113,7 +153,7 @@ async function importResumes(files, names = []) {
   }
   show(`${imported} of ${files.length} imported.`);
   if (imported) toast("Added to your resumes", imported === 1 ? last.name : `${imported} resumes`);
-  if (S.route[1] === "resumes" && !S.route[2]) renderLibrary($("#settings-body"));
+  if (imported && S.route[1] === "resumes" && !S.route[2]) await reloadLibraryItems().catch(() => {});  // the new cards; failing, they show next visit
   return last;
 }
 
@@ -235,7 +275,7 @@ onAction("lib-use", (el) => libUseDialog(+el.dataset.id));
 onAction("lib-dl", (el) => openUrl(el.dataset.url));
 onAction("lib-tag", (el) => {  // a tag filters your resumes; clicking it again clears the filter
   S.libTag = S.libTag === el.dataset.tag ? "" : el.dataset.tag;
-  renderLibrary($("#settings-body"));
+  filterLibrary();
 });
 onAction("lib-paste", () => libPasteDialog());
 onAction("lib-paste-go", (el) => {
