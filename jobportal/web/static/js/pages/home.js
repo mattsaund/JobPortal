@@ -31,6 +31,7 @@ async function renderHome() {
     return;
   }
   followUpsDone = 0;
+  homeShowsRunning = S.state.running;  // drawn for the run state as it is now (see homeRunChanged)
   main.innerHTML = `<div class="page-heading"><div><p class="eyebrow">YOUR JOB SEARCH</p><h1 id="home-title"></h1><p id="home-sub"></p></div>
       <span class="semester" id="home-status"></span></div>
     <div class="dashboard-layout">
@@ -412,7 +413,9 @@ function homeStatusChanged() {
   renderProfilePanel();
 }
 
-// A search started or stopped: the buttons that run one change.
+// A search started or stopped: the buttons that run one change. "state" events come often during a search (every
+// phase and count), so this redraws only when running changed from what Home shows. renderHome sets homeShowsRunning,
+// because a search may have started or stopped while you were on another page.
 let homeShowsRunning = null;
 function homeRunChanged() {
   if (homeShowsRunning === S.state.running) return;
