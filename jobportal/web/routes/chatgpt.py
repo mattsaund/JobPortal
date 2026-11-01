@@ -27,7 +27,7 @@ CALLBACK_PAGE = Template("""<!doctype html><html lang="en"><meta charset="utf-8"
 }
 body { display: grid; place-items: center; min-height: 100vh; margin: 0; background: var(--page); color: var(--text); font: 15px/1.6 Arial, Helvetica, sans-serif; }
 main { max-width: 520px; margin: 16px; padding: 28px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); }
-img { display: block; width: 180px; height: auto; margin-bottom: 18px; border-radius: 8px; }
+img { display: block; width: 180px; height: auto; margin-bottom: 18px; padding: 8px 12px; border-radius: 8px; background: #252525; }
 h1 { margin: 0 0 10px; color: var(--green); font-size: 22px; }
 p { margin: 0; color: var(--muted); }
 </style>
