@@ -292,6 +292,29 @@ def test_triage_saves_leads_and_tells_the_ai_about_the_dream_job_switch(fake_ai)
     assert run.package_q.qsize() == 1 and run.stats["qualified"] == 1 and run.stats["below threshold"] == 1
 
 
+def test_a_triage_result_without_a_score_costs_only_that_job(fake_ai):
+    settings.save(make_cfg(allowed=["Ohio"]))
+
+    def answer(prompt: str) -> dict:  # the AI leaves the score out for one job and writes the other one's as text
+        return {"results": [{"id": item["id"], "verdict": "strong", "eligibility": "eligible", "summary": "", "genres": [],
+                             **({"score": "88"} if item["title"] == "Data Intern" else {})} for item in json.loads(prompt)]}
+
+    fake_ai.responses["triage"] = answer
+
+    async def scenario():
+        run = pipeline.Pipeline("full")
+        try:
+            await run.add_jobs("test", [job("Data Intern", url="https://jobs.example.com/d"), job(url="https://jobs.example.com/s")])
+            await run.triage_batch(run.take_batch(10))
+            return run
+        finally:
+            await run.ctx.close()
+
+    run = asyncio.run(scenario())
+    assert {r["title"]: (r["stage"], r["score"]) for r in db.q("SELECT title, stage, score FROM leads")} == {"Data Intern": ("qualified", 88)}
+    assert run.stats["triage missing"] == 1 and run.stats["qualified"] == 1
+
+
 def test_retriage_tells_the_ai_when_a_dream_lead_may_be_anywhere(fake_ai):
     settings.save(make_cfg(allowed=["Ohio"], dream_bypass=True))
     dream = packages.insert_lead({"fingerprint": "a", "title": "Robotics Intern", "company": "Example Robotics", "location": "Austin, TX",

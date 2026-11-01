@@ -240,10 +240,23 @@ def _qualifies(result: dict, min_score: int) -> bool:
 
 
 async def _ask_triage(items: list[dict], system: str, *, purpose: str, label: str, run_id: int | None = None) -> tuple[dict[str, dict], int]:
-    """Send one batch to the triage AI (stage "triage"). Returns (results by item id, AI tokens used). Raises ai.AIError."""
+    """Send one batch to the triage AI (stage "triage"). Returns (results by item id, AI tokens used). Raises ai.AIError.
+
+    ai.run() only makes sure the answer has its "results" list, not that each result is complete, so a result the run
+    can't use is left out here: one without a verdict or an eligibility, or without a score that reads as a number. Its
+    job then counts as one the AI skipped, instead of a KeyError ending the whole batch. Scores are held to 0..100."""
     out = await ai.run(json.dumps(items, indent=1), system=system, schema=prompts.TRIAGE_SCHEMA, stage="triage", purpose=purpose,
                        run_id=run_id, label=label, timeout=600)
-    return {r["id"]: r for r in out.get("results", [])}, int(out.get("_tokens", 0))
+    results = {}
+    for result in out.get("results") or []:
+        if not isinstance(result, dict) or not result.get("verdict") or not result.get("eligibility"):
+            continue
+        try:
+            score = max(0, min(100, int(result.get("score"))))
+        except (TypeError, ValueError):  # missing, or text that isn't a whole number
+            continue
+        results[str(result.get("id"))] = {**result, "score": score}
+    return results, int(out.get("_tokens", 0))
 
 
 # ---------------------------------------------------------------- dedupe helpers
