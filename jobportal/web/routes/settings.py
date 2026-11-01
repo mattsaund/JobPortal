@@ -36,4 +36,4 @@ def resume_playbook():
 def prompt_defaults():
     return {"triage": prompts.TRIAGE_SYSTEM, "hunt": prompts.HUNT_SYSTEM, "package": prompts.PACKAGE_SYSTEM,
             "revise": prompts.REVISE_SYSTEM, "profile": prompts.PROFILE_SYSTEM, "analysis": prompts.ANALYSIS_SYSTEM,
-            "resume_review": prompts.RESUME_REVIEW_SYSTEM}
+            "resume_review": prompts.RESUME_REVIEW_SYSTEM, "documents": prompts.DOCUMENT_SYSTEM}

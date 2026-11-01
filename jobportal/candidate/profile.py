@@ -449,7 +449,7 @@ def _prompt_head() -> str:
 === RESUME ({imported.get('filename', 'none')}, imported {str(imported.get('imported_at', ''))[:10]}) ===
 {(imported.get('text') or '(no resume imported)')[:60000]}
 
-=== EXTRA DOCUMENTS (other resumes, certificates, cover letters, awards, transcripts) ===
+=== EXTRA DOCUMENTS (other resumes, certificates, licenses, cover letters, awards, transcripts; each with a DETAILS line read from it) ===
 {documents.for_prompt()}
 
 === STANDARD ANSWERS (saved {str(answers.get('_saved_at', ''))[:10]}) ===
