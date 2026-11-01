@@ -1,18 +1,25 @@
 /* main.js: starts the dashboard. It loads last, after every file has registered its actions. It holds the one click
    listener and the one change listener for the whole window (the page in <main>, the dialogs, the sidebar and the top
-   bar), guards unsaved edits, loads what every page needs, connects the live stream and shows the first page. */
+   bar), guards unsaved edits, loads what every page needs, connects the live stream and shows the first page.
+   APIs, all at startup: GET /api/meta, GET /api/stats, GET /api/profile/status, GET /api/questions, GET /api/onboarding,
+   GET /api/settings, GET /api/runs and GET /api/runs/{id}/log. */
 "use strict";
 
 // Clicks: run the action of the nearest element with data-act (see onAction in core.js). An action that fails shows its
-// error in a toast.
+// error in a toast. While an element's action is still running (most wait on the server), more clicks on that element
+// are ignored, so a double click never saves, sends, adds or deletes twice.
+const busy = new WeakSet();
 document.addEventListener("click", async (e) => {
   const el = e.target.closest("[data-act]");
   const action = el && ACTIONS[el.dataset.act];
-  if (!action || el.disabled) return;
+  if (!action || el.disabled || busy.has(el)) return;
+  busy.add(el);
   try {
     await action(el, e);
   } catch (err) {
     toast("Something went wrong", err.message, "error");
+  } finally {
+    busy.delete(el);
   }
 });
 
