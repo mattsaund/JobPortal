@@ -13,10 +13,12 @@
 "use strict";
 
 // ---------------------------------------------------------------- showing a lead
-// Shows a lead in box. opts: tab (the one to open), hashBase (tabs change the address, as on Leads: #/leads/12/emails),
-// header (draw the title, company and match pill too: the Tracker's dialog has no card around it).
+// Shows a lead in box. opts: tab (the one to open; an unknown one, from an old or mistyped address, opens the
+// overview), hashBase (tabs change the address, as on Leads: #/leads/12/emails), header (draw the title, company and
+// match pill too: the Tracker's dialog has no card around it).
 async function showLeadDetails(box, id, opts = {}) {
-  S.leadView = { box, id, tab: opts.tab || "overview", hashBase: opts.hashBase || "", header: !!opts.header };
+  const tab = DETAIL_TABS.some(([key]) => key === opts.tab) ? opts.tab : "overview";
+  S.leadView = { box, id, tab, hashBase: opts.hashBase || "", header: !!opts.header };
   S.lead = null;
   box.innerHTML = `<p class="loading">${spinner()} Loading</p>`;
   let lead;
