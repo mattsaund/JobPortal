@@ -153,8 +153,12 @@ async function addDocuments(files) {
 }
 
 // Replaces the main resume with one file. Before your answers are saved, it fills in the empty ones again; after, your
-// profile is rebuilt from it.
+// profile is rebuilt from it. Not while files are still going up: the batch would pick a main resume of its own.
 async function replaceResume(file) {
+  if (docUpload) {
+    toast("Still adding your documents", "Replace your resume when they're in.");
+    return;
+  }
   const answered = !!S.onboarding?.answers_saved;
   docUpload = { reading: true };
   showUploadNote();
@@ -228,7 +232,13 @@ onAction("paste-resume-go", async (el) => {
 onAction("doc-main", async (el) => {
   el.disabled = true;
   el.innerHTML = `${spinner()} Switching`;
-  await api(`/api/profile/documents/${el.dataset.id}/main`, { method: "POST" });
+  try {
+    await api(`/api/profile/documents/${el.dataset.id}/main`, { method: "POST" });
+  } catch (err) {
+    el.disabled = false;
+    el.textContent = "Use as main resume";
+    throw err;
+  }
   toast("Main resume changed", "Your old main resume stays in your documents.");
   await reloadOnboarding();
 });
