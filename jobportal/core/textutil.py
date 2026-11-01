@@ -634,12 +634,15 @@ def extract_terms(text: str, limit: int = 25) -> list[str]:
     text = text or ""
     low = text.lower()
     found: list[str] = []
+    tech_hits = 0
     for field, patterns in _VOCAB:
         hits = [term for term, pattern in patterns if pattern.search(low)]
         found += hits
         if field == "credentials":
             found += _credential_phrases(text)
-    if sum(1 for term, pattern in dict(_VOCAB)["tech"] if pattern.search(low)) >= 2:
+        elif field == "tech":
+            tech_hits = len(hits)  # counted here, rather than searching the tech terms a second time
+    if tech_hits >= 2:
         found += [term for term, pattern in _TECH_WEAK if pattern.search(low)]
     found += _asked_phrases(text)
     out: list[str] = []
