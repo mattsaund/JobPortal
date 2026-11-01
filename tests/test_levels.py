@@ -86,6 +86,13 @@ def test_ats_terms_are_capped():
     assert levels.ats_search_terms(["senior"], queries) == queries[:8]
 
 
+def test_iv_in_a_nursing_title_is_not_level_four():
+    _, exclude = levels.title_filters(["entry"], ["Registered Nurse"])
+    blocked = lambda title: any(re.search(p, title.lower()) for p in exclude)  # noqa: E731
+    assert not blocked("IV Therapy Registered Nurse") and not blocked("IV Team RN")  # intravenous
+    assert blocked("Registered Nurse IV") and blocked("Registered Nurse II - ICU")  # levels above entry
+
+
 def test_posting_regex():
     assert levels.posting_regex(["internship"]).search("We're hiring summer interns!")
     rx = levels.posting_regex(["senior"], ["Site Reliability Engineer"])

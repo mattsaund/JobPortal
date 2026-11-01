@@ -37,7 +37,10 @@ EARLY = {"internship", "apprenticeship", "entry"}  # the early-career levels
 _NUMERAL_END = r"(?=\s*(?:$|[-,(|/:]))"
 # Numbers and numerals that name something other than a level: "Teacher - Grade 3", "Class 2 Driver", "Title IV Specialist".
 _NOT_A_LEVEL = r"(?<!grade )(?<!class )(?<!title )"
-_SENIOR_NUMERALS = [_NOT_A_LEVEL + r"\b(?:ii|iii|iv)\b", _NOT_A_LEVEL + r"\b[234]\b" + _NUMERAL_END]
+# In front of these words "IV" means intravenous, not level four: "IV Therapy RN", "IV Team Nurse".
+_INTRAVENOUS = r"(?! (?:therapy|team|infusion|access|insertion|starts?|nurse|rn)\b)"
+_SENIOR_NUMERALS = [_NOT_A_LEVEL + r"\b(?:ii|iii)\b", _NOT_A_LEVEL + r"\biv\b" + _INTRAVENOUS,
+                    _NOT_A_LEVEL + r"\b[234]\b" + _NUMERAL_END]
 # Title words that mark a posting as being at a level (case-insensitive regexes; \b marks a word edge). Mid level has none
 # on purpose, see the module docstring.
 TITLE_MARKERS = {
