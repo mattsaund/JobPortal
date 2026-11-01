@@ -736,6 +736,9 @@ def _role_stem(word: str) -> str:
 
 
 _ROLE_ALIASES = {_role_stem(word): aliases for word, aliases in _ALIAS_WORDS.items()}
+# Short target words that are everyday words in a description ("it is", "$20 per hr", "Baltimore, MD"). They still count
+# in a title, where "IT Support" or "HR Assistant" means what it says.
+_EVERYDAY_SHORT = {"it", "hr", "md", "pa", "ma", "us", "am", "pm", "or", "do"}
 # Place words in a search query ("nurse jobs Columbus OH") aren't about the work, so they're never target words.
 _PLACE_WORDS = {code.lower() for code in STATES} | set(NAME_TO_ABBR) | {city for city in CITY_STATE if " " not in city}
 
@@ -753,7 +756,7 @@ class TargetMatcher:
       (three letters or fewer, such as RN or IT) must match a whole word.
     - A few aliases add other words for the same work (_ALIAS_WORDS): RN for nurse, developer for software.
     - A title passes with any one target word. A title without one still passes when the description uses two different
-      target words.
+      target words (short words that are also everyday words, such as "it" or "hr", don't count there).
     `places` is the user's search area ("Columbus, OH", "Remote"): its words are left out too, since queries often name
     the city. With no phrases at all the matcher is empty (bool() is False), and the pipeline lets every job through."""
 
@@ -780,12 +783,13 @@ class TargetMatcher:
     def __bool__(self) -> bool:
         return bool(self.short or self.stems)
 
-    def hits(self, text: str) -> set[str]:
-        """The target words found in `text` (as their stems)."""
+    def hits(self, text: str, description: bool = False) -> set[str]:
+        """The target words found in `text` (as their stems). In a `description`, short words that are also everyday words
+        (_EVERYDAY_SHORT) don't count."""
         found = set()
         for token in set(_TOKEN_RE.findall((text or "").lower())):
             if len(token) <= 3:
-                if token in self.short:
+                if token in self.short and not (description and token in _EVERYDAY_SHORT):
                     found.add(token)
                 continue
             stem = _role_stem(token)
@@ -800,4 +804,4 @@ class TargetMatcher:
         Always True for an empty matcher."""
         if not self:
             return True
-        return bool(self.hits(title)) or len(self.hits((description or "")[:1500])) >= 2
+        return bool(self.hits(title)) or len(self.hits((description or "")[:1500], description=True)) >= 2

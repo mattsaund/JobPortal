@@ -140,6 +140,9 @@ def test_target_roles_match_leniently():
     trades = textutil.TargetMatcher(["Apprentice Electrician"])
     assert trades.matches("Journeyman Electrician") and trades.matches("Electrical Helper") and not trades.matches("Election Clerk")
     assert textutil.TargetMatcher(["Assistant Manager"]).matches("Assistant Store Manager")  # only generic words: they count
+    it_support = textutil.TargetMatcher(["IT Support Specialist"])
+    assert it_support.matches("IT Help Desk Technician")  # "IT" counts in a title...
+    assert not it_support.matches("Line Cook", "It is a busy kitchen. It pays $18 per hr and it has a network of cafes.")  # ...not here
     assert not textutil.TargetMatcher([]) and textutil.TargetMatcher([]).matches("Anything")  # no targets: everything passes
 
 
