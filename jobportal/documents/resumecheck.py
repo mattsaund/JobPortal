@@ -34,8 +34,13 @@ SKILLS_HEADINGS = ("skills", "technical skills", "key skills", "core competencie
 _PHONE_RE = re.compile(r"(?:\+?\d{1,3}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}")
 _EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u27bf]")  # emoji, plus the older symbol and dingbat blocks
 # First person: "I" before a contraction or a lowercase word, and "me" and "my". A lone "I" before punctuation, "and" or
-# "or" is a Roman numeral (Calculus I, Physics I and II), and "I/O" means input/output, so those don't count.
-_FIRST_PERSON_RE = re.compile(r"(?<![A-Za-z])(?:I(?='[a-z]|\s+(?!(?:and|or)\b)[a-z])|me|my)(?![A-Za-z])")
+# "or" is a Roman numeral (Calculus I, Physics I and II), and so is one after a word like Title, Phase or Level ("a Title I
+# school", "Phase I trials", "a Level I trauma center"). "I/O" means input/output, so none of those count.
+_NUMERAL_NOUNS = ("Title", "Phase", "Level", "Type", "Stage", "Tier", "Class", "Grade", "Part")
+_FIRST_PERSON_RE = re.compile("".join(rf"(?<!{noun} )" for noun in _NUMERAL_NOUNS)
+                              + r"(?<![A-Za-z])(?:I(?='[a-z]|\s+(?!(?:and|or)\b)[a-z])|me|my)(?![A-Za-z])")
+# Web and email addresses ("about.me/jordan", "hire.me@example.com"), left out before looking for first person.
+_ADDRESS_RE = re.compile(r"\S*@\S*|\S*://\S*|\b\w+(?:\.\w+)+(?:/\S*)?")
 _WEAK_START_RE = re.compile(r"(responsible for|worked on|helped|assisted|duties)", re.I)
 _MONTH_DATE_RE = re.compile(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.? \d{4}")  # May 2027
 _NUMERIC_DATE_RE = re.compile(r"\b(0[1-9]|1[0-2])/\d{4}\b")  # 05/2027
@@ -135,7 +140,7 @@ def check(md: str, *, inventory: list[dict] | None = None, keywords: list[str] |
         add("error", "Contains a table, which ATS parsers often scramble.")
     if _EMOJI_RE.search(text):
         add("warn", "Contains emoji or symbols that ATS may drop.")
-    if _FIRST_PERSON_RE.search(re.sub(r"\[.*?\]\(.*?\)", "", text)):  # link text and addresses don't count
+    if _FIRST_PERSON_RE.search(_ADDRESS_RE.sub(" ", re.sub(r"\[.*?\]\(.*?\)", "", text))):  # links and addresses don't count
         add("warn", "Uses first person (I / my). Resume bullets should drop pronouns.")
 
     # Bullets.
@@ -176,7 +181,7 @@ def check(md: str, *, inventory: list[dict] | None = None, keywords: list[str] |
     if keywords and keyword_share < 0.5:
         add("warn", f"Only {int(keyword_share * 100)}% of the posting's keywords appear. Add true ones: {', '.join(missing[:6])}")
     if len(skills) > MAX_SKILLS:
-        add("warn", f"{len(skills)} skills listed. Over 30 looks like padding; trim to the most relevant.")
+        add("warn", f"{len(skills)} skills listed. More than {MAX_SKILLS} looks like padding; trim to the most relevant.")
 
     score = 100 - sum(14 if issue["level"] == "error" else 5 for issue in issues)
     score = max(0, min(100, score + (5 if keyword_share >= 0.75 else 0)))

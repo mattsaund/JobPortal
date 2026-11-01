@@ -77,6 +77,10 @@ def test_roman_numerals_are_not_first_person(sample_resume):
     assert not any("first person" in i["text"] for i in resumecheck.check(courses)["issues"])
     pronoun = sample_resume.replace("- Resolved", "- I resolved")
     assert any("first person" in i["text"] for i in resumecheck.check(pronoun)["issues"])
+    numerals = sample_resume.replace("- Resolved", "- Taught at a Title I school; ran Phase I trials at a Level I trauma center. Resolved")
+    addresses = sample_resume.replace("- Resolved", "- Portfolio at about.me/jordan-example, mail hire.me@example.com. Resolved")
+    for text in (numerals, addresses):
+        assert not any("first person" in i["text"] for i in resumecheck.check(text)["issues"])
 
 
 @pytest.mark.skipif(not osutil.find_pdf_engine(), reason="needs Chrome, Edge or Chromium")
