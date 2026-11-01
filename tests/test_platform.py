@@ -74,6 +74,32 @@ def test_a_second_server_on_a_busy_port_leaves_the_pid_file_alone(monkeypatch):
     assert pid_file.read_text(encoding="utf-8") == "4242"  # so --stop still knows the first server
 
 
+def test_saving_a_download_where_it_cannot_be_written_is_reported(tmp_path, monkeypatch):
+    from jobportal.app import desktop
+
+    class Reply:
+        headers = {"Content-Disposition": 'attachment; filename="Jordan Rivera Resume.pdf"'}
+
+        def read(self):
+            return b"%PDF-1.4"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class Window:
+        def create_file_dialog(self, *args, **kwargs):
+            return str(tmp_path / "no-such-folder" / "Jordan Rivera Resume.pdf")  # the folder is gone by the time it's saved
+
+    monkeypatch.setattr(desktop.urllib.request, "urlopen", lambda url, timeout=0: Reply())
+    bridge = desktop.Bridge()
+    bridge._window = Window()
+    result = bridge.save_file("/api/leads/1/export/resume.pdf")  # the dashboard shows the error instead of nothing
+    assert result["ok"] is False and "couldn't save Jordan Rivera Resume.pdf" in result["error"]
+
+
 def test_cli_version_and_doctor(tmp_path):
     env = {**os.environ, "JOBPORTAL_HOME": str(tmp_path)}
     out = subprocess.run([sys.executable, "-m", "jobportal", "--version"], capture_output=True, text=True, env=env, timeout=60)
