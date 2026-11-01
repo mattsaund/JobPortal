@@ -263,13 +263,19 @@ onChange(async (el) => {
   }
   if (el.matches("[data-levels] [data-qm]")) {  // the experience levels are one of your standard answers
     const picked = $$("[data-levels] [data-qm]").filter((box) => box.checked).map((box) => box.value);
+    const undo = () => {  // the level goes back to how it's saved
+      el.checked = !el.checked;
+      el.closest(".choice").classList.toggle("active", el.checked);
+    };
     if (!picked.length) {
-      el.checked = true;
-      el.closest(".choice").classList.add("active");
+      undo();
       toast("Keep at least one level", "The search needs one to know what to look for.", "error");
       return true;
     }
-    const r = await api("/api/onboarding/answers", { method: "PATCH", body: { answers: { levels: picked } } });
+    const r = await api("/api/onboarding/answers", { method: "PATCH", body: { answers: { levels: picked } } }).catch((err) => {
+      undo();
+      throw err;
+    });
     S.onboarding.answers = r.answers;
     toast("Levels saved", "The title filters follow them.");
     if (!S.cfgDirty && !S.dirty) renderSettings("search");  // show the title filters made from them

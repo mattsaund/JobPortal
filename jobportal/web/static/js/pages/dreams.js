@@ -4,32 +4,42 @@
    APIs: GET /api/dreams and PUT /api/dreams, POST /api/dreams/recheck. */
 "use strict";
 
-// Draws the card into box from GET /api/dreams (kept in S.dreams for the actions below).
+// Draws the card into box from GET /api/dreams (kept in S.dreams for the actions below). When the list doesn't load,
+// the card says so (with Try again) instead of staying empty. After a change, a focused button or Add box gets the
+// focus back in the redrawn card.
 async function renderDreams(box) {
   if (!box) return;
-  const d = (S.dreams = await api("/api/dreams"));
+  let d;
+  try {
+    d = S.dreams = await api("/api/dreams");
+  } catch (err) {
+    box.innerHTML = loadError(err);
+    return;
+  }
   const tag = (name, i, kind) => `<span class="tag">${esc(name)}<button class="tag-x" type="button" data-act="dream-rm" data-kind="${kind}" data-i="${i}" aria-label="Remove ${esc(name)}">${icon("close")}</button></span>`;
   const none = `<span class="muted-note">None yet.</span>`;
   const fromProfile = d.profile_companies.map((name) => `<span class="tag blue">${esc(name)}`
     + `<button class="tag-x" type="button" data-act="dream-exclude" data-name="${esc(name)}" aria-label="Remove ${esc(name)}">${icon("close")}</button></span>`).join("");
   const restore = (name) => `<span class="tag">${esc(name)}<button class="tag-x" type="button" data-act="dream-restore" data-name="${esc(name)}" aria-label="Bring back ${esc(name)}">${icon("undo")}</button></span>`;
-  const add = (kind, placeholder) => `<div class="inline-form"><input type="text" data-dream-add="${kind}" placeholder="${placeholder}" aria-label="Add, separated by commas">
+  const add = (kind, placeholder, label) => `<div class="inline-form"><input type="text" data-dream-add="${kind}" placeholder="${placeholder}" aria-label="${label}">
     <button class="button outline" type="button" data-act="dream-add" data-kind="${kind}">${icon("plus")}Add</button></div>`;
+  const focus = focusKey(box);
   box.innerHTML = `<div class="panel-heading"><div><h2>${icon("star")}Dream list</h2>
       <p class="panel-note">Leads that match get a Dream tag. It never changes their score.</p></div>
       <div class="heading-actions"><a class="button outline" href="#/leads" data-act="dream-view">${d.flagged} on your leads</a>
         <button class="button light" type="button" data-act="dream-recheck" title="Tag every lead again (tags you set by hand stay)">${icon("refresh")}Check all leads again</button></div></div>
     <div class="two-col">
       <div><h3>Dream companies</h3><div class="tags">${d.companies.map((name, i) => tag(name, i, "companies")).join("") || none}</div>
-        ${add("companies", "Add companies, separated by commas")}
+        ${add("companies", "Add companies, separated by commas", "Add dream companies, separated by commas")}
         <h4>From your profile</h4><p class="panel-note">Made from your resume and answers. Removing one keeps it out for good.</p>
         <div class="tags">${fromProfile || none}</div>
         ${d.excluded.length ? `<h4>Removed</h4><div class="tags">${d.excluded.map(restore).join("")}</div>` : ""}
         <label class="switch-row">${toggle(`data-dream-bypass="bypass"`, d.bypass)}<span>Dream companies can be anywhere in the US (outside my search area)</span></label></div>
       <div><h3>Dream jobs</h3><p class="panel-note">Any lead whose title has one of these phrases is a dream job, at any company.</p>
         <div class="tags">${d.jobs.map((name, i) => tag(name, i, "jobs")).join("") || none}</div>
-        ${add("jobs", "Add job titles, separated by commas")}
+        ${add("jobs", "Add job titles, separated by commas", "Add dream job titles, separated by commas")}
         <label class="switch-row">${toggle(`data-dream-bypass="jobs_bypass"`, d.jobs_bypass)}<span>Dream jobs can be anywhere in the US too</span></label></div></div>`;
+  refocus(box, focus);
 }
 
 // Saves part of the Dream list (PUT /api/dreams with only the changed keys) and redraws the card. The settings form on
@@ -77,7 +87,11 @@ onAction("dream-view", () => {  // Leads with only dream leads, on All
 });
 onChange(async (el) => {
   if (!el.dataset.dreamBypass) return false;  // the "anywhere in the US" switches
-  await saveDreams({ [el.dataset.dreamBypass]: el.checked }, el.checked ? "They can be anywhere in the US now." : "They follow your search area now.");
+  await saveDreams({ [el.dataset.dreamBypass]: el.checked }, el.checked ? "They can be anywhere in the US now." : "They follow your search area now.")
+    .catch((err) => {
+      el.checked = !el.checked;  // not saved: the switch shows what is
+      throw err;
+    });
   return true;
 });
 // Enter in an Add box adds.
