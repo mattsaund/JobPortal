@@ -11,6 +11,11 @@
   interview prep.
 - The Tracker has five columns (Ready to apply, Application sent, In interview, Accepted and Rejected). Drag cards between
   them, add a job in seconds, delete one, and find your contacts right there.
+- The Analysis chart is built from job titles in your own resume, documents and searches, and it changes as they do. Add
+  or remove roles any time.
+- The AI card at the bottom of the sidebar shows the model in use, how busy the AI is, and what this session has used.
+- About 85 fixes from a full cleanup, including a security fix for desktop notifications and answers on Home that now set
+  up your search area the moment setup is done.
 
 Download the file for your system and open it. There's nothing else to install.
 
