@@ -1,6 +1,6 @@
-# JobPortal – AI Integration Design
+# JobPortal - AI Integration Design
 
-**Course:** CMSC 495 – Computer Science Capstone  
+**Course:** CMSC 495 - Computer Science Capstone 
 **Project:** JobPortal  
 **Contribution:** AI Integration Design  
 **Status:** Proposed design for team review
