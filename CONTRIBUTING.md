@@ -11,7 +11,7 @@ in a pull request like any other change.
 | `Matthew Saunders` | `Lead Architect` |
 | `Joshua Pitter` | `Lead Architect` |
 | `Earth Patel` | `Interface Designer` |
-| `<NAME>` | `<ROLE>` |
+| `Rebecca Streight` | `Interface Designer` |
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
 | `<NAME>` | `<ROLE>` |
