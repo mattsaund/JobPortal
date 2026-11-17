@@ -30,7 +30,17 @@ jobs:
       - name: Lint
         run: python -m ruff check .
       - name: Tests
-        run: python -m pytest -q
+        # With coverage, which fails the run below the floor in pyproject.toml. The performance benchmarks
+        # (tests/test_performance.py) run here too and fail when something gets slower than its limit.
+        env:
+          JOBPORTAL_BENCHMARK_REPORT: ${{ runner.temp }}/benchmarks.md
+        run: python -m pytest -q --cov --cov-report=term
+      - name: Coverage and benchmark summary
+        # The numbers, on this run's summary page.
+        if: runner.os == 'Linux' && matrix.python == '3.13'
+        shell: bash
+        run: |
+          { echo "### Test coverage"; echo; python -m coverage report --format=markdown; echo; cat "$RUNNER_TEMP/benchmarks.md"; } >> "$GITHUB_STEP_SUMMARY"
       - name: Dashboard scripts
         # The dashboard has no build step, so a syntax error would only show up in the browser. node --check catches it.
         if: runner.os == 'Linux'
