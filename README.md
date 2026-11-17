@@ -125,7 +125,8 @@ _Coming soon._
       FastAPI serves them at http://127.0.0.1:8788/docs) and a 500-word design rationale. The ARCHITECTURE.md we removed is
       in the git history and makes a good start.
 - [ ] Unit 5: everyone commits and reviews pull requests, each of us peer reviews one teammate's module, and each writes a
-      250-word refinement report on technical debt
+      250-word refinement report on technical debt. The alpha is v0.3.0. CI now reports test coverage and performance
+      benchmarks, and the pull request template has a reviewer checklist.
 - [ ] Unit 8: API docs, an installation guide and a user manual, CI/CD screenshots, a test coverage report, performance
       benchmarks, a 10 to 15 minute video, and a 1,300-word paper each, with team names and contributions
 

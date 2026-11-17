@@ -195,6 +195,9 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 - Tests use fictional people only (Jordan Rivera, `example.com`). `tests/fixtures/sample_resume.md` is a fake resume.
 - CI runs the lint, the tests, `jobportal --doctor`, a server smoke test and the start scripts on Linux, macOS and Windows
   for every push and pull request, with Python 3.11, 3.13 and 3.14. A red CI blocks merging.
+- CI also measures test coverage and fails below the floor in `pyproject.toml` (75%; it was 81% when the floor was set).
+  The coverage table and the benchmark timings show on each CI run's summary page. Run `python -m pytest --cov` to see
+  coverage on your own computer.
 
 | Test file | What it covers |
 |---|---|
@@ -207,6 +210,7 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 | `test_levels.py` | experience levels and title filters |
 | `test_search.py` | the rule filters (levels, locations, the Dream list), dedupe, triage and building packages |
 | `test_analysis.py` | the Analysis page: picking the roles on the radar, their market numbers, the assessment, removing and adding roles |
+| `test_performance.py` | benchmarks with time limits: the rule filters, location matching, keywords, and the Leads, Tracker and Analysis data with 2,000 saved leads |
 | `test_writing.py` | the writing rules in every tracked file: no em dashes or middle dots, American spelling |
 | `test_platform.py` | cross-platform pieces: the command line, the app window, the PDF engine lookup |
 
@@ -225,8 +229,11 @@ Add or update a test with every bug fix and every feature.
 
 - Pull `main` before you start. Make a branch for each change, like `feature/interview-tips` or `fix/pdf-timeout`.
 - Keep pull requests small and focused, and fill in the pull request template.
-- CI must be green, and one teammate reviews before merging. Ask for a second review on anything that changes prompts, the
-  database or the setup flow.
+- CI must be green, and one teammate reviews before merging. Review with GitHub's "Review changes" button (approve, or
+  request changes on the exact lines) and go through the reviewer checklist in the pull request template. Ask for a second
+  review on anything that changes prompts, the database or the setup flow.
+- Code an AI assistant wrote gets the same review as anyone's. The author reads the whole diff, runs the app and adds tests
+  before opening the pull request.
 - Commit messages are short and say what changed, like "Add a deadline filter to the Leads page".
 
 ## Rules
