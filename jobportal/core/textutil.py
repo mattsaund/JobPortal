@@ -571,13 +571,27 @@ TECH_WEAK = ["C", "Go", "Ada", "Swift", "React", "REST", "API", "testing", "web"
              "systems engineering", "agile", "RF", "DSP", "remote sensing", "robotics", "ROS", "CAD", "3D printing", "AI", "iOS"]
 
 
-def _vocabulary_patterns(entries) -> list[tuple[str, re.Pattern]]:
-    """(term, compiled regex) for each vocabulary entry: its own regex, or the term as a whole word."""
+def _vocabulary_patterns(entries) -> list[tuple[str, str | None, re.Pattern]]:
+    """(term, needle, compiled regex) for each vocabulary entry: its own regex, or the term as a whole word.
+
+    The needle is the lowercase term for a plain entry and None for an entry with its own regex. A plain term can only
+    match as a whole word where the text contains it at all, so extract_terms() first checks `needle in text`, which is
+    far cheaper than the regex, and only runs the regex when the term is there. That skips most of the hundreds of regex
+    scans a posting would otherwise need, and the results stay exactly the same."""
     out = []
     for entry in entries:
-        term, pattern = entry if isinstance(entry, tuple) else (entry, _whole_word(entry.lower()))
-        out.append((term, re.compile(pattern)))
+        if isinstance(entry, tuple):
+            term, needle, pattern = entry[0], None, entry[1]
+        else:
+            term, needle, pattern = entry, entry.lower(), _whole_word(entry.lower())
+        out.append((term, needle, re.compile(pattern)))
     return out
+
+
+def _matches(patterns, low: str) -> list[str]:
+    """The terms whose pattern is found in `low` (lowercase text), in vocabulary order. A plain term's regex only runs
+    when the term appears in the text (see _vocabulary_patterns)."""
+    return [term for term, needle, pattern in patterns if (needle is None or needle in low) and pattern.search(low)]
 
 
 _VOCAB = [(field, _vocabulary_patterns(entries)) for field, entries in VOCABULARY.items()]
@@ -652,14 +666,14 @@ def extract_terms(text: str, limit: int = 25) -> list[str]:
     found: list[str] = []
     tech_hits = 0
     for field, patterns in _VOCAB:
-        hits = [term for term, pattern in patterns if pattern.search(low)]
+        hits = _matches(patterns, low)
         found += hits
         if field == "credentials":
             found += _credential_phrases(text)
         elif field == "tech":
             tech_hits = len(hits)  # counted here, rather than searching the tech terms a second time
     if tech_hits >= 2:
-        found += [term for term, pattern in _TECH_WEAK if pattern.search(low)]
+        found += _matches(_TECH_WEAK, low)
     found += _asked_phrases(text)
     out: list[str] = []
     for term in found:
