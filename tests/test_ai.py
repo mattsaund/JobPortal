@@ -263,7 +263,7 @@ def test_one_turn_reads_a_limited_number_of_pages(openai_mock, monkeypatch):
     assert sum(r.startswith("Skipped") for r in replies) == 2
 
 
-@pytest.mark.skipif(not hasattr(os, "fchmod"), reason="Windows ignores file modes")
+@pytest.mark.skipif(os.name == "nt", reason="Windows ignores file modes")
 def test_saved_tokens_are_never_readable_by_other_users(monkeypatch):
     modes = []
     real_fdopen = os.fdopen
