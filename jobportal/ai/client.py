@@ -44,6 +44,7 @@ MODELS_CACHE_SECONDS = 600  # how long models() reuses the account's model list
 USAGE_CAP_PAUSE = 900  # seconds that usage_high() stays True after OpenAI reports the usage cap
 MAX_NUDGES = 2  # plain-text answers a model may give (and be reminded to call submit_result) before its task fails
 GRACE_TURNS = 2  # tool turns a model still gets after it is told its tool budget is used up
+MAX_FETCHES_PER_TURN = 6  # fetch_url calls answered in one turn (max_steps counts turns, not calls)
 
 # State shared by every task in this process. Tests reset web_search_ok, _limit_hit_at and _models between tests.
 _ids = count(1)  # ids for the dashboard's list of working agents
@@ -420,6 +421,7 @@ class _Conversation:
 
             # Step 4: answer each tool call. A complete submit_result ends the task. Every other call gets a reply,
             # which goes out with the next request.
+            fetched = 0
             for call in calls:
                 name, args = call.get("name"), _json_object(call.get("arguments") or "{}")
                 if args is None:
@@ -429,7 +431,12 @@ class _Conversation:
                     if not missing:
                         return args
                     reply = f"Missing required fields: {', '.join(missing)}. Call submit_result again with every required field."
+                elif name == "fetch_url" and self.web and fetched >= MAX_FETCHES_PER_TURN:
+                    # Without this, one turn could ask for any number of pages (each up to 25 seconds and 5 MB), and every
+                    # page's text would be resent with each later request.
+                    reply = f"Skipped: at most {MAX_FETCHES_PER_TURN} pages are read per turn. Ask again for the ones you still need."
                 elif name == "fetch_url" and self.web:
+                    fetched += 1
                     reply = await self._fetch(str(args.get("url") or ""))
                 else:
                     reply = f"There is no tool called {name}."

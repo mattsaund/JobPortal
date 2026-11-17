@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import json
+import os
 import time
 from urllib.parse import parse_qs, urlparse
 
@@ -244,6 +245,39 @@ def test_web_task_fetches_pages_and_falls_back_without_search(openai_mock, monke
     assert replay[1] == {"type": "function_call", "call_id": "c1", "name": "fetch_url", "arguments": json.dumps({"url": "https://example.com/job"}),
                          "namespace": "jobportal"}  # replayed without its server id
     assert replay[2]["type"] == "function_call_output" and "Job posting text" in replay[2]["output"]
+
+
+def test_one_turn_reads_a_limited_number_of_pages(openai_mock, monkeypatch):
+    fetched = []
+
+    async def fake_fetch(url):
+        fetched.append(url)
+        return f"HTTP 200 {url}\n\nJob posting text"
+    monkeypatch.setattr(ai, "fetch_public", fake_fetch)
+    ai.web_search_ok = False
+    many = [call("fetch_url", {"url": f"https://example.com/job{i}"}, f"c{i}") for i in range(ai.MAX_FETCHES_PER_TURN + 2)]
+    openai_mock["replies"] = [[*many, done(30)], [call("submit_result", {"score": 9}, "cz"), done(10)]]
+    out = asyncio.run(ai.run("find jobs", system="sys", schema=SCHEMA, stage="hunt", purpose="hunt", web=True))
+    assert out["score"] == 9 and len(fetched) == ai.MAX_FETCHES_PER_TURN and out["_tools"]["pages"] == ai.MAX_FETCHES_PER_TURN
+    replies = [i["output"] for i in openai_mock["bodies"][1]["input"] if i["type"] == "function_call_output"]
+    assert sum(r.startswith("Skipped") for r in replies) == 2
+
+
+@pytest.mark.skipif(not hasattr(os, "fchmod"), reason="Windows ignores file modes")
+def test_saved_tokens_are_never_readable_by_other_users(monkeypatch):
+    modes = []
+    real_fdopen = os.fdopen
+
+    def watch(fd, *a, **kw):
+        modes.append(os.fstat(fd).st_mode & 0o777)  # the mode before anything is written
+        return real_fdopen(fd, *a, **kw)
+    monkeypatch.setattr(os, "fdopen", watch)
+    old_umask = os.umask(0)  # the loosest umask, so only the code itself can make the file private
+    try:
+        signin._save({"access_token": "secret"})
+    finally:
+        os.umask(old_umask)
+    assert modes == [0o600] and signin.STORE.stat().st_mode & 0o777 == 0o600
 
 
 def test_a_search_refusal_without_search_is_an_error_not_a_retry(openai_mock):

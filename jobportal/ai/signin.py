@@ -84,13 +84,17 @@ def _load() -> dict:
 
 def _save(data: dict) -> None:
     """Write the sign-in data to disk. It goes to a temporary file that then replaces the real one, so a crash halfway
-    through can't leave a broken file. The temporary file is made owner-only first (on macOS and Linux, since Windows
-    ignores it), so the real file never exists with looser permissions."""
+    through can't leave a broken file. The temporary file is created owner-only (on macOS and Linux, since Windows
+    ignores the mode) before any token is written to it, so the tokens never sit in a file other users can read."""
     DATA.mkdir(parents=True, exist_ok=True)
     tmp = STORE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+    # os.open sets the mode when it creates the file. write_text() would create it with the default mode first, and the
+    # tokens would be readable by other users until a chmod after the write.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(json.dumps(data, indent=1))
     try:
-        os.chmod(tmp, 0o600)
+        os.chmod(tmp, 0o600)  # a .tmp left behind by a crash keeps its old mode, since os.open only sets it on new files
     except OSError:
         pass
     os.replace(tmp, STORE)
