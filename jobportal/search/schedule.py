@@ -20,7 +20,9 @@ Key ideas:
   background is turned off and no window has been open for IDLE_QUIT_SECONDS.
 
 State in the kv table: "schedule.enabled_at" (when it was turned on), "schedule.last" (the last scheduled time handled:
-its slot, the run it started or why it was skipped) and "schedule.alerted_run" (the run its alert was sent for)."""
+its slot, the run it started or why it was skipped), "schedule.alerted_run" (the run its alert was sent for) and
+"schedule.login_item" (this data folder added the login item, so it may remove it: another copy of JobPortal with a data
+folder of its own, such as a test, never removes the login item of the one the user runs)."""
 import asyncio
 import json
 import os
@@ -214,8 +216,19 @@ def login_command() -> list[str]:
 
 def sync_login_item(cfg: dict | None = None) -> bool:
     """Make the login item match the settings: there while the schedule runs in the background, gone otherwise. Also
-    refreshes it, so it follows the app when the app moved or was updated. Returns whether that worked."""
-    return osutil.set_login_item(login_command() if keep_running_without_window(cfg) else None)
+    refreshes it, so it follows the app when the app moved or was updated. Only the data folder that added the login item
+    removes it. Returns whether that worked."""
+    if keep_running_without_window(cfg):
+        added = osutil.set_login_item(login_command())
+        if added:
+            db.kv_set("schedule.login_item", True)
+        return added
+    if not db.kv_get("schedule.login_item"):
+        return True  # this data folder never added one, so the login item (if any) belongs to another copy
+    removed = osutil.set_login_item(None)
+    if removed:
+        db.kv_set("schedule.login_item", False)
+    return removed
 
 
 def settings_saved(before: dict, after: dict) -> None:

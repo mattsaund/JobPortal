@@ -1,6 +1,7 @@
 /* home.js: the Home page (#/home), where JobPortal starts.
-   - Before you sign in with ChatGPT: a welcome that says what JobPortal does, the plan it needs, a big "Continue with
-     ChatGPT" button and the three steps. The "ai" event swaps it for the dashboard as soon as you're signed in.
+   - Before your AI is connected: a welcome that says what JobPortal does, a big "Continue with ChatGPT" button, the other
+     ways in for people without a ChatGPT plan (Sign in with OpenRouter, or an API key), the three steps, and answers to
+     what people ask first. The "ai" event swaps it for the dashboard as soon as the AI is ready.
    - After: the dashboard. The stats (leads ready, applications sent, interviews); "Questions for you", a feed that shows
      one thing at a time (your resume, what JobPortal read from it, the standard questions still empty, the profile
      build, then the questions asked along the way); Next moves (follow-ups and openings worth a look, when there are any);
@@ -58,26 +59,42 @@ async function renderHome() {
   await Promise.all([loadTopLeads(), reloadOnboarding()]);
 }
 
-// The welcome before you sign in with ChatGPT.
+// The welcome before your AI is connected.
 function welcomeHtml() {
   const step = (n, title, text) => `<li class="step-card"><span class="step-num">${n}</span><h3>${title}</h3><p>${text}</p></li>`;
+  const faq = (question, answer) => `<details class="disclosure"><summary>${question}</summary><p>${answer}</p></details>`;
   return `<div class="welcome">
     <div class="page-heading"><div><p class="eyebrow">WELCOME TO JOBPORTAL</p><h1>Find the jobs that fit you.</h1>
       <p>JobPortal looks for jobs wherever they're posted, ranks each one against your experience, and writes a tailored resume
         and cover letter for the best ones. It works for any field and any level.</p></div></div>
     <section class="welcome-hero">
       <div><span class="eyebrow">START HERE</span><h2>Sign in with ChatGPT</h2>
-        <p>JobPortal's AI runs on your own ChatGPT account, so there's nothing else to buy or set up. You need a ChatGPT Go, Plus
-          or Pro plan.</p></div>
+        <p>The easiest way in. JobPortal's AI runs on your own ChatGPT account, so there's nothing else to buy or set up. You
+          need a ChatGPT Go, Plus or Pro plan.</p></div>
       <button class="button primary big" type="button" data-act="ai-signin">Continue with ChatGPT ${icon("arrow")}</button>
       <p class="privacy-note">ChatGPT shares only your name and email with JobPortal. Your files stay on this computer, and each AI
         task sends only what it needs.</p>
     </section>
+    <section class="panel welcome-other"><h2>No ChatGPT plan?</h2>
+      <p class="panel-note">JobPortal works with other AIs too. You need an account with one of them.</p>
+      <div class="welcome-options">
+        <div class="welcome-option"><b>OpenRouter</b><p>One account for hundreds of AI models, including free ones with a daily limit.</p>
+          <button class="button outline" type="button" data-act="openrouter-signin">Sign in with OpenRouter</button></div>
+        <div class="welcome-option"><b>An API key</b><p>From Google Gemini (it has a free tier), Claude, OpenAI, Mistral, Groq, DeepSeek or Grok.</p>
+          <a class="button outline" href="#/settings/ai">Add a key</a></div>
+      </div></section>
     <ol class="steps">
-      ${step(1, "Sign in with ChatGPT", "One click. Usage counts against your plan, and you can set a limit in ChatGPT's settings.")}
+      ${step(1, "Connect your AI", "One click with ChatGPT or OpenRouter, or paste a key. What it uses is paid by your own account, and you can set a limit there.")}
       ${step(2, "Drop your resume and documents", "Your resume, plus any certificates, licenses, awards or transcripts you have.")}
       ${step(3, "Answer a few questions", "What you want and where. Most answers are filled in from your resume.")}
-    </ol></div>`;
+    </ol>
+    <section class="panel welcome-faq"><h2>Questions people ask</h2>
+      ${faq("What does it cost?", "JobPortal itself is free. Its AI runs on your own account: your ChatGPT plan, your OpenRouter account or your API key. You can set a spending limit there.")}
+      ${faq("Where does my information go?", "Your resume, profile and leads stay in JobPortal's folder on this computer. Each AI task sends the AI only what it needs, and job sites see visits like any browser's.")}
+      ${faq("No resume yet?", "That's fine. After you connect your AI, answer a few questions and JobPortal writes your first resume from them.")}
+      ${faq("Why does Windows or macOS warn me when I open it?", "The app isn't code-signed yet. On Windows, click More info, then Run anyway. On a Mac, open System Settings, Privacy & Security, and click Open Anyway.")}
+      ${faq("Can it search while I'm away?", "Yes. Turn on Search on a schedule in Settings, Search, and it keeps searching in the background, even after a restart.")}
+    </section></div>`;
 }
 
 // ---------------------------------------------------------------- the data behind it
@@ -285,9 +302,9 @@ function buildCard() {
       "<p>JobPortal is reading everything you gave it and writing your profile: your experience, your skills and what to search for. Usually 1 to 4 minutes. You can keep going meanwhile.</p>") };
   }
   if (st.error) {
-    const signIn = aiReady() ? "" : `<button class="button outline" type="button" data-act="ai-signin">Sign in with ChatGPT</button>`;
+    const signIn = aiReady() ? "" : `<button class="button outline" type="button" data-act="ai-connect">Connect your AI</button>`;
     return { key: "build", html: card("error", icon("warning"), "THE PROFILE BUILD STOPPED", "Something went wrong",
-      `<p>${esc(st.error)}</p><p>Check that you're signed in with ChatGPT on a Go, Plus or Pro plan, then try again.</p>`,
+      `<p>${esc(st.error)}</p><p>Check that your AI is connected (Settings, AI), then try again.</p>`,
       `<button class="button primary" type="button" data-act="profile-build">${icon("refresh")} Try again</button>${signIn}`) };
   }
   if (S.buildDone) {
@@ -404,7 +421,7 @@ function renderProfilePanel() {
   const name = yourName();
   const role = (a.target_roles || [])[0];
   const place = [a.city, a.state].filter(Boolean).join(", ");
-  const checks = [["Signed in with ChatGPT", aiReady()], ["Resume added", !!ob.resume], ["Other documents added", (S.documents || []).length > 0],
+  const checks = [["AI connected", aiReady()], ["Resume added", !!ob.resume], ["Other documents added", (S.documents || []).length > 0],
     ["Required questions answered", !!ob.resume && !(ob.missing || []).length], ["Profile built", !!st.built]];
   const done = checks.filter(([, ok]) => ok).length, percent = Math.round((done / checks.length) * 100);
   const tag = done === checks.length ? "COMPLETE" : st.busy ? "BUILDING" : "KEEP GOING";

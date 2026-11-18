@@ -3,13 +3,15 @@
    - Search: where to look, experience levels, what to search for (the search plan), the Dream list (dreams.js),
      filters, industries, how much each search does, and searching on a schedule.
    - Resumes (resumes.js): your saved resumes, the recruiter review and the resume playbook.
-   - AI: your ChatGPT account, the model and effort for each kind of AI task, and the prompts.
+   - AI: the AI JobPortal runs on (ChatGPT, OpenRouter or an API key) and how it's connected, the model and effort for
+     each kind of AI task, and the prompts.
    - Appearance: light or dark, and desktop alerts (with a test alert).
    - History (runs.js): every search and its log.
    - Data: your data folder, putting settings back to their defaults, and Quit (in a browser tab, or while the schedule
      keeps JobPortal running in the background).
    APIs: GET /api/settings and PUT /api/settings (through S.cfg and saveCfg, see components/settings-form.js),
-   GET /api/ai/status, GET /api/ai/models, GET /api/prompts/defaults, GET /api/profile, PUT /api/profile/search_plan,
+   GET /api/ai/status, GET /api/ai/providers, POST /api/ai/provider, PUT and DELETE /api/ai/key, GET /api/ai/models,
+   GET /api/prompts/defaults, GET /api/profile, PUT /api/profile/search_plan,
    PATCH /api/onboarding/answers (the experience levels), POST /api/settings/reset, POST /api/open-data-folder,
    POST /api/quit, POST /api/leads/retag-industries, GET /api/schedule and POST /api/alerts/test. */
 "use strict";
@@ -175,20 +177,21 @@ const AI_STAGES = {
   analysis: ["Analysis", "The fit and interest scores on the Analysis page."],
 };
 
-// A model menu: the models your plan offers, plus the saved choice if your plan no longer lists it. "" uses the default.
+// A model menu: the models your AI offers, plus the saved choice if it no longer lists it. "" uses the default.
 function modelOptions(models, selected, emptyLabel) {
   const choices = [...new Set([...models, ...(selected ? [selected] : [])])];
   return selectOptions([["", emptyLabel], ...choices], selected);
 }
 
-// Your ChatGPT account, the models and efforts, how many AI tasks run at once, and the prompts.
+// The AI JobPortal runs on and how it's connected, the models and efforts, how many AI tasks run at once, and the prompts.
 async function renderAISettings(box) {
   await loadCfg();
-  let webSearch;  // true, false, or unknown until the first web task tries it
+  let webSearch, listing = [];  // webSearch: true, false, or unknown until the first web task tries it
   try {
-    const status = await api("/api/ai/status");
+    const [status, list] = await Promise.all([api("/api/ai/status"), api("/api/ai/providers")]);
     S.state.ai = status;
     webSearch = status.web_search;
+    listing = list.providers;
   } catch (_) {}
   const [models, defaults] = await Promise.all([
     aiReady() ? api("/api/ai/models").then((r) => r.models).catch(() => []) : [],
@@ -196,12 +199,9 @@ async function renderAISettings(box) {
   ]);
   if (S.route[1] !== "ai") return;
   const c = S.cfg, ai = S.state.ai || {};
-  const account = aiReady()
-    ? `<div class="account-row"><span class="avatar">${esc(initials(ai.name)) || icon("user")}</span><div><b>${esc(ai.name || "Signed in")}</b><small>${esc(ai.email || "")}</small></div>
-        <span class="spacer"></span><button class="button outline" type="button" data-act="ai-signout">Sign out</button></div>`
-    : `<div class="account-row"><div><b>Not signed in</b><small>JobPortal's AI needs your ChatGPT account.</small></div><span class="spacer"></span>
-        <button class="button primary" type="button" data-act="ai-signin">Continue with ChatGPT</button></div>`;
-  const webSearchText = webSearch === false ? "isn't available on your account, so the AI reads pages directly"
+  const current = listing.find((p) => p.id === ai.provider) || { id: "chatgpt", name: "ChatGPT", auth: "chatgpt", search: true, note: "" };
+  const webSearchText = !current.search ? "isn't something this AI offers, so it reads pages directly"
+    : webSearch === false ? "isn't available on your account, so the AI reads pages directly"
     : webSearch ? "is available" : "is checked the first time the AI needs it";
   // The stage and prompt keys come from the settings and the server, so they're escaped in the attributes too.
   const stageRow = ([key, stage]) => {
@@ -213,10 +213,10 @@ async function renderAISettings(box) {
   const prompt = (key) => `<label class="field"><span class="field-label">${esc(humanize(key))}</span>
     <textarea rows="5" data-path="prompts.${esc(key)}" placeholder="${esc(defaults[key])}">${esc(c.prompts?.[key] || "")}</textarea></label>`;
   box.innerHTML = `<div class="stack" data-cfg>
-    ${settingsPanel("Your ChatGPT account", `JobPortal's AI runs on your ChatGPT plan (Go, Plus or Pro), and what it uses counts against your plan. You can set a
-      limit for JobPortal in ChatGPT's settings. Web search ${webSearchText}.`, account)}
-    ${settingsPanel("Models", "Which model does each kind of task, and how hard it thinks. A higher effort is slower and uses more of your plan.",
-      `<label class="field narrow"><span class="field-label">Default model</span><select data-path="ai.model">${modelOptions(models, c.ai.model, "The first model your plan lists")}</select></label>
+    ${settingsPanel("Your AI", `Pick the AI JobPortal runs on. What it uses is paid by your own account with it. Web search ${webSearchText}.`,
+      `${providerChoices(listing, ai)}<div class="provider-connect">${providerConnect(current, ai)}</div>`)}
+    ${settingsPanel("Models", "Which model does each kind of task, and how hard it thinks. A higher effort is slower and uses more of your plan or credit.",
+      `<label class="field narrow"><span class="field-label">Default model</span><select data-path="ai.model">${modelOptions(models, c.ai.model, "The best one your AI lists")}</select></label>
       <div class="table-wrap"><table class="table"><thead><tr><th>Task</th><th>Model</th><th>Effort</th></tr></thead>
         <tbody>${Object.entries(c.ai.stages).map(stageRow).join("")}</tbody></table></div>
       <div class="form-grid three">${cfgInput("ai.max_parallel", "AI tasks at the same time", "number", 'min="1"')}</div>`)}
@@ -224,6 +224,42 @@ async function renderAISettings(box) {
       <p class="panel-note">Replace the instructions the AI follows. Leave one empty to use the built-in one, shown in gray.</p>
       ${Object.keys(defaults).map(prompt).join("")}</details></section>
     ${saveBar()}</div>`;
+}
+
+// The AIs to pick from (GET /api/ai/providers): one card each, with tags for free options and web search, and the key
+// saved for it. Picking one switches right away (POST /api/ai/provider). They aren't part of the settings form.
+function providerChoices(listing, ai) {
+  const tags = (p) => (p.free ? `<span class="small-tag">FREE OPTION</span>` : "") + (p.search ? `<span class="small-tag plain">WEB SEARCH</span>` : "");
+  return `<div class="provider-list" role="radiogroup" aria-label="The AI JobPortal runs on">${listing.map((p) => {
+    const on = p.id === ai.provider, key = ai.keys?.[p.id];
+    return `<label class="provider-choice${on ? " active" : ""}"><input type="radio" name="ai-provider" data-provider="${esc(p.id)}"${on ? " checked" : ""}>
+      <span><b>${esc(p.name)}</b><span class="tags">${tags(p)}</span>${key ? `<small>Key ${esc(key)}</small>` : ""}</span></label>`;
+  }).join("")}</div>`;
+}
+
+// How the AI in use is connected: the ChatGPT account and its sign-in, or for any other AI its sign-in (OpenRouter), its key
+// (saved after the AI accepts it), where to get one, and for another service its address.
+function providerConnect(p, ai) {
+  if (p.auth === "chatgpt") {
+    return aiReady()
+      ? `<div class="account-row"><span class="avatar">${esc(initials(ai.name)) || icon("user")}</span><div><b>${esc(ai.name || "Signed in")}</b><small>${esc(ai.email || "")}</small></div>
+          <span class="spacer"></span><button class="button outline" type="button" data-act="ai-signout">Sign out</button></div>`
+      : `<div class="account-row"><div><b>Not signed in</b><small>${esc(p.note)} You can set a limit for JobPortal in ChatGPT's settings.</small></div>
+          <span class="spacer"></span><button class="button primary" type="button" data-act="ai-signin">Continue with ChatGPT</button></div>`;
+  }
+  const saved = ai.keys?.[p.id];
+  const signIn = p.signin ? `<div class="block-actions"><button class="button primary" type="button" data-act="openrouter-signin">Sign in with ${esc(p.name)}</button>
+      <span class="muted-note">or paste a key below</span></div>` : "";
+  const address = p.custom ? `<label class="field"><span class="field-label">The service's address (its chat completions API, such as https://example.com/v1)</span>
+      <span class="inline-field"><input type="url" id="ai-custom-url" value="${esc(ai.custom_url || "")}" placeholder="https://example.com/v1">
+      <button class="button outline" type="button" data-act="ai-save-url">Save the address</button></span></label>` : "";
+  const keyLabel = saved ? `Your key is saved (${esc(saved)}). Paste a new one to replace it.` : `Your ${esc(p.name)} key`;
+  const keyField = `<label class="field"><span class="field-label">${keyLabel}</span><span class="inline-field">
+      <input type="password" id="ai-key" autocomplete="off" spellcheck="false" placeholder="${esc(p.key_prefix ? `${p.key_prefix}...` : "Paste your key")}">
+      <button class="button ${p.signin ? "outline" : "primary"}" type="button" data-act="ai-save-key" data-provider="${esc(p.id)}">Save key</button></span></label>`;
+  const links = (p.key_url ? `<a class="text-button" href="${esc(p.key_url)}" target="_blank" rel="noopener">Get a ${esc(p.name)} key ${icon("external")}</a>` : "")
+    + (saved ? `<button class="text-button" type="button" data-act="ai-forget-key" data-provider="${esc(p.id)}" data-name="${esc(p.name)}">Remove the key</button>` : "");
+  return `<p class="panel-note">${esc(p.note)}</p>${signIn}${address}${keyField}${links ? `<div class="block-actions">${links}</div>` : ""}`;
 }
 
 // ---------------------------------------------------------------- Appearance
@@ -274,7 +310,7 @@ function renderDataSettings(box) {
     ${settingsPanel("Your data", "Everything JobPortal keeps (your profile, leads, documents and tailored files) is in one folder on this computer. Delete the folder to start over from nothing.",
       `<div class="path-row"><code>${esc(m.data_dir || "")}</code><button class="button outline" type="button" data-act="open-data">${icon("folder")}Open the folder</button></div>
       <dl class="facts"><dt>Version</dt><dd>JobPortal ${esc(m.version || "")}</dd><dt>System</dt><dd>${esc(humanize(m.os || ""))}</dd>
-        <dt>PDF downloads</dt><dd>${m.pdf_ready ? "Ready" : "Need Chrome, Edge or Chromium installed"}</dd><dt>ChatGPT</dt><dd>${aiReady() ? "Signed in" : "Not signed in"}</dd></dl>`)}
+        <dt>PDF downloads</dt><dd>${m.pdf_ready ? "Ready" : "Need Chrome, Edge or Chromium installed"}</dd><dt>AI</dt><dd>${esc(aiConnected())}</dd></dl>`)}
     ${settingsPanel("Back to the defaults", "Put one part of your settings back the way it came. Your profile, leads and documents stay as they are.",
       `<ul class="reset-list">${RESETTABLE.map(([path, label, note]) => `<li><div><b>${label}</b>${note ? `<small>${note}</small>` : ""}</div>
         <button class="button outline small" type="button" data-act="reset-section" data-path="${path}" data-label="${esc(label)}">${icon("undo")}Reset</button></li>`).join("")}</ul>`)}
@@ -309,6 +345,35 @@ onAction("reset-section", async (el) => {
   S.industries = fresh.industries;
   toast("Back to the defaults", el.dataset.label);
 });
+onAction("ai-save-key", async (el) => {
+  const input = $("#ai-key"), key = input.value.trim();
+  if (!key) {
+    toast("Paste your key first", "Copy it from your account's key page.", "error");
+    return;
+  }
+  const label = el.innerHTML;
+  el.innerHTML = `${spinner()}Checking`;
+  try {
+    const r = await api("/api/ai/key", { method: "PUT", body: { provider: el.dataset.provider, key } });
+    input.value = "";
+    S.state.ai = r;
+    toast("Key saved", `${r.provider_name} works, with ${plural(r.models.length, "model")} to pick from.`);
+    renderSettings("ai");
+  } finally {
+    el.innerHTML = label;
+  }
+});
+onAction("ai-forget-key", async (el) => {
+  if (!confirm(`Remove your ${el.dataset.name} key from JobPortal? It keeps working at ${el.dataset.name} until you delete it there.`)) return;
+  S.state.ai = await api(`/api/ai/key?provider=${encodeURIComponent(el.dataset.provider)}`, { method: "DELETE" });
+  toast("Key removed", `Delete it at ${el.dataset.name} too if you won't use it again.`);
+  renderSettings("ai");
+});
+onAction("ai-save-url", async () => {
+  S.state.ai = await api("/api/ai/provider", { method: "POST", body: { provider: "custom", custom_url: $("#ai-custom-url").value } });
+  toast("Address saved", aiReady() ? "Your AI service is ready." : "Add its key below too.");
+  renderSettings("ai");
+});
 onAction("add-time", () => {
   const times = S.cfg.schedule.times || (S.cfg.schedule.times = []);
   const last = times.length ? +times[times.length - 1].split(":")[0] : 6;
@@ -333,6 +398,17 @@ onAction("quit", async () => {
   document.body.innerHTML = `<div class="empty-state quit"><h3>JobPortal has quit</h3><p>You can close this tab. Open JobPortal again to pick up where you left off.</p></div>`;
 });
 onChange(async (el) => {
+  if (el.name === "ai-provider") {  // a card in Your AI: switch to that AI now
+    if (S.cfgDirty && !confirm("Switching the AI drops the changes you haven't saved on this page.")) {
+      $(`[data-provider="${S.state.ai?.provider}"]`)?.click();
+      return true;
+    }
+    S.state.ai = await api("/api/ai/provider", { method: "POST", body: { provider: el.dataset.provider } });
+    toast(`Using ${aiName()}`, aiReady() ? "It's ready." : "Connect it below.");
+    S.cfgDirty = false;
+    renderSettings("ai");
+    return true;
+  }
   if (el.id === "notify-switch") {
     await saveAlerts(el.checked).catch((err) => {
       el.checked = !el.checked;

@@ -164,6 +164,18 @@ def test_turning_the_schedule_on_notes_the_time_and_adds_the_login_item(login_it
     assert login_items[-1] is None
 
 
+def test_only_the_data_folder_that_added_the_login_item_removes_it(login_items):
+    schedule.sync_login_item()  # the schedule is off, and this data folder never added a login item
+    assert login_items == []  # so another copy's login item is left alone
+    turn_on()
+    schedule.sync_login_item()
+    cfg = settings.get()
+    cfg["schedule"]["enabled"] = False
+    settings.save(cfg)
+    schedule.sync_login_item()
+    assert login_items[-1] is None and db.kv_get("schedule.login_item") is False
+
+
 def test_the_login_item_on_this_system(tmp_path, monkeypatch):
     """The real login item for this system: added, found and removed, under a name and home folder of the test's own, so
     the user's own login items are never touched."""
