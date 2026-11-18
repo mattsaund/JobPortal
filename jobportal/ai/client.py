@@ -38,6 +38,7 @@ from itertools import count
 from urllib.parse import urljoin, urlparse
 
 import httpx
+import jsonschema
 
 from jobportal.ai import providers, signin
 from jobportal.core import bus, db, settings as settings_mod
@@ -253,6 +254,21 @@ def _json_object(text: str) -> dict | None:
     except ValueError:
         return None
     return value if isinstance(value, dict) else None
+
+
+def _result_error(result: dict, schema: dict) -> str | None:
+    """A short correction for a result that doesn't match its complete JSON schema, or None when it does."""
+    missing = [key for key in schema.get("required", []) if key not in result]
+    if missing:
+        return f"Missing required fields: {', '.join(missing)}."
+    try:
+        jsonschema.validate(instance=result, schema=schema)
+    except jsonschema.exceptions.ValidationError as error:
+        location = ".".join(str(part) for part in error.absolute_path) or "result"
+        return f"Result does not match the schema at {location}: {error.message[:200]}"
+    except jsonschema.exceptions.SchemaError as error:
+        raise AIError(f"Invalid result schema: {error.message[:200]}") from None
+    return None
 
 
 def _retry_wait(response: httpx.Response, attempt: int) -> float | None:
@@ -865,7 +881,6 @@ class _Conversation:
         when it keeps calling tools long past its budget."""
         global web_search_ok
         self.use_search = self.web and bool(self.provider.get("search")) and web_search_ok is not False
-        required = self.schema.get("required", [])
         self.wire.start(prompt)
         steps = nudges = 0
         while True:
@@ -889,12 +904,14 @@ class _Conversation:
             # result as JSON. Otherwise remind the model to call submit_result, at most MAX_NUDGES times.
             if not turn["calls"]:
                 answer = _json_from_text(turn["text"])
-                if answer is not None and all(k in answer for k in required):
+                error = _result_error(answer, self.schema) if answer is not None else None
+                if answer is not None and error is None:
                     return answer
                 nudges += 1
                 if nudges > MAX_NUDGES:
                     raise AIError("the model didn't return a structured result")
-                self.wire.add_user("Call submit_result now with your final answer.")
+                correction = error or "The answer wasn't a valid JSON object."
+                self.wire.add_user(f"{correction} Return a corrected result by calling submit_result.")
                 continue
 
             # Step 3: answer each tool call. A complete submit_result ends the task. Every other call gets a reply, which
@@ -906,10 +923,10 @@ class _Conversation:
                 if args is None:
                     reply = "Those arguments weren't a valid JSON object. Try again."
                 elif name == "submit_result":
-                    missing = [k for k in required if k not in args]
-                    if not missing:
+                    error = _result_error(args, self.schema)
+                    if error is None:
                         return args
-                    reply = f"Missing required fields: {', '.join(missing)}. Call submit_result again with every required field."
+                    reply = f"{error} Call submit_result again with a corrected result."
                 elif name == "fetch_url" and self.web and fetched >= MAX_FETCHES_PER_TURN:
                     # Without this, one turn could ask for any number of pages (each up to 25 seconds and 5 MB), and every
                     # page's text would be resent with each later request.
