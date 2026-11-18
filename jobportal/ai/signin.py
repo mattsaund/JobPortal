@@ -3,7 +3,7 @@
 The flow is OAuth 2.0 with OpenID Connect. It runs between the user's browser, OpenAI's sign-in server (auth.openai.com)
 and JobPortal's own server on 127.0.0.1:
 1. start() builds the address of OpenAI's sign-in page, and the dashboard opens it in the user's browser
-   (web/routes/chatgpt.py, POST /api/ai/signin).
+   (web/routes/ai.py, POST /api/ai/signin).
 2. The user signs in and approves JobPortal. On the first sign-in, OpenAI also registers this installation as a client
    of its own (dynamic client registration) and sends back the new client id.
 3. OpenAI redirects the browser to http://127.0.0.1:<port>/auth/callback. The route there calls finish(), which checks
@@ -20,7 +20,8 @@ The security checks, each explained where it happens:
 - Storage: the tokens live only in chatgpt_auth.json in the data folder, readable by the owner alone on macOS and Linux.
   They never reach the dashboard. status() says who is signed in, never what the tokens are.
 
-Who calls it: web/routes/chatgpt.py (start, finish, status, sign_out), ai/client.py (access_token, forget_tokens),
+Who calls it: web/routes/ai.py (start, finish, status, sign_out), ai/providers.py (access_token, status), ai/client.py
+(forget_tokens),
 web/server.py (publish at startup) and app/doctor.py (status)."""
 import asyncio
 import base64
@@ -34,7 +35,6 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
-from jobportal.core import bus
 from jobportal.core.config import DATA
 
 ISSUER = "https://auth.openai.com"  # OpenAI's sign-in server. ID tokens must name it as their issuer.
@@ -356,6 +356,7 @@ def status() -> dict:
 
 
 def publish() -> None:
-    """Send the current sign-in status to every open dashboard (live event "ai") and keep it in bus.state."""
-    bus.state["ai"] = status()
-    bus.publish("ai", bus.state["ai"])
+    """Send the AI's status to every open dashboard (live event "ai") and keep it in bus.state. The status covers the
+    provider in use as well as this sign-in, so ai/providers.py builds it."""
+    from jobportal.ai import providers  # inside the function: providers imports this module
+    providers.publish()

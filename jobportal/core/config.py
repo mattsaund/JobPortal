@@ -72,7 +72,9 @@ _TITLE_INCLUDE, _TITLE_EXCLUDE = title_filters(DEFAULT_LEVELS)
 DEFAULT_SETTINGS = {
     # Settings, AI. Every AI request names a stage, and the stage picks the model and reasoning effort.
     "ai": {
-        "model": "",  # the default model; "" means the first model the signed-in ChatGPT account lists
+        "provider": "chatgpt",  # the AI in use: an id from ai/providers.PROVIDERS (ChatGPT, OpenRouter, an API key...)
+        "custom_url": "",  # the address of "Another service" (an OpenAI-compatible chat completions API)
+        "model": "",  # the default model; "" means the first model the provider lists for the account
         "stages": {  # per stage: "model" ("" uses the default above) and "effort" (one of EFFORTS)
             "prefill": {"model": "", "effort": "low"},  # setup: reads the resume to pre-fill the standard questions
             "triage": {"model": "", "effort": "low"},  # scores every job that passes the rule filters, in batches

@@ -528,7 +528,7 @@ async def parse_with_ai(doc_id: str, changed: bool = False) -> dict:
 
 async def parse_pending() -> int:
     """Read with AI, one at a time, every document that only has its rules reading, when someone is signed in with
-    ChatGPT. web/server.py runs it at startup and web/routes/chatgpt.py after a sign-in, both in the background. The first
+    ChatGPT. web/server.py runs it at startup and web/routes/ai.py after a sign-in or a new key, both in the background. The first
     AI failure ends the round with one toast, so a missing plan or a usage cap isn't hit again and again. Returns how many
     documents were read."""
     if not _signed_in():
