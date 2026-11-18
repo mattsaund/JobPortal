@@ -56,5 +56,5 @@ If an alert doesn't show:
 - **macOS:** open System Settings, Notifications, and check that Script Editor may send notifications (JobPortal's
   alerts come through AppleScript), and that Focus is off.
 
-Write down the system version and what happened, and check off the item in the README's To do list once both computers
+Write down the system version and what happened, and delete the item from the README's To do list once both computers
 work.

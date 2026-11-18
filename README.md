@@ -109,39 +109,14 @@ All made with a fictional user.
 
 ## To do
 
-- [x] Add profile editing and creation. Settings, Profile edits every part of the profile, and anyone without a resume
-      gets one written from a few questions and text boxes on Home (the resume builder). With a resume, nothing it covers
-      is asked again.
-- [x] Job listing saving
-- [x] Get a good color scheme
-- [x] Pick a good font
-- [x] Get a good logo
 - [ ] Change the name (maybe?) - Currently Pending
-- [x] Simplify the UI: fewer buttons and fewer words. Sleek, simple and easy to use.
-- [x] Test Sign in with ChatGPT and a full search with a real ChatGPT plan, end to end.
-- [x] Finish extra documents in the dashboard: drop your resume with other resumes, certificates, licenses, cover letters
-      and awards at once on Home. The best resume becomes the main one (with a button to pick a different one), and each
-      document's details (title, issuer, dates, skills) are read into the profile.
-- [x] A continuous stream of leads: searches on a schedule at the times and days you pick (Settings, Search). Off until
-      you turn it on. With background searching on, it keeps going after the window closes and after a restart.
-- [x] Reach everywhere, in the ways each place allows: X through its official API (with your own developer key), Discord,
-      Slack, Facebook groups, Threads and LinkedIn posts through Paste posts, Indeed, ZipRecruiter and Handshake through
-      the AI hunt's web searches, and new boards (Himalayas, Jobicy, Working Nomads, Recruitee, Personio). Telegram is left
-      out because its terms bar using its content with AI.
-- [x] Make it ready for people outside the team: clearer first-run help on the welcome screen, other AIs for people
-      without a ChatGPT plan (Sign in with OpenRouter, or an API key), and an Intel Mac build
 - [ ] Code signing so Windows and macOS stop warning (maybe). It needs paid certificates; CONTRIBUTING.md, Releases, has
       what it takes.
-- [x] Make it work for anyone, any degree or school level (high school, trades, college, graduate). Tech stays fully
-      supported. The filters, keywords, sources, prompts and the Analysis page adapt to each person's own fields.
-- [x] Make job search type as broad as possible covering all types of jobs.
 - [ ] Try the whole flow on a few classmates' resumes: ranked jobs in their areas, tailored resumes and cover letters,
       recruiter contacts and email templates for each match. The steps are in
       [documentation/USER_TESTING.md](documentation/USER_TESTING.md).
 - [ ] Check desktop notifications on a real Windows PC and a real Mac. v0.3.0 changed how they're sent (a security fix),
       and it was only tested with stand-ins. Settings, Appearance, Send a test alert makes it a one-click check.
-- [x] A small "Next moves" card on Home with the best rules from the old Equity mining page: applications with no reply
-      after 21 days, companies with several openings, and new openings at companies that turned you down before
 
 ### Course deliverables (from the assignment PDFs)
 
