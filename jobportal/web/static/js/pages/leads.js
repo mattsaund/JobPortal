@@ -419,9 +419,9 @@ function addJobDialog() {
 
 // The "Paste posts" dialog: posts copied from a community apps can't read (Discord, Slack, Facebook groups, LinkedIn,
 // Threads, X). POST /api/leads/paste has the AI find each opening in them; the new leads are scored in the background, and
-// the good ones are queued for their packages like any search's.
+// the good ones are queued for their packages like any search's. It opens on top of the Sources dialog (which keeps any
+// edits), and in place of Add a job.
 function pastePostsDialog() {
-  closeDialog();
   openDialog(`<h2>Paste posts</h2>
     <p>Copy job posts you can see in your communities and paste them all here. JobPortal finds each opening, adds it to your
       leads and scores it like any other. Nothing is read from the community itself.</p>
@@ -435,7 +435,11 @@ function pastePostsDialog() {
 }
 
 // ---------------------------------------------------------------- actions
-onAction("paste-posts", () => pastePostsDialog());
+onAction("paste-posts", (el) => {
+  const from = el.closest("dialog");
+  if (from && $("#aj-url", from)) closeDialog(from);  // from Add a job: this one takes its place
+  pastePostsDialog();
+});
 onAction("paste-posts-go", async (el) => {
   const dialog = el.closest("dialog"), text = $("#pp-text", dialog).value.trim();
   if (!text) {
