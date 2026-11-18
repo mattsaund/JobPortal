@@ -167,6 +167,9 @@ main ones.
   unchanged in the next request, as the providers require.
 - The result still comes back through the `submit_result` function. The call is never forced, because several providers
   reject forced tool calls, so a turn that ends without it gets a short reminder.
+- Every result is checked against its task's full JSON Schema (with the `jsonschema` library), whichever provider sent it.
+  A result with a missing field, a wrong type or a value out of range is not used. The model gets a short correction that
+  names the field and tries again.
 - API keys are stored owner-only in the data folder and never reach the dashboard. A new key is checked against the
   provider's model list before it is saved.
 - Errors are handled per provider. A refused key asks the user for a new one. No credit, a spending limit or a rate limit

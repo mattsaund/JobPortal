@@ -184,8 +184,9 @@ JobPortal/
   function, which keeps import loops out.
 - **The AI can be any of several providers** (`ai/providers.py`): ChatGPT through its sign-in, OpenRouter through its
   sign-in or a key, or an API key from OpenAI, Anthropic, Google, Mistral, Groq, DeepSeek, xAI or any OpenAI-compatible
-  service. `ai/client.py` runs one request loop for all of them, with a "wire" for each kind of API. Keys stay in the data
-  folder, owner-only, and the dashboard only sees their last four characters.
+  service. `ai/client.py` runs one request loop for all of them, with a "wire" for each kind of API, and checks every
+  result against its task's JSON Schema before using it. Keys stay in the data folder, owner-only, and the dashboard only
+  sees their last four characters.
 - **Searching on a schedule** (`search/schedule.py`): at the user's times, a full search starts by itself. With background
   searching on, a detached server keeps going after the window closes, and a login item on each system starts it again
   after a restart.
@@ -216,7 +217,7 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 | Test file | What it covers |
 |---|---|
 | `test_api.py` | the HTTP API: setup, documents, downloads, leads, the Tracker, the Dream list, sources, security checks, Quit |
-| `test_ai.py` | Sign in with ChatGPT and the AI request loop, against a mock OpenAI |
+| `test_ai.py` | Sign in with ChatGPT, the AI request loop and its result checks, against a mock OpenAI |
 | `test_providers.py` | the other AI providers: keys, switching, Sign in with OpenRouter, the chat and Claude wires, errors and short waits, model lists |
 | `test_schedule.py` | searching on a schedule: the clock rules, catching up, alerts, the login item on each system, the background server |
 | `test_builder.py` | the resume builder for people without a resume |

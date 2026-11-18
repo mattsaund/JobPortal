@@ -14,6 +14,8 @@
   Threads and LinkedIn posts, paste what you see there and JobPortal finds the jobs in it.
 - **Desktop alerts that work in the background,** with a Send a test alert button in Settings, Appearance.
 - **An app for Intel Macs** next to the Apple Silicon one.
+- Every AI answer is checked against what its task asked for, and the AI fixes one that doesn't fit before JobPortal
+  uses it.
 - Clearer first-run help on the welcome screen, and short waits a provider asks for are waited out instead of pausing
   your search.
 
