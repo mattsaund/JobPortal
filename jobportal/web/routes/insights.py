@@ -1,4 +1,4 @@
-"""The Analysis and Dream list pages.
+"""The Analysis and Dream list pages, and Home's Next moves card.
 
 The Analysis page's role controls (add, remove and bring back a role) each answer with the whole page's data, the same as
 GET /api/analysis, so the page redraws from one request."""
@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from jobportal.candidate import profile
 from jobportal.core import background, db, settings
-from jobportal.insights import analysis
+from jobportal.insights import analysis, moves
 from jobportal.search import pipeline, plan
 
 router = APIRouter()
@@ -17,6 +17,22 @@ def get_analysis():
     """The Analysis page: the radar's roles with their numbers and scores, the market numbers, the latest AI assessment
     and its history (see insights/analysis.get)."""
     return analysis.get()
+
+
+@router.get("/api/moves")
+def get_moves():
+    """Home's Next moves: a few things worth doing next, found by plain rules (see insights/moves.py)."""
+    return {"moves": moves.moves()}
+
+
+@router.post("/api/moves/hide")
+def hide_move(body: dict):
+    """Keep one move off the card for 30 days, {"key": "..."}."""
+    key = str(body.get("key") or "").strip()
+    if not key:
+        raise HTTPException(400, "key required")
+    moves.hide(key)
+    return {"ok": True}
 
 
 @router.post("/api/analysis/run")

@@ -3,10 +3,12 @@
      ChatGPT" button and the three steps. The "ai" event swaps it for the dashboard as soon as you're signed in.
    - After: the dashboard. The stats (leads ready, applications sent, interviews); "Questions for you", a feed that shows
      one thing at a time (your resume, what JobPortal read from it, the standard questions still empty, the profile
-     build, then the questions asked along the way); your top leads; and on the right your profile's progress, your
-     documents (components/documents.js) and where the search looks.
+     build, then the questions asked along the way); Next moves (follow-ups and openings worth a look, when there are any);
+     your top leads; and on the right your profile's progress, your documents (components/documents.js) and where the
+     search looks. The heading says when the next scheduled search starts.
    APIs: GET /api/onboarding, PATCH /api/onboarding/answers (each answer saves on its own), GET /api/leads (the five best
-   ready leads), GET /api/settings (the search area), POST /api/questions/answer and /dismiss, POST /api/profile/build.
+   ready leads), GET /api/moves and POST /api/moves/hide, GET /api/settings (the search area), POST /api/questions/answer
+   and /dismiss, POST /api/profile/build.
    Live events redraw the parts that changed (live.js). A card you're answering stays as it is through them, and an
    answer you've typed counts as an unsaved edit until it's saved, skipped or dismissed. */
 "use strict";
@@ -40,6 +42,7 @@ async function renderHome() {
         <div class="stats" id="home-stats"></div>
         <div class="section-heading"><div><h2>Questions for you</h2><p>One at a time. Every answer makes your matches better.</p></div></div>
         <div class="feed" id="home-feed"></div>
+        <div id="home-moves"></div>
         <div class="section-heading"><div><h2>Top leads</h2><p>Your best matches, ready to apply.</p></div>
           <a class="text-button" href="#/leads" data-act="leads-tab" data-tab="ready">View all leads ${icon("arrow")}</a></div>
         <div class="job-list" id="home-leads"></div>
@@ -352,6 +355,7 @@ function skipQuestion(id) {
 // The five best ready leads, as job cards (leads.js). A click opens one on the Leads page. Live refreshes during a
 // search redraw them only when they changed (setHtml).
 async function loadTopLeads() {
+  loadMoves();  // Next moves come from the leads too, so they reload together
   let d;
   try {
     d = await api("/api/leads?tab=ready&sort=score&limit=5");
@@ -363,6 +367,32 @@ async function loadTopLeads() {
   const empty = S.profileStatus?.built ? "Run a search, and your best matches show up here."
     : "Once your profile is built, run a search and your best matches show up here.";
   setHtml(box, d.leads.map((l) => leadCard(l)).join("") || `<div class="empty-state"><h3>No leads yet</h3><p>${empty}</p></div>`);
+}
+
+// ---------------------------------------------------------------- next moves
+// The Next moves card (GET /api/moves): a few things worth doing next, found by plain rules over your leads (no reply after
+// three weeks, a new opening where you were turned down before, several openings at one company). Hidden when there are
+// none. Each move has a button and Hide (30 days).
+async function loadMoves() {
+  let d;
+  try {
+    d = await api("/api/moves");
+  } catch (_) {
+    return;
+  }
+  const box = $("#home-moves");
+  if (!box) return;
+  setHtml(box, d.moves.length ? `<div class="section-heading"><div><h2>Next moves</h2><p>Worth doing soon, from your applications.</p></div></div>
+    <div class="moves">${d.moves.map(moveRow).join("")}</div>` : "");
+}
+
+function moveRow(m) {
+  const button = m.cta.search
+    ? `<button class="button outline small" type="button" data-act="leads-search" data-q="${esc(m.cta.search)}">${esc(m.cta.label)}</button>`
+    : `<a class="button outline small" href="${esc(m.cta.href)}">${esc(m.cta.label)}</a>`;
+  return `<div class="move"><span class="small-tag">${esc(m.kind.toUpperCase())}</span>
+    <div class="move-text"><b>${esc(m.text)}</b><small>${esc(m.why)}</small></div>${button}
+    <button class="icon-button" type="button" data-act="hide-move" data-key="${esc(m.key)}" aria-label="Hide this for 30 days" title="Hide for 30 days">${icon("close")}</button></div>`;
 }
 
 // Your profile: who you are, what you're after, and the setup checklist with its progress bar.
@@ -487,4 +517,14 @@ document.addEventListener("input", (e) => {
   if (!card) return;
   card.dataset.edited = "1";
   S.dirty = true;
+});
+onAction("leads-search", (el) => {  // a Next moves button: Leads, searched for one company, on every tab
+  $("#search").value = el.dataset.q;
+  S.leadsTab = "all";
+  searchLeads();
+});
+onAction("hide-move", async (el) => {
+  await api("/api/moves/hide", { method: "POST", body: { key: el.dataset.key } });
+  toast("Hidden for 30 days", "It comes back if it still applies then.");
+  loadMoves();
 });

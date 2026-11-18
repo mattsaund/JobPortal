@@ -309,6 +309,11 @@ input[type=checkbox], input[type=radio] { accent-color: var(--green-dark); }
 .time-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .time-row { display: inline-flex; align-items: center; gap: 2px; }
 .time-row input[type=time] { width: 8.5em; }
+/* Home's Next moves: one row per move with its kind, what to do and why, its button and Hide. */
+.moves { display: grid; gap: 8px; margin-bottom: 26px; }
+.move { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.move-text { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.move-text small { color: var(--muted); }
 .choice { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
   color: var(--text); font-size: 12px; cursor: pointer; user-select: none; }
 .choice:hover { border-color: var(--green-dark); }
