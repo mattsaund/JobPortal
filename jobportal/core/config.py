@@ -38,7 +38,7 @@ RESUME_DIR = DATA / "resume"  # the resume file the user imported during setup
 HOST = "127.0.0.1"  # the server only listens on this computer, never on the network
 PORT = int(os.environ.get("JOBPORTAL_PORT") or 8788)
 
-# Reasoning effort choices for each AI stage (Settings, AI). Models come from the signed-in ChatGPT account.
+# Reasoning effort choices for each AI stage (Settings, AI). Models come from the AI in use (ai.models()).
 EFFORTS = ["low", "medium", "high"]
 
 # Where the user is with each application. "new" is every lead's starting status: found, ranked and on the Leads page, but

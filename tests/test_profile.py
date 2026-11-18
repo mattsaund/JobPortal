@@ -162,14 +162,25 @@ def test_parse_pending_reads_what_only_the_rules_read(fake_ai, monkeypatch):
     from jobportal.candidate import documents
     documents.add("cpr.txt", b"American Heart Association\nBLS Provider\nIssue Date 2/2025 Renew By 2/2027")
     documents.add("food.txt", b"Certificate of completion: Food Handler Training. Issued March 2025.")
-    assert asyncio.run(documents.parse_pending()) == 0  # nobody is signed in
-    monkeypatch.setattr(documents, "_signed_in", lambda: True)
+    assert asyncio.run(documents.parse_pending()) == 0  # no AI is connected
+    monkeypatch.setattr(documents, "_ai_ready", lambda: True)
     assert asyncio.run(documents.parse_pending()) == 0  # the fake AI has no answer: the first failure ends the round
     assert all(d["parsed_by"] == "rules" for d in documents.listing())
     fake_ai.responses["document-parse"] = {"kind": "certificate", "title": "BLS Provider", "issuer": "American Heart Association",
                                            "issued": "2025-02", "expires": "2027-02", "skills": ["CPR"], "summary": "A BLS card."}
     assert asyncio.run(documents.parse_pending()) == 2 and all(d["parsed_by"] == "ai" for d in documents.listing())
     assert asyncio.run(documents.parse_pending()) == 0  # nothing left to read
+
+
+def test_documents_are_read_with_any_connected_ai():
+    """A saved key connects the AI just like the ChatGPT sign-in does, so documents get their AI reading with either."""
+    from jobportal.ai import providers
+    from jobportal.candidate import documents
+    assert not documents._ai_ready()  # nothing connected yet
+    providers.set_provider("gemini")
+    assert not documents._ai_ready()  # Gemini picked, but no key saved
+    providers.save_key("gemini", "AIza-example-test-key")
+    assert documents._ai_ready()
 
 
 def test_document_kinds_cover_british_spelling_and_resumes():

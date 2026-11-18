@@ -321,7 +321,7 @@ def test_a_signed_out_reading_asks_to_sign_in(client):
 def test_documents_are_read_by_ai_in_the_background_when_signed_in(client, fake_ai, monkeypatch):
     from jobportal.candidate import documents
     from jobportal.core import bus
-    monkeypatch.setattr(documents, "_signed_in", lambda: True)
+    monkeypatch.setattr(documents, "_ai_ready", lambda: True)
     fake_ai.responses["document-parse"] = AI_DETAILS
     events = bus.subscribe()
     upload = client.put("/api/profile/documents?filename=RN license.txt", content=LICENSE).json()

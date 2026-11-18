@@ -11,7 +11,7 @@ Keeping usage in check: an "Everything" run only runs missions_per_run missions,
 still runs every few searches (pick_missions). "AI hunt only" runs them all. The depth setting ("How deep": quick,
 standard, deep) sets how many searches and page reads each agent may use.
 
-Side effects: AI calls on the user's ChatGPT plan, and the rotation position saved in the kv table (hunt.rotation)."""
+Side effects: AI calls on the user's AI account, and the rotation position saved in the kv table (hunt.rotation)."""
 import asyncio
 from datetime import date
 
@@ -51,7 +51,7 @@ async def run_mission(ctx: Ctx, mission: dict) -> list[RawJob]:
 
     Leads without a URL or a title are dropped. Titles skip the level check (strict_titles=False): the agent was told the
     candidate's levels and its titles are free text. found_url is the post or page where the agent found the lead, or the
-    lead's own URL. Raises ai.UsageLimitError when the ChatGPT usage cap is hit; any other AI failure is logged and the
+    lead's own URL. Raises ai.UsageLimitError when the AI account reaches a usage limit; any other AI failure is logged and the
     mission returns nothing."""
     depth = ctx.cfg["sources"]["ai_hunt"].get("depth", "standard")
     prompt = f"""MISSION: {mission['name']}
@@ -96,8 +96,8 @@ def pick_missions(cfg: dict, all_missions: bool) -> list[dict]:
     searches at one of those levels, and one with only_groups (research labs) only when one of the user's field groups
     (plan.groups, such as "science" or "healthcare") is in it, or while their fields aren't known yet. With all_missions
     (an "AI hunt only" run), or when missions_per_run is 0 or covers them all, every one runs. Otherwise the next
-    missions_per_run in a rotation run, so every mission still runs every few searches without using up the ChatGPT plan's
-    usage window. Side effect: saves the rotation position (kv hunt.rotation)."""
+    missions_per_run in a rotation run, so every mission still runs every few searches without using up the AI account's
+    usage limits. Side effect: saves the rotation position (kv hunt.rotation)."""
     levels = set(plan.levels(cfg))
     groups = set(plan.groups(cfg))
     missions = [m for m in cfg["sources"]["ai_hunt"]["missions"]

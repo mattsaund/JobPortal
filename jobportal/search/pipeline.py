@@ -16,11 +16,11 @@ How a run flows (Pipeline.run):
 5. Package workers build packages for queued leads (packages.build_package), best first with close deadlines jumping the
    line, up to the per-run package cap.
 
-Stop cancels everything at once. A ChatGPT usage cap pauses the run instead: AI work stops and queued leads wait for the next
+Stop cancels everything at once. A usage limit on the user's AI account pauses the run instead: AI work stops and queued leads wait for the next
 run. Building a package and other work on one lead lives in packages.py.
 
 Side effects: rows in the runs, run_log, leads, events and candidates tables; live events (core/bus.py: log, state, lead,
-toast, run_done); AI calls on the user's ChatGPT plan; HTTP requests to job sites."""
+toast, run_done); AI calls on the user's own AI account; HTTP requests to job sites."""
 import asyncio
 import json
 import re
@@ -466,7 +466,7 @@ class Pipeline:
                 return
             if len(self.pool) < batch_size and not self.collecting_done.is_set():
                 # Collectors are still running. Wait for at least half a batch: each AI request carries the whole triage
-                # prompt, so fuller batches use the ChatGPT plan better.
+                # prompt, so fuller batches use the AI account better.
                 await asyncio.sleep(4)
                 if len(self.pool) < batch_size // 2 and not self.collecting_done.is_set():
                     continue
@@ -481,7 +481,7 @@ class Pipeline:
             try:
                 await self.triage_batch(batch)
             except ai.UsageLimitError as e:
-                self.pause(f"ChatGPT usage cap: {e}")
+                self.pause(str(e))
                 return
             except ai.AIError as e:
                 self.log("triage", f"batch failed: {e}", "error")
@@ -545,11 +545,11 @@ class Pipeline:
 
     # ------------------------------------------------------------ packages
     def pause(self, reason: str) -> None:
-        """Pause the run (a ChatGPT usage cap): stop starting AI work and wind down. Qualified leads stay queued for the next
+        """Pause the run (the AI account reached a usage limit): stop starting AI work and wind down. Qualified leads stay queued for the next
         run. Only the first reason is kept."""
         if not self.paused_reason:
             self.paused_reason = reason
-            self.log("run", f"paused: {reason}. Stopping AI work; qualified leads stay queued for the next run", "warn")
+            self.log("run", f"paused: {reason.rstrip('.')}. Stopping AI work; qualified leads stay queued for the next run", "warn")
             self.cancel.set()
 
     async def package_worker(self) -> None:
@@ -563,14 +563,14 @@ class Pipeline:
                 if self.cancel.is_set() or self.packages_started >= cap:
                     continue
                 if ai.usage_high():
-                    self.pause("JobPortal reached its ChatGPT usage cap")
+                    self.pause("your AI account reached a usage limit a few minutes ago")
                     continue
                 self.packages_started += 1
                 try:
                     await build_package(lead_id, run_id=self.run_id, ctx=self.ctx, log=self.log)
                     self.stats["packaged"] += 1
                 except ai.UsageLimitError as e:
-                    self.pause(f"ChatGPT usage cap: {e}")
+                    self.pause(str(e))
                 except Exception as e:  # noqa: BLE001 (build_package already marked the lead as failed)
                     self.stats["package errors"] += 1
                     self.log("package", f"lead {lead_id}: {e}", "error")
@@ -608,7 +608,7 @@ class Pipeline:
         try:
             await hunt.collect(self.ctx, on_batch=self.add_jobs, all_missions=self.mode == "hunt")
         except ai.UsageLimitError as e:
-            self.pause(f"ChatGPT usage cap: {e}")
+            self.pause(str(e))
         except Exception as e:  # noqa: BLE001
             self.log("hunt", f"failed: {type(e).__name__}: {e}", "error")
 

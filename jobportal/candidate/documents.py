@@ -18,7 +18,7 @@ who issued it, when it was issued and when it expires ("YYYY-MM", "YYYY" or ""),
 a one-sentence summary. It happens in two steps:
   1. parse_rules(), a quick reading with patterns ("issued by", "has completed", "Expires:", known issuers), the moment a
      document is added, so the dashboard has something right away. "parsed_by" is "rules".
-  2. parse_with_ai(), when the user is signed in with ChatGPT: a cheap AI reading (stage "documents", prompts.DOCUMENT_SYSTEM)
+  2. parse_with_ai(), when the AI in use is connected: a cheap AI reading (stage "documents", prompts.DOCUMENT_SYSTEM)
      in the background, which replaces the rules' reading. "parsed_by" is "ai". While it runs, the listing says
      "parsing": true, and the "documents" event goes out when it starts and when it ends.
 Documents added before this existed get their rules reading the first time the list is read, and their AI reading from
@@ -36,7 +36,7 @@ import time
 import uuid
 from pathlib import Path
 
-from jobportal.ai import client as ai, prompts, signin
+from jobportal.ai import client as ai, prompts, providers
 from jobportal.core import background, bus, db, osutil
 from jobportal.core.config import DATA, RESUME_DIR
 from jobportal.core.textutil import clean, extract_terms, unique
@@ -414,8 +414,8 @@ def read_text(filename: str, data: bytes) -> str:
 
 
 def add(filename: str, data: bytes, text: str | None = None) -> dict:
-    """Read one document and keep it, with its rules reading, and start its AI reading in the background when the user is
-    signed in with ChatGPT (_start_ai_reading). Returns its listing entry. `text` is the file's text when the caller already
+    """Read one document and keep it, with its rules reading, and start its AI reading in the background when the AI in use
+    is connected (_start_ai_reading). Returns its listing entry. `text` is the file's text when the caller already
     read it with read_text() (the upload route does, in a worker thread); otherwise it's read here. The same file added
     again changes nothing and comes back with "duplicate": True. Raises extract.ExtractError when no text can be read (a
     scanned image, an unsupported type), and ValueError when MAX_DOCUMENTS are kept already."""
@@ -458,16 +458,16 @@ def remove(doc_id: str) -> bool:
 # ---------------------------------------------------------------- the AI reading
 
 
-def _signed_in() -> bool:
-    """True when someone is signed in with ChatGPT, so an AI reading can run."""
-    return bool(signin.status().get("signed_in"))
+def _ai_ready() -> bool:
+    """True when the AI in use is connected (signed in with ChatGPT or OpenRouter, or its key saved), so an AI reading can run."""
+    return not providers.problem()
 
 
 def _start_ai_reading(doc_id: str) -> bool:
-    """Start the AI reading of one document in the background, when someone is signed in and this code runs inside the
+    """Start the AI reading of one document in the background, when the AI in use is connected and this code runs inside the
     server's event loop (an upload route). Returns True when it started. Outside the loop (a worker thread, a test, a
     script) nothing starts, and parse_pending() reads the document later."""
-    if not _signed_in():
+    if not _ai_ready():
         return False
     try:
         asyncio.get_running_loop()
@@ -527,11 +527,11 @@ async def parse_with_ai(doc_id: str, changed: bool = False) -> dict:
 
 
 async def parse_pending() -> int:
-    """Read with AI, one at a time, every document that only has its rules reading, when someone is signed in with
-    ChatGPT. web/server.py runs it at startup and web/routes/ai.py after a sign-in or a new key, both in the background. The first
+    """Read with AI, one at a time, every document that only has its rules reading, when the AI in use is connected.
+    web/server.py runs it at startup and web/routes/ai.py after a sign-in or a new key, both in the background. The first
     AI failure ends the round with one toast, so a missing plan or a usage cap isn't hit again and again. Returns how many
     documents were read."""
-    if not _signed_in():
+    if not _ai_ready():
         return 0
     done = 0
     for doc in all_documents():

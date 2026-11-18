@@ -330,7 +330,7 @@ const S = {
   // Loaded at startup (main.js) and kept up to date by events
   meta: null,             // GET /api/meta: version, os, data_dir, statuses, status_labels, efforts, collectors, pdf_ready
   state: { running: false, counts: {} },  // the live run state from the server: running, run_id, mode, phase, counts,
-                                          // started_at, tokens, run_tokens_start, ai (the ChatGPT sign-in), active_agents
+                                          // started_at, tokens, run_tokens_start, ai (the AI's status), active_agents
   stats: null,            // GET /api/stats: the sidebar badges and the Home stats
   logs: [],               // live feed lines {ts, source, level, msg}: the last run's log, then "log" events (600 at most)
   profileStatus: null,    // GET /api/profile/status and "profile_status" events: has_resume, answers_saved, built, busy,

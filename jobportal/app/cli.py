@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--server", action="store_true", help="run only the server in this terminal")
     mode.add_argument("--background", action="store_true", help="run only the server, detached from this terminal")
     mode.add_argument("--stop", action="store_true", help="stop a running server")
-    mode.add_argument("--doctor", action="store_true", help="check Python, the ChatGPT sign-in, the PDF browser and the window toolkit")
+    mode.add_argument("--doctor", action="store_true", help="check Python, the AI's sign-in or key, the PDF browser and the window toolkit")
     p.add_argument("--scheduled", action="store_true", help="with --background: a server for searching on a schedule, "
                    "which quits by itself once that's turned off")
     p.add_argument("--port", type=int, help="port for the local server (default 8788, or JOBPORTAL_PORT)")

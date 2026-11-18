@@ -278,7 +278,7 @@ The extra documents: other resumes, certificates, licenses, cover letters, award
 
 ### `PUT /api/profile/documents`
 
-Add one document, sent as the raw request body. Its details are read by patterns right away and, when the user is signed in with ChatGPT, by AI in the background (a "documents" event says when). The profile rebuilds about a minute after the user stops adding.
+Add one document, sent as the raw request body. Its details are read by patterns right away and, when the AI in use is connected, by AI in the background (a "documents" event says when). The profile rebuilds about a minute after the user stops adding.
 
 Parameters: `filename`.
 

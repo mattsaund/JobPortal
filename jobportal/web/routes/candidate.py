@@ -134,8 +134,8 @@ def list_documents():
 
 @router.put("/api/profile/documents")
 async def add_document(request: Request, filename: str):
-    """Add one document, sent as the raw request body. Its details are read by patterns right away and, when the user is
-    signed in with ChatGPT, by AI in the background (a "documents" event says when). The profile rebuilds about a minute
+    """Add one document, sent as the raw request body. Its details are read by patterns right away and, when the AI in use
+    is connected, by AI in the background (a "documents" event says when). The profile rebuilds about a minute
     after the user stops adding."""
     data = await read_upload(request)
     try:

@@ -61,7 +61,7 @@ function renderFeedHead() {
     const seconds = started ? Math.max(0, Math.floor((Date.now() - started) / 1000)) : 0;
     const used = (+st.tokens || 0) - (+st.run_tokens_start || 0);
     el.innerHTML = `${spinner()}<b>${esc(runPhase(st.phase))}</b><span class="muted">${Math.floor(seconds / 60)}m ${seconds % 60}s</span>${counts}`
-      + (used > 0 ? `<span class="tag" title="AI tokens this search used on your ChatGPT plan">${fmtTokens(used)} tokens</span>` : "");
+      + (used > 0 ? `<span class="tag" title="AI tokens this search used">${fmtTokens(used)} tokens</span>` : "");
   } else {
     el.innerHTML = `<span class="status-dot off"></span><b>Live search</b>`
       + (counts ? `<span class="muted">Last search:</span>${counts}` : `<span class="muted">Run a search to watch it here.</span>`);

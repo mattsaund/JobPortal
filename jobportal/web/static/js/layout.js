@@ -1,6 +1,6 @@
 /* layout.js: the frame around every page, and the router.
    - The sidebar: the menu with its badges (leads ready, follow-ups due), a card that says what's happening (a search,
-     the AI agents at work) or the next useful step, Settings, and a line with your ChatGPT sign-in and the version.
+     the AI agents at work) or the next useful step, Settings, and a line with the AI in use and the version.
    - The top bar: the search box (it searches your leads; "/" jumps to it), Run search or Stop, and your account button.
    - The hash router that picks the page (#/home, #/leads/12, #/settings/ai, ...) and sends old addresses where their
      content lives now, and what a page shows when its data can't load (loadError, with Try again).

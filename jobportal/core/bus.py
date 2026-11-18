@@ -30,7 +30,7 @@ state = {
     "phase": "idle",  # what the run is doing: idle, collecting, triaging or packaging
     "counts": {},  # the run's counters: found, candidates, triaged, qualified, packaged and a few more
     "tokens": 0,  # AI tokens used since JobPortal started (ai/client.py adds to it)
-    "ai": None,  # ChatGPT sign-in status (ai/signin.py)
+    "ai": None,  # the AI's status: the provider in use and whether it's connected (ai/providers.py status())
     "active_agents": {},  # AI requests running now, id -> label (ai/client.py)
     "model": None,  # the model of the AI request that started last (ai/client.py; shown on the sidebar's AI card)
     "ai_requests": 0,  # AI requests started since JobPortal started (ai/client.py)
