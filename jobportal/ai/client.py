@@ -910,8 +910,10 @@ class _Conversation:
                 nudges += 1
                 if nudges > MAX_NUDGES:
                     raise AIError("the model didn't return a structured result")
-                correction = error or "The answer wasn't a valid JSON object."
-                self.wire.add_user(f"{correction} Return a corrected result by calling submit_result.")
+                if answer is None:
+                    self.wire.add_user("Call submit_result now with your final answer.")
+                else:
+                    self.wire.add_user(f"{error} Return a corrected result by calling submit_result.")
                 continue
 
             # Step 3: answer each tool call. A complete submit_result ends the task. Every other call gets a reply, which
