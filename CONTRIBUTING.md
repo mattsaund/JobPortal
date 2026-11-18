@@ -33,7 +33,7 @@ Optional:
 
 | What | Why |
 |---|---|
-| A ChatGPT Go, Plus or Pro plan | trying the real AI by hand. The automated tests never need it. |
+| An AI account: a ChatGPT Go, Plus or Pro plan, OpenRouter, or an API key (Gemini's free tier works) | trying the real AI by hand. The automated tests never need one. |
 | LibreOffice | importing old `.doc` resumes |
 | [uv](https://docs.astral.sh/uv/) | faster Python environments |
 | Linux only: PyGObject and WebKit2GTK 4.1 (Arch: `python-gobject webkit2gtk-4.1`, Debian and Ubuntu: `python3-gi gir1.2-webkit2-4.1`, Fedora: `python3-gobject webkit2gtk4.1`) | a native app window when running from source. Without them it opens in a Chromium browser's app mode or a tab. |
@@ -82,7 +82,7 @@ The command line:
 | `jobportal --server` | run only the server (the dashboard is at http://127.0.0.1:8788) |
 | `jobportal --background` | run the server detached, so searches keep going with the window closed |
 | `jobportal --stop` | stop a server started with `--server` or `--background` |
-| `jobportal --doctor` | check Python, the ChatGPT sign-in, the PDF engine and the window toolkit |
+| `jobportal --doctor` | check Python, the AI's sign-in or key, the login item, the PDF engine and the window toolkit |
 | `--port 8790` | use another port (or set `JOBPORTAL_PORT`) |
 | `--data-dir PATH` | keep the data somewhere else (or set `JOBPORTAL_HOME`) |
 
@@ -116,22 +116,26 @@ JobPortal/
 │   │       ├── style.css       all the styles, on the team design's light and dark color tokens
 │   │       ├── logo.png        the sidebar logo (icon.png and favicon.png are the app icon and the browser tab icon)
 │   │       └── js/             core.js, live.js, layout.js, components/ (pieces several pages share: documents, file
-│   │                           drops, search area, answers form, settings form), pages/ (home, leads with lead.js and
+│   │                           drops, search area, answers form, settings form, resume builder), pages/ (home, leads with lead.js and
 │   │                           the sources dialog, tracker, analysis, and settings with its parts: profile, dreams,
 │   │                           resumes, runs), then main.js
 │   ├── candidate/              what JobPortal knows about the user
 │   │   ├── onboarding.py       setup: importing the resume and the standard questions (asked one at a time on Home)
 │   │   ├── documents.py        extra documents (certificates, licenses, cover letters, awards), read and parsed
 │   │   ├── profile.py          the profile: building it, updating it, questions along the way, writing voice
+│   │   ├── builder.py          the resume builder: a first resume from questions, for people who don't have one
 │   │   └── library.py          saved resumes (storage only, they never feed the profile)
 │   ├── search/                 finding jobs
 │   │   ├── pipeline.py         a search run: collect, filter, score with AI, queue packages
 │   │   ├── packages.py         work on one lead: build its package, rework its resume, add a job by hand
 │   │   ├── plan.py             what to search for: levels, roles, queries, dream companies
+│   │   ├── schedule.py         searching on a schedule at the user's times, also in the background
+│   │   ├── posts.py            jobs from posts the user pastes from communities apps can't read
 │   │   ├── sources.py          the checks in the Sources dialog on Leads
 │   │   └── collectors/         one file per kind of source (LinkedIn, company boards, feeds, GitHub lists, AI hunt)
-│   ├── ai/                     ChatGPT
-│   │   ├── client.py           every AI request (OpenAI's Responses API)
+│   ├── ai/                     the AI
+│   │   ├── client.py           every AI request, one loop with a wire for each kind of API (Responses, chat, Claude)
+│   │   ├── providers.py        the AI providers: ChatGPT, OpenRouter, API keys, and Sign in with OpenRouter
 │   │   ├── signin.py           Sign in with ChatGPT
 │   │   └── prompts.py          every prompt and the shape of each AI answer
 │   ├── documents/              resumes and other files
@@ -140,7 +144,7 @@ JobPortal/
 │   │   ├── resumecheck.py      resume checks: format, length, keywords, truthful skills
 │   │   ├── exports.py          downloads: single files, the package zip, emails
 │   │   └── revise.py           AI edits by instruction
-│   ├── insights/               the Analysis page (analysis.py)
+│   ├── insights/               the Analysis page (analysis.py) and Home's Next moves card (moves.py)
 │   ├── core/                   shared building blocks
 │   │   ├── background.py       background work (package builds, profile updates) and stopping it at shutdown
 │   │   ├── config.py           folders, the port and every default setting
@@ -154,7 +158,8 @@ JobPortal/
 │   └── resources/              files read at run time (the resume playbook, the Linux desktop entry)
 ├── tests/                      pytest tests and a fictional sample resume
 ├── packaging/                  how the release apps are built: PyInstaller spec, Windows installer, PDF engine, icons
-├── documentation/              school documents, and logo, color and font ideas
+├── documentation/              the user manual, install guide and API reference, screenshots, school documents, and
+│                               logo, color and font ideas
 ├── .github/workflows/          CI (tests on every push) and Release (builds the apps when a version tag is pushed)
 └── run.sh, run.ps1, run.bat    start scripts for running from source
 ```
@@ -177,6 +182,13 @@ JobPortal/
 - **The packages stack in layers:** `core`, then `ai`, then `candidate` and `documents`, then `search` and `insights`, then
   `web`, then `app`. A lower package never imports a higher one at the top of a file. When it has to, it imports inside the
   function, which keeps import loops out.
+- **The AI can be any of several providers** (`ai/providers.py`): ChatGPT through its sign-in, OpenRouter through its
+  sign-in or a key, or an API key from OpenAI, Anthropic, Google, Mistral, Groq, DeepSeek, xAI or any OpenAI-compatible
+  service. `ai/client.py` runs one request loop for all of them, with a "wire" for each kind of API. Keys stay in the data
+  folder, owner-only, and the dashboard only sees their last four characters.
+- **Searching on a schedule** (`search/schedule.py`): at the user's times, a full search starts by itself. With background
+  searching on, a detached server keeps going after the window closes, and a login item on each system starts it again
+  after a restart.
 
 ## Testing
 
@@ -190,7 +202,9 @@ python -m ruff check .               # lint, including import order
 python -m ruff check . --fix         # fix what ruff can fix by itself
 ```
 
-- Tests never talk to OpenAI. They use the `fake_ai` fixture in `tests/conftest.py` or the mock OpenAI in `tests/test_ai.py`.
+- Tests never talk to an AI service. They use the `fake_ai` fixture in `tests/conftest.py`, or the mock services in
+  `tests/test_ai.py` and `tests/test_providers.py`.
+- Tests never touch the computer's real login items: the `login_items` fixture in `tests/conftest.py` records them instead.
 - Every test starts from an empty data folder, exactly like a fresh install.
 - Tests use fictional people only (Jordan Rivera, `example.com`). `tests/fixtures/sample_resume.md` is a fake resume.
 - CI runs the lint, the tests, `jobportal --doctor`, a server smoke test and the start scripts on Linux, macOS and Windows
@@ -203,6 +217,11 @@ python -m ruff check . --fix         # fix what ruff can fix by itself
 |---|---|
 | `test_api.py` | the HTTP API: setup, documents, downloads, leads, the Tracker, the Dream list, sources, security checks, Quit |
 | `test_ai.py` | Sign in with ChatGPT and the AI request loop, against a mock OpenAI |
+| `test_providers.py` | the other AI providers: keys, switching, Sign in with OpenRouter, the chat and Claude wires, errors and short waits, model lists |
+| `test_schedule.py` | searching on a schedule: the clock rules, catching up, alerts, the login item on each system, the background server |
+| `test_builder.py` | the resume builder for people without a resume |
+| `test_moves.py` | Home's Next moves card |
+| `test_reach.py` | the newer job sources, the sites fetch_url leaves alone, and jobs from pasted posts |
 | `test_profile.py` | building and updating the profile, and that only the resume and answers feed it |
 | `test_onboarding.py` | resume import, pre-filling the questions, saving answers |
 | `test_extract.py`, `test_render.py` | reading resume files, rendering resumes, PDF export |
@@ -220,8 +239,10 @@ Add or update a test with every bug fix and every feature.
 
 - Run with a scratch data folder and another port: `jobportal --data-dir ./dev-data --port 8790 --browser`.
 - Drop `tests/fixtures/sample_resume.md` on Home to try setup without using your own resume.
-- Without signing in to ChatGPT, anything that needs AI shows a "Sign in with ChatGPT first" error. That's expected. To try
-  the AI, sign in with your own ChatGPT account.
+- Without an AI connected, anything that needs AI says to connect it first. That's expected. To try the AI, connect your
+  own in Settings, AI: a ChatGPT plan, OpenRouter (it has free models), or a key (Google Gemini has a free tier).
+- With a second data folder, scheduled searches in the background stay off unless you turn them on there. Only the data
+  folder that added the login item ever removes it, so testing never undoes your own setup.
 - After changing the dashboard, click through every page you touched with the browser's developer console open (F12). Any
   red error there is a bug.
 
@@ -249,7 +270,8 @@ Add or update a test with every bug fix and every feature.
 4. **Keep the AI truthful.** Prompts may let the AI choose, reorder and rephrase, but never invent. If the profile is
    missing something, the fix is a question for the user (`profile.ask`), not a guess.
 5. **Keep it safe.** The server only answers requests from this computer. Don't add endpoints that run commands or read
-   arbitrary files. ChatGPT tokens never leave the data folder.
+   arbitrary files. Sign-in tokens and API keys never leave the data folder, and the dashboard never sees them whole.
+   Collectors only use what each site allows: official APIs, public feeds, and pages whose rules permit reading them.
 6. **Write plainly.** In UI text, comments and docs: short sentences, American English, no em dashes and no middle dots as
    separators. `tests/test_writing.py` checks every tracked file for the dashes, the dots and common British spellings.
 7. **Match the code around you.** Absolute imports (`from jobportal.core import db`), the existing naming, and comments that
@@ -262,6 +284,9 @@ Add or update a test with every bug fix and every feature.
 | change or add a standard question | `QUESTIONS` in `candidate/onboarding.py` |
 | change what the AI writes | the prompt in `ai/prompts.py` |
 | add a job source | a collector in `search/collectors/`, listed in `search/collectors/__init__.py`, with defaults in `core/config.py` |
+| add an AI provider | `PROVIDERS` in `ai/providers.py`. A service with an OpenAI-compatible chat API needs only an entry; a new kind of API needs a wire in `ai/client.py` |
+| change when scheduled searches start | `search/schedule.py` (the settings are in `core/config.py`, the panel in `web/static/js/pages/settings.js`) |
+| change the Next moves rules | `insights/moves.py` |
 | add a company job board | the Sources dialog on Leads, or `ATS_BOARDS` in `core/config.py` |
 | change resume layouts | `RESUME_THEMES` and `_DOCX_THEMES` in `documents/render.py` (keep `FIT_SCALES` in step with the copy in `web/static/js/pages/lead.js`), and the playbook in `resources/resume_playbook.md` |
 | add an API endpoint | the matching file in `web/routes/` |
@@ -273,9 +298,17 @@ Add or update a test with every bug fix and every feature.
 ## Releases
 
 1. Bump `__version__` in `jobportal/__init__.py`, and update "What's new" in `packaging/release-notes.md`.
-2. Commit, then push a version tag: `git tag v0.3.0 && git push origin v0.3.0`.
-3. The Release workflow builds the Windows installer, the macOS disk image and the Linux AppImage, checks that each one
-   starts and prints a PDF, and publishes them on the Releases page.
+2. Dry-run the Release workflow first: `gh workflow run release.yml --ref main` builds and tests every app without
+   publishing anything.
+3. Commit, then push a version tag: `git tag v0.4.0 && git push origin v0.4.0`.
+4. The Release workflow builds the Windows installer, two macOS disk images (Apple Silicon, and Intel on GitHub's Intel
+   runner, which GitHub keeps until fall 2027) and the Linux AppImage, checks that each one starts and prints a PDF, and
+   publishes them on the Releases page.
+
+The apps aren't code-signed, which is why Windows and macOS warn on the first open. Signing needs paid certificates: an
+Apple Developer ID (99 dollars a year) for signing and notarizing the macOS app, and a code signing certificate for Windows
+(SignPath has a free plan for open source projects). With them, the signing steps go into `.github/workflows/release.yml`
+with the certificates as repository secrets.
 
 The macOS and Linux apps carry their own PDF engine (`packaging/fetch_pdf_engine.py`). The Windows installer is built with
 Inno Setup from `packaging/windows/jobportal.iss`. To build the app for your own system:

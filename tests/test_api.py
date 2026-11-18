@@ -151,12 +151,14 @@ def test_any_email_draft_downloads(client):
     import io
     import zipfile
 
-    from jobportal.core import db
+    from jobportal.core import db, osutil
     lead_id = _lead_with_documents()
     # The AI names each draft's kind in free text, and may leave a field out.
     db.update_lead(lead_id, package={"emails": [{"kind": "follow-up → hiring manager 你好", "to_addr": "hr@example.com"}]})
     one = client.get(f"/api/leads/{lead_id}/export/email-0.eml")
     assert one.status_code == 200 and "filename*=utf-8''" in one.headers["content-disposition"]
+    if not osutil.find_pdf_engine():  # the package also holds the resume and cover letter as PDFs
+        pytest.skip("the package download needs Chrome, Edge or Chromium for its PDFs")
     package = client.get(f"/api/leads/{lead_id}/export/package.zip")
     names = zipfile.ZipFile(io.BytesIO(package.content)).namelist()
     assert package.status_code == 200 and any(name.startswith("email-1-follow-up") for name in names)

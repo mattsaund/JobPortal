@@ -147,6 +147,36 @@ A key tradeoff is reliance on an external AI service. Although this approach red
 
 Input validation, restricted data sharing, clear error handling, and human review help address these limitations.
 
+## 11. AI Providers (added in v0.4.0)
+
+JobPortal no longer depends on a single AI service. The user chooses one in Settings, AI, and the welcome screen offers the
+main ones.
+
+| Provider | How the user connects | Hosted web search |
+|---|---|---|
+| ChatGPT | Sign in with ChatGPT, on a Go, Plus or Pro plan | Yes |
+| OpenRouter | Sign in with OpenRouter (OAuth PKCE, no app registration), or a pasted key | No, pages are read with fetch_url |
+| OpenAI API | An API key | Yes |
+| Claude (Anthropic) | An API key | Yes |
+| Gemini (Google) | An API key, with a free tier | No |
+| Mistral, Groq, DeepSeek, xAI, or another OpenAI-compatible service | An API key | No |
+
+- One request loop serves every provider. Three adapters ("wires") turn the conversation into OpenAI's Responses API, the
+  chat completions API most services share, or Anthropic's Messages API.
+- Each provider's own output (encrypted reasoning, thinking blocks, search results, thought signatures) goes back
+  unchanged in the next request, as the providers require.
+- The result still comes back through the `submit_result` function. The call is never forced, because several providers
+  reject forced tool calls, so a turn that ends without it gets a short reminder.
+- API keys are stored owner-only in the data folder and never reach the dashboard. A new key is checked against the
+  provider's model list before it is saved.
+- Errors are handled per provider. A refused key asks the user for a new one. No credit, a spending limit or a rate limit
+  pauses searching for a while, and a short Retry-After wait is honored first.
+- Anthropic and Google do not let other apps sign people in with their Claude or Gemini subscriptions, so those come by
+  API key. Telegram content is not collected, because its terms bar using it with AI.
+
+Design rationale: several providers remove the single-vendor dependency named in Section 10, let people without a ChatGPT
+plan use the app (including free tiers), and keep the user in control of what they pay.
+
 ## References
 
 OpenAI. (n.d.). API documentation. https://platform.openai.com/docs/
