@@ -303,7 +303,7 @@ onAction("ai-signout", async () => {
 });
 onAction("run", async (el) => {
   // In a browser tab, the first run with alerts on asks for permission to notify.
-  if (S.notify && !desktop() && "Notification" in window && Notification.permission === "default") Notification.requestPermission();
+  if (S.alerts && !desktop() && "Notification" in window && Notification.permission === "default") Notification.requestPermission();
   try {
     await api("/api/run", { method: "POST", body: { mode: el.dataset.mode || "full" } });
   } catch (err) {

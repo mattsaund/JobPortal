@@ -13,6 +13,9 @@ The window chain, best first:
 
 The server: when a JobPortal server is already listening on the port (`jobportal --background`), the window attaches to it
 and leaves it running. Otherwise the server runs on a background thread in this process and stops when the window closes.
+While the schedule searches in the background (Settings, Search), JobPortal starts a detached server first and attaches
+to it, so closing the window never stops it. A window that owned its server when the schedule went to the background
+hands over to a detached one as it closes (finish()).
 
 On Linux, an AppImage adds itself to the app menu the first time it runs (add_to_app_menu)."""
 import json
@@ -95,6 +98,31 @@ def stop_server(server, thread) -> None:
     if server:
         server.should_exit = True
         thread.join(timeout=20)
+
+
+def schedule_in_background() -> bool:
+    """Whether the schedule keeps searching while no window is open (Settings, Search). A database that can't be read
+    counts as no, so it can never keep the window from opening or closing."""
+    try:
+        from jobportal.search import schedule
+        return schedule.keep_running_without_window()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def start_background_server() -> bool:
+    """Start a detached server for the schedule (`jobportal --background --scheduled`) unless one answers already. Returns
+    whether a server answers afterward."""
+    from jobportal.app.cli import background
+    return up() or background(scheduled=True) == 0
+
+
+def finish(server, thread) -> None:
+    """The window closed: stop this process's own server, then, when the schedule keeps searching in the background, start
+    a detached server that goes on with it."""
+    stop_server(server, thread)
+    if server and schedule_in_background():
+        start_background_server()
 
 
 # ---------------------------------------------------------------- the native window's bridge
@@ -202,7 +230,8 @@ def open_app_window(server, thread) -> bool:
                 proc.kill()
             return False
         time.sleep(0.25)
-    print("JobPortal is open in its own window. Closing the window quits it.")
+    print("JobPortal is open in its own window. " + ("Scheduled searches go on after you close it." if schedule_in_background()
+                                                       else "Closing the window quits it."))
     quiet_since = None  # when the browser was first seen gone with no dashboard connected
     while thread.is_alive():
         if proc.poll() is None or bus.listeners():
@@ -212,7 +241,7 @@ def open_app_window(server, thread) -> bool:
         elif time.monotonic() - quiet_since >= APP_WINDOW_GRACE:
             break
         time.sleep(0.25)
-    stop_server(server, thread)
+    finish(server, thread)
     return True
 
 
@@ -227,17 +256,6 @@ def open_without_toolkit(server, thread) -> None:
 # The last line of every menu entry this code writes. Entries without it were made by someone else (by hand, or by
 # packaging/linux/install-desktop-entry.sh for a source checkout) and are never touched.
 APPIMAGE_MARK = "X-JobPortal-AppImage=true"
-
-
-def _exec_arg(path: str) -> str:
-    """Quote a path for a desktop entry's Exec key. The desktop entry spec unescapes the value twice: first as a string
-    value, where a doubled backslash stands for one, then by the Exec quoting rules, where a double quote, backtick, dollar
-    sign or backslash inside double quotes needs a backslash in front. So a backslash in the path is written four times.
-    A percent sign starts a field code (like %f), so a literal one is written twice."""
-    out = path.replace("\\", "\\\\\\\\")
-    for ch in '"`$':
-        out = out.replace(ch, "\\\\" + ch)
-    return '"' + out.replace("%", "%%") + '"'
 
 
 def add_to_app_menu() -> bool:
@@ -258,7 +276,7 @@ def add_to_app_menu() -> bool:
     if old is not None and APPIMAGE_MARK not in old:
         return False
     template = (RESOURCES / "jobportal.desktop").read_text(encoding="utf-8")
-    text = template.replace("@EXEC@", _exec_arg(appimage)).rstrip("\n") + f"\n{APPIMAGE_MARK}\n"
+    text = template.replace("@EXEC@", osutil.desktop_exec_arg(appimage)).rstrip("\n") + f"\n{APPIMAGE_MARK}\n"
     if text == old and icon.is_file():
         return False  # already up to date
     try:
@@ -302,6 +320,8 @@ def main(browser: bool = False) -> None:
     browser=True skips the window and opens a browser tab. Returns when JobPortal should exit."""
     if add_to_app_menu():
         print("Added JobPortal to your app menu.")
+    if not browser and schedule_in_background() and not up():
+        start_background_server()  # the window attaches to it, so closing the window leaves the schedule running
     server, thread = start_server()
     if browser:
         return open_in_browser(server, thread)
@@ -331,7 +351,7 @@ def main(browser: bool = False) -> None:
     def on_closing():
         """Returning False keeps the window open. Only ask when closing would stop our own server in mid-search."""
         if server and running_search():
-            return window.create_confirmation_dialog("Quit JobPortal?", "A search is running. Quitting stops it; progress so far is saved.")
+            return window.create_confirmation_dialog("Quit JobPortal?", "A search is running. Quitting stops it, and what it found so far is saved.")
         return True
 
     window.events.closing += on_closing
@@ -345,4 +365,4 @@ def main(browser: bool = False) -> None:
     except Exception as e:  # noqa: BLE001 (missing WebView2 runtime, broken toolkit...)
         print(f"Couldn't open a native window ({e}).")
         return open_without_toolkit(server, thread)
-    stop_server(server, thread)
+    finish(server, thread)

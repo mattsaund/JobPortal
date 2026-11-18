@@ -94,8 +94,18 @@ DEFAULT_SETTINGS = {
         "package_web_research": True,  # packages research the web live: check the posting, company news, contacts
         "resume_review": True,  # a recruiter-style AI review pass on every tailored resume
         "max_age_days": 90,  # postings older than this are dropped
-        "auto_run_hours": 0,  # start a full run every N hours (0 = off); web/server.py checks once a minute
     },
+    # Settings, Search, "Search on a schedule" (search/schedule.py). Off until the user turns it on.
+    "schedule": {
+        "enabled": False,
+        "times": ["09:00", "17:00"],  # times of day in the computer's local time, 24-hour "HH:MM"
+        "days": [0, 1, 2, 3, 4, 5, 6],  # the days it searches, 0 is Monday
+        # Keep searching after the window closes, and start in the background when the user logs in (core/osutil.py)
+        "background": True,
+    },
+    # Settings, Appearance, "Desktop alerts". The open dashboard shows them while its window is in the background, and the
+    # server sends them itself when no window is open (a scheduled search in the background, search/schedule.py).
+    "alerts": {"desktop": False},
     # The search area: where jobs may be. Filled in from the standard answers, then edited in the search area editor
     # (Home's "Where to search", or Settings, Search). search/pipeline.py checks every job with textutil.LocationMatcher.
     "locations": {

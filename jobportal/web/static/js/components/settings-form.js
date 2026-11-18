@@ -41,6 +41,7 @@ function markCfgEdit(path) {
 //   data-list="a.b"     a list, one item per line
 //   data-feeds          the RSS feeds, "name | url" per line
 //   data-board + data-bf, data-mission + data-mf: one field of a company board or an AI hunt mission
+//   data-time, data-day  the schedule's times of day and its days (every one of them is read again)
 function onCfgEdit(e) {
   const t = e.target;
   if (!S.cfg || !t.closest?.("[data-cfg]")) return;
@@ -63,6 +64,13 @@ function onCfgEdit(e) {
   } else if (t.dataset.mission != null) {
     cfg.sources.ai_hunt.missions[+t.dataset.mission][t.dataset.mf] = checkOrText();
     markCfgEdit("sources.ai_hunt.missions");
+  } else if (t.dataset.time != null) {
+    setPath(cfg, "schedule.times", $$("[data-time]", t.closest("[data-schedule]")).map((input) => input.value).filter(Boolean));
+    markCfgEdit("schedule.times");
+  } else if (t.dataset.day != null) {
+    t.closest(".choice")?.classList.toggle("active", t.checked);
+    setPath(cfg, "schedule.days", $$("[data-day]", t.closest("[data-schedule]")).filter((box) => box.checked).map((box) => +box.dataset.day));
+    markCfgEdit("schedule.days");
   }
 }
 document.addEventListener("input", onCfgEdit);

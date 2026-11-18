@@ -1,16 +1,17 @@
 /* settings.js: Settings (#/settings/<tab>), one page with a tab for each area:
    - Profile (profile.js): your standard answers, the parts of your profile, your writing voice, and its history.
    - Search: where to look, experience levels, what to search for (the search plan), the Dream list (dreams.js),
-     filters, industries, and how much each search does.
+     filters, industries, how much each search does, and searching on a schedule.
    - Resumes (resumes.js): your saved resumes, the recruiter review and the resume playbook.
    - AI: your ChatGPT account, the model and effort for each kind of AI task, and the prompts.
-   - Appearance: light or dark, and desktop alerts.
+   - Appearance: light or dark, and desktop alerts (with a test alert).
    - History (runs.js): every search and its log.
-   - Data: your data folder, putting settings back to their defaults, and Quit (in a browser tab).
+   - Data: your data folder, putting settings back to their defaults, and Quit (in a browser tab, or while the schedule
+     keeps JobPortal running in the background).
    APIs: GET /api/settings and PUT /api/settings (through S.cfg and saveCfg, see components/settings-form.js),
    GET /api/ai/status, GET /api/ai/models, GET /api/prompts/defaults, GET /api/profile, PUT /api/profile/search_plan,
    PATCH /api/onboarding/answers (the experience levels), POST /api/settings/reset, POST /api/open-data-folder,
-   POST /api/quit and POST /api/leads/retag-industries. */
+   POST /api/quit, POST /api/leads/retag-industries, GET /api/schedule and POST /api/alerts/test. */
 "use strict";
 
 // The tabs: [key, label, icon, function that fills the tab]. The functions get the tab's box and the rest of the address
@@ -66,7 +67,8 @@ const settingsPanel = (title, note, html, attrs = "") => `<section class="panel"
 // ---------------------------------------------------------------- Search
 // Where to look, levels, the search plan, the Dream list, filters, industries and how much each search does.
 async function renderSearchSettings(box) {
-  const [, profile] = await Promise.all([loadCfg(), api("/api/profile").catch(() => ({}))]);
+  const [, profile, schedule] = await Promise.all([loadCfg(), api("/api/profile").catch(() => ({})), api("/api/schedule").catch(() => null)]);
+  S.schedule = schedule || S.schedule;
   if (S.route[1] !== "search") return;
   const c = S.cfg, plan = profile.search_plan || {};
   const levels = questionFields().levels;
@@ -94,12 +96,58 @@ async function renderSearchSettings(box) {
     ${settingsPanel("How much each search does", "",
       `<div class="form-grid three">${number("run.min_score", "Good-fit score (0 to 100)")}${number("run.max_triage", "Jobs scored per search")}
         ${number("run.triage_batch", "Jobs per AI scoring request")}${number("run.max_packages", "Applications tailored per search")}
-        ${number("run.max_age_days", "Skip jobs older than (days)")}${number("run.auto_run_hours", "Search by itself every (hours, 0 is off)", 0.5)}</div>
+        ${number("run.max_age_days", "Skip jobs older than (days)")}</div>
       ${cfgSwitch("run.package_web_research", "Research each job on the web while tailoring: check the posting, company news and people to contact", c.run.package_web_research)}`)}
+    <section class="panel" id="schedule-card" data-schedule></section>
     ${saveBar()}</div>`;
   $("[data-plan]", box).closest(".panel").addEventListener("input", () => (S.dirty = true));
   renderAreaCard();
   renderDreams($("#dream-card"));
+  renderScheduleCard();
+}
+
+// ---------------------------------------------------------------- the schedule
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];  // the schedule's days; 0 is Monday, as on the server
+
+// The schedule panel on the Search tab: on or off, the times and the days, searching in the background, and when the
+// next search starts. Its fields are part of the Search form (onCfgEdit reads data-time and data-day), so Save settings
+// saves them with the rest. Adding or removing a time redraws it from S.cfg.
+function renderScheduleCard() {
+  const card = $("#schedule-card");
+  if (!card || !S.cfg) return;
+  const sc = S.cfg.schedule || {}, days = sc.days || [];
+  const times = (sc.times || []).map((t, i) => `<span class="time-row"><input type="time" data-time="${i}" value="${esc(t)}" aria-label="Search time ${i + 1}">`
+    + `<button class="icon-button" type="button" data-act="rm-time" data-i="${i}" aria-label="Remove ${esc(t)}">${icon("close")}</button></span>`).join("");
+  card.innerHTML = `<h2>Search on a schedule</h2>
+    <p class="panel-note">JobPortal can search by itself at the times you pick. Each search uses some of your AI plan.</p>
+    ${cfgSwitch("schedule.enabled", "Search on a schedule", sc.enabled)}
+    <div class="form-grid">
+      <div class="field"><span class="field-label">Times</span><div class="time-list">${times}
+        <button class="button light small" type="button" data-act="add-time">${icon("plus")}Add a time</button></div></div>
+      <div class="field"><span class="field-label">Days</span><div class="choice-row">${DAY_NAMES.map((name, i) =>
+        `<label class="choice${days.includes(i) ? " active" : ""}"><input type="checkbox" data-day="${i}"${days.includes(i) ? " checked" : ""}>${name}</label>`).join("")}</div></div>
+    </div>
+    ${cfgSwitch("schedule.background", "Keep searching after you close JobPortal, and start in the background when you log in", sc.background)}
+    <p class="panel-note" id="schedule-note">${esc(scheduleNote())}</p>`;
+}
+
+// The line under the schedule: off, the next search, or why the last scheduled one was skipped (from the server).
+function scheduleNote() {
+  const st = S.schedule || {};
+  if (!st.enabled) return "Off. JobPortal searches only when you click Search.";
+  if (!st.next) return "On, but no search is coming up. Pick at least one time and one day.";
+  const skipped = st.last?.skipped ? ` The last scheduled search was skipped: ${st.last.skipped}` : "";
+  return `Next search ${fmtNextSearch(st.next)}.${skipped}`;
+}
+
+// When a scheduled search starts, like "Tue 5:00 PM".
+const fmtNextSearch = (iso) => new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
+
+// The schedule changed on the server (saved, a search started or skipped): update the lines that show it.
+function scheduleChanged() {
+  const note = $("#schedule-note");
+  if (note) note.textContent = scheduleNote();
+  if (S.route[0] === "home") renderHomeHeading();
 }
 
 // The search area's card (redrawn when the editor saves; setHtml gives the focus back to its button, which the closing
@@ -179,7 +227,7 @@ async function renderAISettings(box) {
 }
 
 // ---------------------------------------------------------------- Appearance
-// The light or dark theme (saved on this computer), and desktop alerts.
+// The light or dark theme (saved on this computer), and desktop alerts with a button that sends a test one.
 function renderAppearance(box) {
   const theme = document.documentElement.dataset.theme;
   const choice = (key, label, name) => `<button class="theme-choice${theme === key ? " active" : ""}" type="button" role="radio" aria-checked="${theme === key}"
@@ -188,7 +236,16 @@ function renderAppearance(box) {
     ${settingsPanel("Theme", "Light or dark. JobPortal remembers your choice on this computer.",
       `<div class="theme-choices" role="radiogroup" aria-label="Theme">${choice("light", "Light", "sun")}${choice("dark", "Dark", "moon")}</div>`)}
     ${settingsPanel("Desktop alerts", "",
-      `<label class="switch-row">${toggle('id="notify-switch"', S.notify)}<span>Show a desktop alert when new leads are ready while JobPortal is in the background</span></label>`)}</div>`;
+      `<label class="switch-row">${toggle('id="notify-switch"', S.alerts)}<span>Show a desktop alert when new leads are ready while JobPortal is in the background or closed</span></label>
+      <div class="block-actions"><button class="button outline small" type="button" data-act="test-alert">${icon("bell")}Send a test alert</button></div>`)}</div>`;
+}
+
+// Turns desktop alerts on or off on the server, on top of the settings as they are there now.
+async function saveAlerts(on) {
+  const fresh = await api("/api/settings");
+  fresh.alerts = { ...(fresh.alerts || {}), desktop: on };
+  await api("/api/settings", { method: "PUT", body: fresh });
+  S.alerts = on;
 }
 
 // ---------------------------------------------------------------- Data
@@ -207,7 +264,11 @@ const RESETTABLE = [
 // window quits when you close it).
 function renderDataSettings(box) {
   const m = S.meta;
-  const quit = ownWindow() ? "" : settingsPanel("Quit JobPortal", "Closing this tab leaves JobPortal running, so a search can finish. Quit stops it.",
+  // A server started for the schedule goes on after its window closes, so it gets a Quit button even in its own window.
+  const background = !!S.schedule?.background_server;
+  const quit = ownWindow() && !background ? "" : settingsPanel("Quit JobPortal", background
+    ? "JobPortal keeps searching on your schedule after you close its window. Quit stops it until you open JobPortal again or log in next time."
+    : "Closing this tab leaves JobPortal running, so a search can finish. Quit stops it.",
     `<button class="button outline" type="button" data-act="quit">Quit JobPortal</button>`);
   box.innerHTML = `<div class="stack">
     ${settingsPanel("Your data", "Everything JobPortal keeps (your profile, leads, documents and tailored files) is in one folder on this computer. Delete the folder to start over from nothing.",
@@ -248,6 +309,23 @@ onAction("reset-section", async (el) => {
   S.industries = fresh.industries;
   toast("Back to the defaults", el.dataset.label);
 });
+onAction("add-time", () => {
+  const times = S.cfg.schedule.times || (S.cfg.schedule.times = []);
+  const last = times.length ? +times[times.length - 1].split(":")[0] : 6;
+  times.push(`${String((last + 3) % 24).padStart(2, "0")}:00`);  // three hours after the last time, so it's new
+  markCfgEdit("schedule.times");
+  renderScheduleCard();
+});
+onAction("rm-time", (el) => {
+  S.cfg.schedule.times.splice(+el.dataset.i, 1);
+  markCfgEdit("schedule.times");
+  renderScheduleCard();
+});
+onAction("test-alert", async () => {
+  const r = await api("/api/alerts/test", { method: "POST" });
+  if (r.ok) toast("Test alert sent", "It shows up in a moment. If it doesn't, allow notifications for JobPortal in your system settings.");
+  else toast("This computer can't show desktop alerts", "Its system has no notification service JobPortal can use.", "error");
+});
 onAction("quit", async () => {
   if (S.state.running && !confirm("A search is running. Quitting stops it; what it found so far is kept.")) return;
   await api("/api/quit", { method: "POST" });
@@ -256,10 +334,12 @@ onAction("quit", async () => {
 });
 onChange(async (el) => {
   if (el.id === "notify-switch") {
-    S.notify = el.checked;
-    store.set("notify", S.notify ? "1" : "0");
-    if (S.notify && !desktop() && "Notification" in window) Notification.requestPermission();
-    toast(S.notify ? "Desktop alerts on" : "Desktop alerts off");
+    await saveAlerts(el.checked).catch((err) => {
+      el.checked = !el.checked;
+      throw err;
+    });
+    if (S.alerts && !desktop() && "Notification" in window) Notification.requestPermission();
+    toast(S.alerts ? "Desktop alerts on" : "Desktop alerts off");
     return true;
   }
   if (el.matches("[data-levels] [data-qm]")) {  // the experience levels are one of your standard answers

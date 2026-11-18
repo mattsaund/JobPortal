@@ -266,7 +266,7 @@ main { max-width: 1720px; margin: auto; padding: 32px 35px 60px; outline: none; 
 .menu button:hover, .menu button:focus-visible { background: var(--mint); color: var(--green-dark); outline: none; }
 
 /* ---------------------------------------------------------------- form controls */
-input[type=text], input[type=search], input[type=url], input[type=email], input[type=tel], input[type=number], input[type=date], input[type=password],
+input[type=text], input[type=search], input[type=url], input[type=email], input[type=tel], input[type=number], input[type=date], input[type=time], input[type=password],
 select, textarea { width: 100%; min-width: 0; padding: 10px 11px; border: 1px solid var(--field-border); border-radius: 6px; background: var(--surface);
   color: var(--text); font-size: 13px; }
 .search-box input[type=search] { padding: 12px 0; border: 0; background: none; }
@@ -305,6 +305,10 @@ input[type=checkbox], input[type=radio] { accent-color: var(--green-dark); }
 .switch-list { display: grid; gap: 2px; margin: 10px 0; }
 /* choices drawn as pills: one-pick buttons (Home) and many-pick checkboxes */
 .choice-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* The schedule's times (Settings, Search): a time field with its remove button, in a row that wraps. */
+.time-list { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.time-row { display: inline-flex; align-items: center; gap: 2px; }
+.time-row input[type=time] { width: 8.5em; }
 .choice { display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
   color: var(--text); font-size: 12px; cursor: pointer; user-select: none; }
 .choice:hover { border-color: var(--green-dark); }

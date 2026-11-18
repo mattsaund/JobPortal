@@ -136,6 +136,9 @@ const openFollowUps = () => (S.questions || []).filter((q) => q.status === "open
 const homeWaiting = () => (S.onboarding?.missing || []).length + (fromResumeIds().length ? 1 : 0) + openFollowUps().length;
 
 // ---------------------------------------------------------------- the heading and the stats
+// " Next scheduled search Tue 5:00 PM." while the schedule is on and no search is running, else "".
+const nextSearchNote = () => (S.schedule?.enabled && S.schedule.next && !S.state.running ? ` Next scheduled search ${fmtNextSearch(S.schedule.next)}.` : "");
+
 function renderHomeHeading() {
   const title = $("#home-title");
   if (!title) return;
@@ -145,7 +148,7 @@ function renderHomeHeading() {
   $("#home-sub").textContent = S.state.running ? "A search is running. New leads show up here as they're ready."
     : !ob.resume ? "Start with your resume. The rest takes a few minutes."
     : (ob.missing || []).length ? "A few questions and you're ready to search."
-    : st.built ? "Here's where your search stands." : "Your profile is almost ready.";
+    : st.built ? "Here's where your search stands." + nextSearchNote() : "Your profile is almost ready.";
   // The pill on the right: whether the profile is up to date. (setHtml: redrawn only when it changes, so its spinner
   // doesn't restart on every status event.)
   let pill = `<span class="status-dot"></span>Profile up to date`;

@@ -68,7 +68,15 @@ window.addEventListener("beforeunload", (e) => {
   if (cfg) {
     S.searchArea = cfg.locations.allowed;
     S.industries = cfg.industries;
+    S.alerts = !!cfg.alerts?.desktop;
+    // Before v0.4.0 the alerts switch was saved in this browser. It's a setting on the server now, so a search in the
+    // background can send alerts too. A switch that was on here turns the setting on, once.
+    if (store.get("notify") === "1") {
+      store.set("notify", "0");
+      if (!S.alerts) saveAlerts(true).catch(() => {});
+    }
   }
+  S.schedule = S.state.schedule || null;
   if (runs[0]) S.logs = (await quiet(api(`/api/runs/${runs[0].id}/log`), [])).slice(-250);  // the last search's feed
   renderFrame();
   if (!/[?&]snapshot/.test(location.search)) connect();  // ?snapshot leaves the live stream off (headless screenshots)

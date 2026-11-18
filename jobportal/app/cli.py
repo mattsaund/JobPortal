@@ -5,6 +5,9 @@
   jobportal --browser     open the dashboard in your default browser instead
   jobportal --server      run only the server in this terminal (Ctrl+C stops it)
   jobportal --background  run only the server, detached; the app attaches to it
+  jobportal --background --scheduled
+                          the same, for searching on a schedule: JobPortal's login item runs this, and the server quits
+                          by itself once searching in the background is turned off (search/schedule.py)
   jobportal --stop        stop a server started with --server or --background
   jobportal --doctor      check that everything JobPortal needs is installed
 
@@ -36,6 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--background", action="store_true", help="run only the server, detached from this terminal")
     mode.add_argument("--stop", action="store_true", help="stop a running server")
     mode.add_argument("--doctor", action="store_true", help="check Python, the ChatGPT sign-in, the PDF browser and the window toolkit")
+    p.add_argument("--scheduled", action="store_true", help="with --background: a server for searching on a schedule, "
+                   "which quits by itself once that's turned off")
     p.add_argument("--port", type=int, help="port for the local server (default 8788, or JOBPORTAL_PORT)")
     p.add_argument("--data-dir", help="keep the database and files here instead of the default app-data folder (or JOBPORTAL_HOME)")
     p.add_argument("--version", action="version", version=f"JobPortal {__version__}")
@@ -70,14 +75,10 @@ def serve() -> int:
     return 0
 
 
-def _self_command() -> list[str]:
-    """How to start JobPortal again: the packaged executable itself, or this Python running the package."""
-    return [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, "-m", "jobportal"]
-
-
-def background() -> int:
+def background(scheduled: bool = False) -> int:
     """--background: start `jobportal --server` as a detached process that outlives this terminal, with its output appended
-    to server.log in the cache folder. Waits up to 15 seconds for it to answer."""
+    to server.log in the cache folder. Waits up to 15 seconds for it to answer. scheduled=True (--scheduled) marks the
+    server as one for searching on a schedule (search/schedule.SCHEDULED_ENV), so it quits by itself once that's off."""
     from jobportal.app.desktop import up
     from jobportal.core import osutil
     from jobportal.core.config import CACHE, HOST, PORT
@@ -87,7 +88,7 @@ def background() -> int:
         return 0
     CACHE.mkdir(parents=True, exist_ok=True)
     log_path = CACHE / "server.log"
-    options: dict = {"stdin": subprocess.DEVNULL}
+    options: dict = {"stdin": subprocess.DEVNULL, "env": {**os.environ, **({"JOBPORTAL_SCHEDULED": "1"} if scheduled else {})}}
     if osutil.IS_WIN:
         # No console window, and a process group of its own so a Ctrl+C in this terminal doesn't reach it.
         options["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
@@ -96,7 +97,7 @@ def background() -> int:
     # The child inherits the environment, including JOBPORTAL_HOME from --data-dir. It gets its own copy of the log file
     # handle, so this process can close its copy right away.
     with open(log_path, "ab") as log:
-        subprocess.Popen([*_self_command(), "--server", "--port", str(PORT)], stdout=log, stderr=log, **options)
+        subprocess.Popen([*osutil.self_command(), "--server", "--port", str(PORT)], stdout=log, stderr=log, **options)
     for _ in range(60):
         if up():
             print(f"JobPortal server running at {url} (log: {log_path})")
@@ -160,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.stop:
         return stop()
     if args.background:
-        return background()
+        return background(scheduled=args.scheduled)
     if args.server:
         return serve()
     from jobportal.app.desktop import main as desktop_main

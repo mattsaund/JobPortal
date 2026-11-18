@@ -108,6 +108,14 @@ def usage() -> dict:
             "tokens": int(bus.state.get("tokens") or 0), "requests": int(bus.state.get("ai_requests") or 0), "capped": usage_high()}
 
 
+def setup_problem() -> str:
+    """Why AI tasks can't run right now, worded for the user, or "" when they can. A scheduled search checks this before it
+    starts (search/schedule.py)."""
+    if not signin.status().get("signed_in"):
+        return "Sign in with ChatGPT first (Settings, AI)."
+    return ""
+
+
 def _semaphore(n: int) -> asyncio.Semaphore:
     """The shared limit on how many AI tasks run at once (ai.max_parallel: Settings, AI, "AI tasks at the same time").
     When the setting changes, a new semaphore replaces the old one, and tasks that already hold the old one simply finish

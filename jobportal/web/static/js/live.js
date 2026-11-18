@@ -53,6 +53,10 @@ function onEvent({ kind, data }) {
       if (data && S.lead && S.lead.id === data.id) refreshLeadDetails(data);
       refreshSoon();
       break;
+    case "schedule":  // the schedule changed, or a scheduled search started or was skipped (search/schedule.py)
+      S.schedule = S.state.schedule = data;
+      scheduleChanged();
+      break;
     case "toast":
       toast(data.title, data.body, data.level || "", data.lead_id);
       break;

@@ -122,7 +122,7 @@ def migrate_defaults() -> list[str]:
     if not stored:
         return []
     seen = set(stored.get("_defaults_seen", []))
-    added = _retire_tech_defaults(stored)
+    added = _retire_tech_defaults(stored) + _schedule_from_auto_run(stored)
     boards = stored.get("sources", {}).get("ats_boards", {}).get("boards")
     if boards is not None:
         have = {_board_id(b) for b in boards}
@@ -144,6 +144,26 @@ def migrate_defaults() -> list[str]:
     stored["_defaults_seen"] = sorted(seen)
     db.kv_set("settings", stored)
     return added
+
+
+def _schedule_from_auto_run(stored: dict) -> list[str]:
+    """Versions before v0.4.0 could search "every N hours" (run.auto_run_hours, 0 meant off). v0.4.0 searches at times of
+    day instead (the "schedule" section). A stored N above zero becomes the same rhythm as times, starting at 08:00 (every
+    8 hours is 08:00 and 16:00 and 00:00), with the schedule on. The old key is removed either way. Returns a note when it
+    turned the schedule on."""
+    run = stored.get("run")
+    if not isinstance(run, dict) or "auto_run_hours" not in run:
+        return []
+    try:
+        hours = float(run.pop("auto_run_hours") or 0)
+    except (TypeError, ValueError):
+        return []
+    if hours <= 0 or "schedule" in stored:
+        return []
+    step = max(1, round(hours))
+    times = sorted({f"{(8 + step * k) % 24:02d}:00" for k in range(max(1, 24 // step))})
+    stored["schedule"] = {"enabled": True, "times": times}
+    return [f"schedule every {step} hours"]
 
 
 def _board_id(board: dict) -> str | None:
