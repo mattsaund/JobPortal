@@ -8,7 +8,7 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Request
 
 from jobportal.ai import client as ai
-from jobportal.candidate import documents, library, onboarding, profile
+from jobportal.candidate import builder, documents, library, onboarding, profile
 from jobportal.core import background, bus, db
 from jobportal.documents import extract
 from jobportal.web.common import ai_error, read_upload
@@ -58,6 +58,34 @@ async def import_resume_text(body: dict):
     if body.get("save_to_library", True):
         _keep_copy_in_library(profile.resume()["text"], name)
     return out
+
+
+@router.get("/api/onboarding/builder")
+def resume_builder_form():
+    """The resume builder, for someone without a resume: its questions and text boxes, and the answers to start from
+    (what they wrote last time, else the standard answers saved so far)."""
+    return builder.form()
+
+
+@router.post("/api/onboarding/builder")
+async def write_resume_from_answers(body: dict):
+    """Write a resume from the builder's answers ({"answers": {...}, "jobs": [{...}]}) and make it the main resume (one AI
+    call). A copy goes to Settings, Resumes. When the answers complete setup, the first profile build starts. Returns the
+    resume, the AI's notes on what to add, the saved answers and the profile status."""
+    try:
+        out = await builder.write_resume(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except ai.AIError as e:
+        raise ai_error(e)
+    try:
+        builder.keep_in_library(out["markdown"])
+    except Exception:  # noqa: BLE001 (the copy is a convenience; it must never undo the resume itself)
+        pass
+    building = bool(out["answers"].pop("first_complete") and profile.resume())
+    if building:
+        background.spawn(profile.build("standard answers saved"))  # build() reports its own errors as toasts
+    return {**out, "building": building, "status": profile.status_snapshot()}
 
 
 @router.put("/api/onboarding/answers")

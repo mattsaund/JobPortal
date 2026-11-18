@@ -62,4 +62,4 @@ def prompt_defaults():
     """The built-in system prompts by name, which Settings, AI shows as placeholders until the user overrides one."""
     return {"triage": prompts.TRIAGE_SYSTEM, "hunt": prompts.HUNT_SYSTEM, "package": prompts.PACKAGE_SYSTEM,
             "revise": prompts.REVISE_SYSTEM, "profile": prompts.PROFILE_SYSTEM, "analysis": prompts.ANALYSIS_SYSTEM,
-            "resume_review": prompts.RESUME_REVIEW_SYSTEM, "documents": prompts.DOCUMENT_SYSTEM}
+            "resume_review": prompts.RESUME_REVIEW_SYSTEM, "documents": prompts.DOCUMENT_SYSTEM, "builder": prompts.BUILDER_SYSTEM}

@@ -239,7 +239,8 @@ function resumeCard() {
     <p>Drop your resume and anything else that shows what you've done. JobPortal reads them all to learn your experience,
       and fills in most of your answers from your resume.</p>
     ${documentsDropZone(true)}
-    <div class="feed-actions"><button class="text-button" type="button" data-act="paste-resume">Or paste your resume's text ${icon("arrow")}</button></div>
+    <div class="feed-actions"><button class="text-button" type="button" data-act="paste-resume">Or paste your resume's text ${icon("arrow")}</button>
+      <button class="text-button" type="button" data-act="open-builder">No resume? Answer a few questions and JobPortal writes one ${icon("arrow")}</button></div>
   </article>`;
 }
 
