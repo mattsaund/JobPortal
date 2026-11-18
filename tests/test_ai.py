@@ -293,6 +293,43 @@ def test_missing_fields_get_a_second_chance(openai_mock):
     assert "Missing required fields: score" in openai_mock["bodies"][1]["input"][-1]["output"]
 
 
+def test_submit_result_rejects_values_that_violate_the_schema(openai_mock):
+    openai_mock["replies"] = [
+        [call("submit_result", {"score": "high"}), done()],
+        [call("submit_result", {"score": 5}, "c2"), done()],
+    ]
+    assert asyncio.run(ai.run("x", system="s", schema=SCHEMA, stage="triage", purpose="t"))["score"] == 5
+    correction = openai_mock["bodies"][1]["input"][-1]["output"]
+    assert "schema" in correction and "score" in correction
+
+
+def test_plain_text_json_is_validated_before_acceptance(openai_mock):
+    def answer(value):
+        return item({"type": "message", "id": "msg", "role": "assistant",
+                     "content": [{"type": "output_text", "text": json.dumps(value)}]})
+
+    openai_mock["replies"] = [
+        [answer({"score": "high"}), done()],
+        [answer({"score": 5}), done()],
+    ]
+    assert asyncio.run(ai.run("x", system="s", schema=SCHEMA, stage="triage", purpose="t"))["score"] == 5
+    assert "schema" in openai_mock["bodies"][1]["input"][-1]["content"][0]["text"]
+
+
+def test_schema_constraints_are_applied_beyond_required_fields(openai_mock):
+    schema = {
+        "type": "object",
+        "properties": {"score": {"type": "integer", "minimum": 1}},
+        "required": ["score"],
+    }
+    openai_mock["replies"] = [
+        [call("submit_result", {"score": 0}), done()],
+        [call("submit_result", {"score": 1}, "c2"), done()],
+    ]
+    assert asyncio.run(ai.run("x", system="s", schema=schema, stage="triage", purpose="t"))["score"] == 1
+    assert "schema" in openai_mock["bodies"][1]["input"][-1]["output"]
+
+
 def test_bad_tool_calls_get_a_reply(openai_mock):
     not_an_object = item({"type": "function_call", "call_id": "c1", "name": "submit_result", "arguments": "[1, 2]"})
     openai_mock["replies"] = [[not_an_object, call("send_email", {}, "c2"), done()], [call("submit_result", {"score": 3}, "c3"), done()]]
