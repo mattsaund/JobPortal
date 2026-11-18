@@ -1,12 +1,15 @@
 /* home.js: the Home page (#/home), where JobPortal starts.
-   - Before you sign in with ChatGPT: a welcome that says what JobPortal does, the plan it needs, a big "Continue with
-     ChatGPT" button and the three steps. The "ai" event swaps it for the dashboard as soon as you're signed in.
+   - Before your AI is connected: a welcome that says what JobPortal does, a big "Continue with ChatGPT" button, the other
+     ways in for people without a ChatGPT plan (Sign in with OpenRouter, or an API key), the three steps, and answers to
+     what people ask first. The "ai" event swaps it for the dashboard as soon as the AI is ready.
    - After: the dashboard. The stats (leads ready, applications sent, interviews); "Questions for you", a feed that shows
      one thing at a time (your resume, what JobPortal read from it, the standard questions still empty, the profile
-     build, then the questions asked along the way); your top leads; and on the right your profile's progress, your
-     documents (components/documents.js) and where the search looks.
+     build, then the questions asked along the way); Next moves (follow-ups and openings worth a look, when there are any);
+     your top leads; and on the right your profile's progress, your documents (components/documents.js) and where the
+     search looks. The heading says when the next scheduled search starts.
    APIs: GET /api/onboarding, PATCH /api/onboarding/answers (each answer saves on its own), GET /api/leads (the five best
-   ready leads), GET /api/settings (the search area), POST /api/questions/answer and /dismiss, POST /api/profile/build.
+   ready leads), GET /api/moves and POST /api/moves/hide, GET /api/settings (the search area), POST /api/questions/answer
+   and /dismiss, POST /api/profile/build.
    Live events redraw the parts that changed (live.js). A card you're answering stays as it is through them, and an
    answer you've typed counts as an unsaved edit until it's saved, skipped or dismissed. */
 "use strict";
@@ -40,6 +43,7 @@ async function renderHome() {
         <div class="stats" id="home-stats"></div>
         <div class="section-heading"><div><h2>Questions for you</h2><p>One at a time. Every answer makes your matches better.</p></div></div>
         <div class="feed" id="home-feed"></div>
+        <div id="home-moves"></div>
         <div class="section-heading"><div><h2>Top leads</h2><p>Your best matches, ready to apply.</p></div>
           <a class="text-button" href="#/leads" data-act="leads-tab" data-tab="ready">View all leads ${icon("arrow")}</a></div>
         <div class="job-list" id="home-leads"></div>
@@ -55,26 +59,42 @@ async function renderHome() {
   await Promise.all([loadTopLeads(), reloadOnboarding()]);
 }
 
-// The welcome before you sign in with ChatGPT.
+// The welcome before your AI is connected.
 function welcomeHtml() {
   const step = (n, title, text) => `<li class="step-card"><span class="step-num">${n}</span><h3>${title}</h3><p>${text}</p></li>`;
+  const faq = (question, answer) => `<details class="disclosure"><summary>${question}</summary><p>${answer}</p></details>`;
   return `<div class="welcome">
     <div class="page-heading"><div><p class="eyebrow">WELCOME TO JOBPORTAL</p><h1>Find the jobs that fit you.</h1>
       <p>JobPortal looks for jobs wherever they're posted, ranks each one against your experience, and writes a tailored resume
         and cover letter for the best ones. It works for any field and any level.</p></div></div>
     <section class="welcome-hero">
       <div><span class="eyebrow">START HERE</span><h2>Sign in with ChatGPT</h2>
-        <p>JobPortal's AI runs on your own ChatGPT account, so there's nothing else to buy or set up. You need a ChatGPT Go, Plus
-          or Pro plan.</p></div>
+        <p>The easiest way in. JobPortal's AI runs on your own ChatGPT account, so there's nothing else to buy or set up. You
+          need a ChatGPT Go, Plus or Pro plan.</p></div>
       <button class="button primary big" type="button" data-act="ai-signin">Continue with ChatGPT ${icon("arrow")}</button>
       <p class="privacy-note">ChatGPT shares only your name and email with JobPortal. Your files stay on this computer, and each AI
         task sends only what it needs.</p>
     </section>
+    <section class="panel welcome-other"><h2>No ChatGPT plan?</h2>
+      <p class="panel-note">JobPortal works with other AIs too. You need an account with one of them.</p>
+      <div class="welcome-options">
+        <div class="welcome-option"><b>OpenRouter</b><p>One account for hundreds of AI models, including free ones with a daily limit.</p>
+          <button class="button outline" type="button" data-act="openrouter-signin">Sign in with OpenRouter</button></div>
+        <div class="welcome-option"><b>An API key</b><p>From Google Gemini (it has a free tier), Claude, OpenAI, Mistral, Groq, DeepSeek or Grok.</p>
+          <a class="button outline" href="#/settings/ai">Add a key</a></div>
+      </div></section>
     <ol class="steps">
-      ${step(1, "Sign in with ChatGPT", "One click. Usage counts against your plan, and you can set a limit in ChatGPT's settings.")}
+      ${step(1, "Connect your AI", "One click with ChatGPT or OpenRouter, or paste a key. What it uses is paid by your own account, and you can set a limit there.")}
       ${step(2, "Drop your resume and documents", "Your resume, plus any certificates, licenses, awards or transcripts you have.")}
       ${step(3, "Answer a few questions", "What you want and where. Most answers are filled in from your resume.")}
-    </ol></div>`;
+    </ol>
+    <section class="panel welcome-faq"><h2>Questions people ask</h2>
+      ${faq("What does it cost?", "JobPortal itself is free. Its AI runs on your own account: your ChatGPT plan, your OpenRouter account or your API key. You can set a spending limit there.")}
+      ${faq("Where does my information go?", "Your resume, profile and leads stay in JobPortal's folder on this computer. Each AI task sends the AI only what it needs, and job sites see visits like any browser's.")}
+      ${faq("No resume yet?", "That's fine. After you connect your AI, answer a few questions and JobPortal writes your first resume from them.")}
+      ${faq("Why does Windows or macOS warn me when I open it?", "The app isn't code-signed yet. On Windows, click More info, then Run anyway. On a Mac, open System Settings, Privacy & Security, and click Open Anyway.")}
+      ${faq("Can it search while I'm away?", "Yes. Turn on Search on a schedule in Settings, Search, and it keeps searching in the background, even after a restart.")}
+    </section></div>`;
 }
 
 // ---------------------------------------------------------------- the data behind it
@@ -136,6 +156,9 @@ const openFollowUps = () => (S.questions || []).filter((q) => q.status === "open
 const homeWaiting = () => (S.onboarding?.missing || []).length + (fromResumeIds().length ? 1 : 0) + openFollowUps().length;
 
 // ---------------------------------------------------------------- the heading and the stats
+// " Next scheduled search Tue 5:00 PM." while the schedule is on and no search is running, else "".
+const nextSearchNote = () => (S.schedule?.enabled && S.schedule.next && !S.state.running ? ` Next scheduled search ${fmtNextSearch(S.schedule.next)}.` : "");
+
 function renderHomeHeading() {
   const title = $("#home-title");
   if (!title) return;
@@ -145,7 +168,7 @@ function renderHomeHeading() {
   $("#home-sub").textContent = S.state.running ? "A search is running. New leads show up here as they're ready."
     : !ob.resume ? "Start with your resume. The rest takes a few minutes."
     : (ob.missing || []).length ? "A few questions and you're ready to search."
-    : st.built ? "Here's where your search stands." : "Your profile is almost ready.";
+    : st.built ? "Here's where your search stands." + nextSearchNote() : "Your profile is almost ready.";
   // The pill on the right: whether the profile is up to date. (setHtml: redrawn only when it changes, so its spinner
   // doesn't restart on every status event.)
   let pill = `<span class="status-dot"></span>Profile up to date`;
@@ -233,7 +256,8 @@ function resumeCard() {
     <p>Drop your resume and anything else that shows what you've done. JobPortal reads them all to learn your experience,
       and fills in most of your answers from your resume.</p>
     ${documentsDropZone(true)}
-    <div class="feed-actions"><button class="text-button" type="button" data-act="paste-resume">Or paste your resume's text ${icon("arrow")}</button></div>
+    <div class="feed-actions"><button class="text-button" type="button" data-act="paste-resume">Or paste your resume's text ${icon("arrow")}</button>
+      <button class="text-button" type="button" data-act="open-builder">No resume? Answer a few questions and JobPortal writes one ${icon("arrow")}</button></div>
   </article>`;
 }
 
@@ -278,9 +302,9 @@ function buildCard() {
       "<p>JobPortal is reading everything you gave it and writing your profile: your experience, your skills and what to search for. Usually 1 to 4 minutes. You can keep going meanwhile.</p>") };
   }
   if (st.error) {
-    const signIn = aiReady() ? "" : `<button class="button outline" type="button" data-act="ai-signin">Sign in with ChatGPT</button>`;
+    const signIn = aiReady() ? "" : `<button class="button outline" type="button" data-act="ai-connect">Connect your AI</button>`;
     return { key: "build", html: card("error", icon("warning"), "THE PROFILE BUILD STOPPED", "Something went wrong",
-      `<p>${esc(st.error)}</p><p>Check that you're signed in with ChatGPT on a Go, Plus or Pro plan, then try again.</p>`,
+      `<p>${esc(st.error)}</p><p>Check that your AI is connected (Settings, AI), then try again.</p>`,
       `<button class="button primary" type="button" data-act="profile-build">${icon("refresh")} Try again</button>${signIn}`) };
   }
   if (S.buildDone) {
@@ -349,6 +373,7 @@ function skipQuestion(id) {
 // The five best ready leads, as job cards (leads.js). A click opens one on the Leads page. Live refreshes during a
 // search redraw them only when they changed (setHtml).
 async function loadTopLeads() {
+  loadMoves();  // Next moves come from the leads too, so they reload together
   let d;
   try {
     d = await api("/api/leads?tab=ready&sort=score&limit=5");
@@ -362,6 +387,32 @@ async function loadTopLeads() {
   setHtml(box, d.leads.map((l) => leadCard(l)).join("") || `<div class="empty-state"><h3>No leads yet</h3><p>${empty}</p></div>`);
 }
 
+// ---------------------------------------------------------------- next moves
+// The Next moves card (GET /api/moves): a few things worth doing next, found by plain rules over your leads (no reply after
+// three weeks, a new opening where you were turned down before, several openings at one company). Hidden when there are
+// none. Each move has a button and Hide (30 days).
+async function loadMoves() {
+  let d;
+  try {
+    d = await api("/api/moves");
+  } catch (_) {
+    return;
+  }
+  const box = $("#home-moves");
+  if (!box) return;
+  setHtml(box, d.moves.length ? `<div class="section-heading"><div><h2>Next moves</h2><p>Worth doing soon, from your applications.</p></div></div>
+    <div class="moves">${d.moves.map(moveRow).join("")}</div>` : "");
+}
+
+function moveRow(m) {
+  const button = m.cta.search
+    ? `<button class="button outline small" type="button" data-act="leads-search" data-q="${esc(m.cta.search)}">${esc(m.cta.label)}</button>`
+    : `<a class="button outline small" href="${esc(m.cta.href)}">${esc(m.cta.label)}</a>`;
+  return `<div class="move"><span class="small-tag">${esc(m.kind.toUpperCase())}</span>
+    <div class="move-text"><b>${esc(m.text)}</b><small>${esc(m.why)}</small></div>${button}
+    <button class="icon-button" type="button" data-act="hide-move" data-key="${esc(m.key)}" aria-label="Hide this for 30 days" title="Hide for 30 days">${icon("close")}</button></div>`;
+}
+
 // Your profile: who you are, what you're after, and the setup checklist with its progress bar.
 function renderProfilePanel() {
   const el = $("#home-profile");
@@ -370,7 +421,7 @@ function renderProfilePanel() {
   const name = yourName();
   const role = (a.target_roles || [])[0];
   const place = [a.city, a.state].filter(Boolean).join(", ");
-  const checks = [["Signed in with ChatGPT", aiReady()], ["Resume added", !!ob.resume], ["Other documents added", (S.documents || []).length > 0],
+  const checks = [["AI connected", aiReady()], ["Resume added", !!ob.resume], ["Other documents added", (S.documents || []).length > 0],
     ["Required questions answered", !!ob.resume && !(ob.missing || []).length], ["Profile built", !!st.built]];
   const done = checks.filter(([, ok]) => ok).length, percent = Math.round((done / checks.length) * 100);
   const tag = done === checks.length ? "COMPLETE" : st.busy ? "BUILDING" : "KEEP GOING";
@@ -484,4 +535,14 @@ document.addEventListener("input", (e) => {
   if (!card) return;
   card.dataset.edited = "1";
   S.dirty = true;
+});
+onAction("leads-search", (el) => {  // a Next moves button: Leads, searched for one company, on every tab
+  $("#search").value = el.dataset.q;
+  S.leadsTab = "all";
+  searchLeads();
+});
+onAction("hide-move", async (el) => {
+  await api("/api/moves/hide", { method: "POST", body: { key: el.dataset.key } });
+  toast("Hidden for 30 days", "It comes back if it still applies then.");
+  loadMoves();
 });

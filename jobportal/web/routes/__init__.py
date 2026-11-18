@@ -2,7 +2,7 @@
 profile live in candidate.py next to jobportal/candidate/, and so on. web/server.py includes every router listed here.
 
 Adding an endpoint: put it in the module for its area, or add a module and list its router in ROUTERS."""
-from jobportal.web.routes import candidate, chatgpt, documents, insights, leads, library, search, settings, system
+from jobportal.web.routes import ai, candidate, documents, insights, leads, library, search, settings, system
 
-ROUTERS = [system.router, chatgpt.router, search.router, leads.router, documents.router, candidate.router, library.router,
+ROUTERS = [system.router, ai.router, search.router, leads.router, documents.router, candidate.router, library.router,
            insights.router, settings.router]

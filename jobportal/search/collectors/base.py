@@ -25,7 +25,7 @@ RETRY_STATUSES = (429, 502, 503, 504)  # rate limited, or a passing server probl
 
 # Sources whose "jobs" are posts or comments, not job postings. The title is the post's first line and the URL is the post
 # itself, so there is no posting page to fetch more details from.
-SOCIAL_SOURCES = frozenset({"hackernews", "mastodon", "reddit", "bluesky"})
+SOCIAL_SOURCES = frozenset({"hackernews", "mastodon", "reddit", "bluesky", "x"})
 # An allowed location that means the whole country ("Nationwide", "Anywhere in the US", "USA"). Match it against the
 # lowercased, stripped text with fullmatch(). It's the location filter's own pattern, so a source and the filter always
 # agree on which entries are nationwide.

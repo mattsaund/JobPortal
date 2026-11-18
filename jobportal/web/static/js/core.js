@@ -330,7 +330,7 @@ const S = {
   // Loaded at startup (main.js) and kept up to date by events
   meta: null,             // GET /api/meta: version, os, data_dir, statuses, status_labels, efforts, collectors, pdf_ready
   state: { running: false, counts: {} },  // the live run state from the server: running, run_id, mode, phase, counts,
-                                          // started_at, tokens, run_tokens_start, ai (the ChatGPT sign-in), active_agents
+                                          // started_at, tokens, run_tokens_start, ai (the AI's status), active_agents
   stats: null,            // GET /api/stats: the sidebar badges and the Home stats
   logs: [],               // live feed lines {ts, source, level, msg}: the last run's log, then "log" events (600 at most)
   profileStatus: null,    // GET /api/profile/status and "profile_status" events: has_resume, answers_saved, built, busy,
@@ -345,7 +345,9 @@ const S = {
   route: [],              // the current hash split into parts: #/leads/12/emails is ["leads", "12", "emails"]
   dirty: false,           // unsaved edits on screen: an editor, a form, a lead's notes, an answer typed on Home
   quit: false,            // you quit JobPortal from Settings: don't reconnect the live stream
-  notify: store.get("notify") === "1",  // system notifications for toasts while JobPortal is in the background
+  alerts: false,          // Settings, Appearance: desktop alerts for toasts while JobPortal is in the background (the
+                          // server's "alerts.desktop" setting, so a search in the background can send them too)
+  schedule: null,         // GET /api/schedule and "schedule" events: on or off, the next scheduled search, the last one
   // Leads page (leads.js). The filter and the feed's open state are remembered.
   leadsTab: store.get("leadsTab", "ready"),  // ready, queue, filtered, closed, trashed or all
   q: "",                  // the search box in the top bar
@@ -375,13 +377,13 @@ const S = {
 // Display names for where a lead came from (lead.source and lead.sources).
 const LABEL_SRC = { github: "GitHub lists", ats: "Company board", linkedin: "LinkedIn", ai_hunt: "AI hunt", hackernews: "Hacker News",
   themuse: "The Muse", usajobs: "USAJobs", reddit: "Reddit", mastodon: "Mastodon", bluesky: "Bluesky", remote: "Remote board",
-  rss: "RSS", adzuna: "Adzuna", google: "Google Jobs", manual: "Added by you" };
+  rss: "RSS", adzuna: "Adzuna", google: "Google Jobs", manual: "Added by you", x: "X", paste: "Pasted posts" };
 // The resume layouts, as named in RESUME_THEMES in documents/render.py on the server.
 const RESUME_THEMES = ["classic", "modern", "compact", "academic"];
 
 // ---------------------------------------------------------------- toasts
 // Shows a short message at the bottom of the window. level "error" makes it red and keeps it longer. With a leadId,
-// clicking it opens that lead. action ({ label, run }) adds a button, like Undo. When alerts are on (S.notify) and
+// clicking it opens that lead. action ({ label, run }) adds a button, like Undo. When alerts are on (S.alerts) and
 // JobPortal is in the background, it also shows a system notification.
 function toast(title, body = "", level = "", leadId = null, action = null) {
   const el = document.createElement("div");
@@ -401,7 +403,7 @@ function toast(title, body = "", level = "", leadId = null, action = null) {
   box.prepend(el);
   $$(".toast", box).slice(4).forEach((old) => old.remove());  // four at most
   setTimeout(() => el.remove(), level === "error" ? 12000 : action ? 10000 : 6500);
-  if (!S.notify) return;
+  if (!S.alerts) return;
   if (desktop() && !document.hasFocus()) {
     window.pywebview.api.notify(title, body);
   } else if (document.hidden && "Notification" in window && Notification.permission === "granted") {

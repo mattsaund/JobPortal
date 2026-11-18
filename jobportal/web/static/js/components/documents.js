@@ -59,6 +59,7 @@ function documentsList() {
       <div class="doc-name"><strong title="${esc(resume.filename)}">${esc(resume.filename)}</strong><span class="tag green">MAIN RESUME</span></div>
       <small>Added ${esc(fmtTs(resume.imported_at))}</small>
       <div class="doc-actions"><button class="text-button" type="button" data-act="resume-read">What it read</button>
+        ${S.onboarding.resume_from_builder ? `<button class="text-button" type="button" data-act="open-builder">Change your answers</button>` : ""}
         <button class="text-button" type="button" data-act="resume-replace">Replace</button>
         <button class="text-button" type="button" data-act="paste-resume">Paste text instead</button></div></div></li>` : "";
   if (!main && !docs.length) return `<p class="muted-note">Nothing yet. Start with your resume.</p>`;

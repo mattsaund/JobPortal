@@ -1,5 +1,5 @@
 /* live.js: the live connection to the server. The server pushes events over Server-Sent Events (GET /api/events, fed by
-   core/bus.py): run progress, live feed lines, new and changed leads, profile changes, documents, the ChatGPT sign-in and
+   core/bus.py): run progress, live feed lines, new and changed leads, profile changes, documents, the AI's status and
    toasts. onEvent() stores what changed in S and redraws the parts of the frame and of the open page that show it.
    Every redraw it starts leaves your unsaved edits alone, and a text box you're typing in (see typingIn in core.js).
    APIs: GET /api/events, plus what the redraws load (GET /api/stats, the open page's list, GET /api/onboarding). */
@@ -53,10 +53,14 @@ function onEvent({ kind, data }) {
       if (data && S.lead && S.lead.id === data.id) refreshLeadDetails(data);
       refreshSoon();
       break;
+    case "schedule":  // the schedule changed, or a scheduled search started or was skipped (search/schedule.py)
+      S.schedule = S.state.schedule = data;
+      scheduleChanged();
+      break;
     case "toast":
       toast(data.title, data.body, data.level || "", data.lead_id);
       break;
-    case "ai":  // the ChatGPT sign-in
+    case "ai":  // the AI's status: the provider in use and whether it's connected
       onAIStatus(data);
       break;
     case "tokens":  // the AI tokens used since JobPortal started

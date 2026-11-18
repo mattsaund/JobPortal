@@ -17,7 +17,7 @@ The profile only learns from the user here: questions raised while packaging go 
 (profile.ask), and apply_answers folds the user's own answers in (profile.update_from_answers).
 
 Side effects: rows in the leads and events tables, files in the lead's folder (LEADS_DIR/<id>), live events, and AI calls on
-the user's ChatGPT plan (ai.run raises ai.AIError when the AI fails)."""
+the user's own AI account (ai.run raises ai.AIError when the AI fails)."""
 import asyncio
 import json
 import re

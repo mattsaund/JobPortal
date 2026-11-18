@@ -3,9 +3,7 @@
 This module builds the FastAPI app: what happens at startup and shutdown, two safety checks on every request, the dashboard
 files, and the routes. The routes live in web/routes/, one module per area of the dashboard. app/desktop.py starts the
 server and shows the window."""
-import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, PlainTextResponse
@@ -16,35 +14,19 @@ from jobportal.ai import client as ai, signin
 from jobportal.candidate import documents, profile
 from jobportal.core import background, bus, db, settings
 from jobportal.core.config import STATIC
-from jobportal.search import pipeline
+from jobportal.search import schedule
 from jobportal.web.routes import ROUTERS
 
 # Host names that mean "this computer". "testserver" is the name FastAPI's test client uses.
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
 
 
-async def auto_runner() -> None:
-    """Start a full search every N hours when Settings, Search, "Search by itself every (hours)" is above zero. Checks
-    once a minute."""
-    while True:
-        await asyncio.sleep(60)
-        try:
-            hours = float(settings.get()["run"].get("auto_run_hours") or 0)
-            if hours <= 0 or bus.state.get("running"):
-                continue
-            last = db.one("SELECT started_at FROM runs ORDER BY id DESC LIMIT 1")
-            if last and datetime.now(timezone.utc) - datetime.fromisoformat(last["started_at"]) < timedelta(hours=hours):
-                continue
-            await pipeline.start("full")
-        except Exception:  # noqa: BLE001 (the scheduler must keep running; a run that can't start just waits)
-            pass
-
-
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Startup: open the database, clean up after a crash or a forced quit, publish the sign-in and profile status, and
-    start the two background loops and the AI reading of documents that only have their rules reading. Shutdown: stop AI
-    requests and all background work."""
+    """Startup: open the database, clean up after a crash or a forced quit, publish the sign-in, profile and alert status,
+    and start the two background loops (the schedule, and the answers watcher) and the AI reading of documents that only
+    have their rules reading. The login item is refreshed, so it follows the app when it moved or was updated. Shutdown:
+    stop AI requests and all background work."""
     db.conn()
     signin.publish()
     settings.migrate_defaults()
@@ -53,7 +35,10 @@ async def lifespan(_app: FastAPI):
     db.ex("UPDATE leads SET stage='qualified' WHERE stage='packaging'")
     db.ex("UPDATE runs SET status='interrupted', finished_at=? WHERE status='running'", (db.now(),))
     profile.publish_status()
-    background.spawn(auto_runner())
+    bus.state["alerts"] = settings.get()["alerts"]
+    schedule.sync_login_item()
+    server = getattr(_app.state, "server", None)  # the uvicorn server, when app/desktop.py or app/cli.py started it
+    background.spawn(schedule.runner((lambda: setattr(server, "should_exit", True)) if server else None))
     background.spawn(profile.answers_watcher(settings.get))
     background.spawn(documents.parse_pending())  # nothing to do unless signed in; it reports its own errors
     yield

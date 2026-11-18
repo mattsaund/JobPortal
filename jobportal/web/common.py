@@ -8,8 +8,8 @@ MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # imported resumes; real ones are far small
 
 
 def ai_error(e: Exception) -> HTTPException:
-    """Turn an AI failure into the HTTP status the dashboard expects: 401 means "sign in with ChatGPT", 429 means the plan's
-    usage cap was reached, and 502 is anything else that went wrong talking to OpenAI."""
+    """Turn an AI failure into the HTTP status the dashboard expects: 401 means "connect the AI" (sign in, or add or fix
+    the key), 429 means a cap, no credit or a rate limit, and 502 is anything else that went wrong talking to the AI."""
     if isinstance(e, ai.NotSignedIn):
         return HTTPException(401, str(e))
     if isinstance(e, ai.UsageLimitError):

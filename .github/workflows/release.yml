@@ -10,12 +10,18 @@ permissions:
 
 jobs:
   build:
-    name: build on ${{ matrix.os }}
+    name: build for ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-22.04]
+        # Each Mac build runs on a runner of its own kind: PyInstaller builds for the machine it runs on. GitHub keeps its
+        # Intel Mac runner (macos-15-intel) until fall 2027, when Apple Silicon is the only Mac left to build for.
+        include:
+          - { os: windows-latest, name: Windows }
+          - { os: macos-latest, name: macOS, pdf_engine: mac-arm64, dmg: JobPortal-macOS.dmg }
+          - { os: macos-15-intel, name: macOS-Intel, pdf_engine: mac-x64, dmg: JobPortal-macOS-Intel.dmg }
+          - { os: ubuntu-22.04, name: Linux }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -29,7 +35,7 @@ jobs:
       - name: Bundle the PDF engine (macOS)
         if: runner.os == 'macOS'
         run: |
-          python packaging/fetch_pdf_engine.py mac-arm64 dist/JobPortal.app/Contents/Resources/pdf-engine
+          python packaging/fetch_pdf_engine.py ${{ matrix.pdf_engine }} dist/JobPortal.app/Contents/Resources/pdf-engine
           codesign --force --sign - dist/JobPortal.app
       - name: Bundle the PDF engine (Linux)
         if: runner.os == 'Linux'
@@ -88,7 +94,7 @@ jobs:
           mkdir -p out dmg
           ditto dist/JobPortal.app dmg/JobPortal.app
           ln -s /Applications dmg/Applications
-          hdiutil create -volname JobPortal -srcfolder dmg -ov -format UDZO out/JobPortal-macOS.dmg
+          hdiutil create -volname JobPortal -srcfolder dmg -ov -format UDZO out/${{ matrix.dmg }}
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -105,7 +111,7 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN=1 ./out/JobPortal-Linux-x86_64.AppImage --version | grep -q JobPortal
       - uses: actions/upload-artifact@v4
         with:
-          name: JobPortal-${{ runner.os }}
+          name: JobPortal-${{ matrix.name }}
           path: out/*
 
   publish:

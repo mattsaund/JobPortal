@@ -3,8 +3,9 @@ placeholders until the user overrides one)."""
 from fastapi import APIRouter, HTTPException
 
 from jobportal.ai import prompts
-from jobportal.core import settings
+from jobportal.core import bus, osutil, settings
 from jobportal.documents import render
+from jobportal.search import schedule
 
 router = APIRouter()
 
@@ -17,8 +18,27 @@ def get_settings():
 
 @router.put("/api/settings")
 def save_settings(body: dict):
-    """Store the whole settings document the dashboard sends, replacing what was saved, and return the result."""
-    return settings.save(body)
+    """Store the whole settings document the dashboard sends, replacing what was saved, and return the result. The schedule
+    and the desktop alerts follow the new settings at once (search/schedule.settings_saved)."""
+    before = settings.get()
+    after = settings.save(body)
+    schedule.settings_saved(before, after)
+    bus.state["alerts"] = after["alerts"]
+    return after
+
+
+@router.get("/api/schedule")
+def schedule_status():
+    """The schedule as Settings and Home show it: on or off, the next scheduled search, the last one, and whether JobPortal
+    starts in the background at login."""
+    return schedule.status()
+
+
+@router.post("/api/alerts/test")
+def test_alert():
+    """Send a desktop alert right away, the same way JobPortal sends one when its window is closed, so the user can check
+    that alerts show on this computer. ok is False when the system has no way to show one."""
+    return {"ok": osutil.notify("JobPortal test alert", "Desktop alerts work on this computer.")}
 
 
 @router.post("/api/settings/reset")
@@ -42,4 +62,4 @@ def prompt_defaults():
     """The built-in system prompts by name, which Settings, AI shows as placeholders until the user overrides one."""
     return {"triage": prompts.TRIAGE_SYSTEM, "hunt": prompts.HUNT_SYSTEM, "package": prompts.PACKAGE_SYSTEM,
             "revise": prompts.REVISE_SYSTEM, "profile": prompts.PROFILE_SYSTEM, "analysis": prompts.ANALYSIS_SYSTEM,
-            "resume_review": prompts.RESUME_REVIEW_SYSTEM, "documents": prompts.DOCUMENT_SYSTEM}
+            "resume_review": prompts.RESUME_REVIEW_SYSTEM, "documents": prompts.DOCUMENT_SYSTEM, "builder": prompts.BUILDER_SYSTEM}

@@ -16,11 +16,11 @@ How a run flows (Pipeline.run):
 5. Package workers build packages for queued leads (packages.build_package), best first with close deadlines jumping the
    line, up to the per-run package cap.
 
-Stop cancels everything at once. A ChatGPT usage cap pauses the run instead: AI work stops and queued leads wait for the next
+Stop cancels everything at once. A usage limit on the user's AI account pauses the run instead: AI work stops and queued leads wait for the next
 run. Building a package and other work on one lead lives in packages.py.
 
 Side effects: rows in the runs, run_log, leads, events and candidates tables; live events (core/bus.py: log, state, lead,
-toast, run_done); AI calls on the user's ChatGPT plan; HTTP requests to job sites."""
+toast, run_done); AI calls on the user's own AI account; HTTP requests to job sites."""
 import asyncio
 import json
 import re
@@ -466,7 +466,7 @@ class Pipeline:
                 return
             if len(self.pool) < batch_size and not self.collecting_done.is_set():
                 # Collectors are still running. Wait for at least half a batch: each AI request carries the whole triage
-                # prompt, so fuller batches use the ChatGPT plan better.
+                # prompt, so fuller batches use the AI account better.
                 await asyncio.sleep(4)
                 if len(self.pool) < batch_size // 2 and not self.collecting_done.is_set():
                     continue
@@ -481,7 +481,7 @@ class Pipeline:
             try:
                 await self.triage_batch(batch)
             except ai.UsageLimitError as e:
-                self.pause(f"ChatGPT usage cap: {e}")
+                self.pause(str(e))
                 return
             except ai.AIError as e:
                 self.log("triage", f"batch failed: {e}", "error")
@@ -545,11 +545,11 @@ class Pipeline:
 
     # ------------------------------------------------------------ packages
     def pause(self, reason: str) -> None:
-        """Pause the run (a ChatGPT usage cap): stop starting AI work and wind down. Qualified leads stay queued for the next
+        """Pause the run (the AI account reached a usage limit): stop starting AI work and wind down. Qualified leads stay queued for the next
         run. Only the first reason is kept."""
         if not self.paused_reason:
             self.paused_reason = reason
-            self.log("run", f"paused: {reason}. Stopping AI work; qualified leads stay queued for the next run", "warn")
+            self.log("run", f"paused: {reason.rstrip('.')}. Stopping AI work; qualified leads stay queued for the next run", "warn")
             self.cancel.set()
 
     async def package_worker(self) -> None:
@@ -563,14 +563,14 @@ class Pipeline:
                 if self.cancel.is_set() or self.packages_started >= cap:
                     continue
                 if ai.usage_high():
-                    self.pause("JobPortal reached its ChatGPT usage cap")
+                    self.pause("your AI account reached a usage limit a few minutes ago")
                     continue
                 self.packages_started += 1
                 try:
                     await build_package(lead_id, run_id=self.run_id, ctx=self.ctx, log=self.log)
                     self.stats["packaged"] += 1
                 except ai.UsageLimitError as e:
-                    self.pause(f"ChatGPT usage cap: {e}")
+                    self.pause(str(e))
                 except Exception as e:  # noqa: BLE001 (build_package already marked the lead as failed)
                     self.stats["package errors"] += 1
                     self.log("package", f"lead {lead_id}: {e}", "error")
@@ -608,7 +608,7 @@ class Pipeline:
         try:
             await hunt.collect(self.ctx, on_batch=self.add_jobs, all_missions=self.mode == "hunt")
         except ai.UsageLimitError as e:
-            self.pause(f"ChatGPT usage cap: {e}")
+            self.pause(str(e))
         except Exception as e:  # noqa: BLE001
             self.log("hunt", f"failed: {type(e).__name__}: {e}", "error")
 
@@ -745,9 +745,11 @@ async def stop() -> None:
 # ---------------------------------------------------------------- re-checking saved leads
 
 
-async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filtered", "qualified")) -> dict:
+async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filtered", "qualified"),
+                         lead_ids: list[int] | None = None) -> dict:
     """Score saved leads again against the current profile: below-threshold leads and qualified ones still waiting for a
     package. A new answer (a skill, a project, a certification) can turn an earlier "no" into a match, or the other way.
+    lead_ids limits it to those leads (the jobs from pasted posts, scored for the first time).
 
     Only leads without a resume and not in the trash are checked, RETRIAGE_BATCH per AI request (stage "triage"). Each lead's
     score, verdict, triage notes and stage are updated, unless its stage changed or it got a resume while the AI was
@@ -761,13 +763,17 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
         placeholders = ",".join("?" * len(stages))
         leads = [db.lead_row(r) for r in db.q(
             f"SELECT * FROM leads WHERE stage IN ({placeholders}) AND app_status!='trashed' AND resume_md IS NULL", stages)]
+        if lead_ids is not None:
+            wanted = set(lead_ids)
+            leads = [lead for lead in leads if lead["id"] in wanted]
         if not leads:
             return {"ok": True, "checked": 0, "promoted": 0, "demoted": 0}
         min_score = int(cfg["run"].get("min_score", 60))
         system = triage_system(cfg)
         promoted, demoted, checked = [], [], 0
-        bus.publish("toast", {"title": "Re-evaluating leads",
-                              "body": f"{len(leads)} below-threshold and queued leads against your updated profile ({reason})."})
+        bus.publish("toast", {"title": "Scoring the new jobs" if lead_ids is not None else "Re-evaluating leads",
+                              "body": f"{len(leads)} jobs from {reason}." if lead_ids is not None
+                              else f"{len(leads)} below-threshold and queued leads against your updated profile ({reason})."})
         for offset in range(0, len(leads), RETRIAGE_BATCH):
             batch = leads[offset:offset + RETRIAGE_BATCH]
             items = [_triage_item(k, title=lead["title"], company=lead["company"], location=lead["location"], kind=lead["kind"],

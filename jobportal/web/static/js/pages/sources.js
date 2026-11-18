@@ -9,22 +9,24 @@
 // What each source is, by its key in S.meta.collectors.
 const SRC_HELP = {
   github_lists: "Community-kept lists of tech internships and new-graduate jobs, updated daily. Used only when your targets include tech jobs at the internship or entry level.",
-  ats_boards: "The job boards of specific companies, read directly. Add any company by pasting its careers page.",
+  ats_boards: "The job boards of specific companies, read directly. Add any company by pasting its careers page (Greenhouse, Lever, Ashby, Workday, UKG, iCIMS, SmartRecruiters, Recruitee or Personio).",
   linkedin: "LinkedIn's public job search (no sign-in): your search terms in your search area, at your experience levels.",
   usajobs: "U.S. federal government jobs in every field, including student programs. Needs a free key from developer.usajobs.gov.",
   hackernews: "The monthly hiring threads on Hacker News, plus recent comments that mention jobs at your level. Used only when your targets include tech jobs.",
   bluesky: "Hiring posts on Bluesky. Needs your handle and a free app password (Bluesky settings, Privacy and security, App passwords).",
+  x: "Hiring posts on X through its official API. Needs your own X developer app's Bearer token (developer.x.com). X charges about half a cent for each post it returns, so keep the numbers low.",
   themuse: "Listings from The Muse at your levels, in your search area.",
   reddit: "Job posts in the subreddits below. Reddit limits how often it can be read, so the AI hunt covers more of it.",
   mastodon: "Hiring hashtags on Mastodon.",
-  remote_boards: "Remotive, RemoteOK and We Work Remotely, when Remote is part of your search area.",
+  remote_boards: "Remotive, RemoteOK, We Work Remotely, Himalayas, Jobicy and Working Nomads, when Remote is part of your search area.",
   rss: "Any RSS or Atom feed. Tip: set up a Google Alert for the jobs you want, delivered as a feed, and paste its link here.",
   adzuna: "A job search site that gathers listings from many boards. Needs a free key from developer.adzuna.com.",
   serpapi: "Google's job results through SerpAPI (100 free searches a month at serpapi.com).",
 };
 // The source name its leads carry (lead.source), by source key, for the counts.
 const COLLECTOR_SOURCE = { github_lists: "github", ats_boards: "ats", linkedin: "linkedin", usajobs: "usajobs", hackernews: "hackernews",
-  themuse: "themuse", reddit: "reddit", mastodon: "mastodon", bluesky: "bluesky", remote_boards: "remote", rss: "rss", adzuna: "adzuna", serpapi: "google" };
+  themuse: "themuse", reddit: "reddit", mastodon: "mastodon", bluesky: "bluesky", x: "x", remote_boards: "remote", rss: "rss", adzuna: "adzuna",
+  serpapi: "google" };
 
 // What the dialog shows besides the settings: the search plan's terms and the leads per source.
 let sourcesInfo = { queries: [], counts: {} };
@@ -61,6 +63,11 @@ function drawSources() {
       <p class="block-note">Change them under <a href="#/settings/search">Settings, Search</a>.</p>
       ${cfgLines("search.queries", "Your own search terms (one per line)", 4)}</section>
     <section class="block"><div class="block-head"><h3>Job sources</h3></div>${S.meta.collectors.map(sourceRow).join("")}</section>
+    <section class="block"><div class="block-head"><h3>Communities apps can't read</h3>
+        <button class="button outline small" type="button" data-act="paste-posts">${icon("plus")}Paste posts</button></div>
+      <p class="block-note">Discord, Slack, Facebook groups, Threads and LinkedIn posts don't let apps read them, so paste the posts you see
+        there and JobPortal finds the jobs in them. The AI hunt also checks what search engines show from LinkedIn, X, Indeed,
+        ZipRecruiter and Handshake.</p></section>
     ${missionsBlock(src.ai_hunt)}
     <div class="dialog-actions sticky"><button class="button outline" type="button" data-act="close-dialog">Cancel</button>
       <button class="button primary" type="button" data-act="save-sources">Save sources</button></div>`;
@@ -95,6 +102,8 @@ function sourceOptions(src) {
     adzuna: `<div class="form-grid">${cfgInput("sources.adzuna.app_id", "App ID")}${cfgInput("sources.adzuna.app_key", "App key", "password")}</div>`,
     serpapi: cfgInput("sources.serpapi.api_key", "API key", "password"),
     bluesky: `<div class="form-grid">${cfgInput("sources.bluesky.handle", "Handle (you.bsky.social)")}${cfgInput("sources.bluesky.app_password", "App password", "password")}</div>`,
+    x: `<div class="form-grid three">${cfgInput("sources.x.bearer_token", "Bearer token", "password")}${cfgInput("sources.x.searches", "Searches per run", "number", 'min="1" max="10"')}
+      ${cfgInput("sources.x.posts_per_search", "Posts per search (10 to 100)", "number", 'min="10" max="100"')}</div>`,
   };
 }
 

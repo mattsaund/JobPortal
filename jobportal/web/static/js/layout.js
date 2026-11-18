@@ -1,6 +1,6 @@
 /* layout.js: the frame around every page, and the router.
    - The sidebar: the menu with its badges (leads ready, follow-ups due), a card that says what's happening (a search,
-     the AI agents at work) or the next useful step, Settings, and a line with your ChatGPT sign-in and the version.
+     the AI agents at work) or the next useful step, Settings, and a line with the AI in use and the version.
    - The top bar: the search box (it searches your leads; "/" jumps to it), Run search or Stop, and your account button.
    - The hash router that picks the page (#/home, #/leads/12, #/settings/ai, ...) and sends old addresses where their
      content lives now, and what a page shows when its data can't load (loadError, with Try again).
@@ -60,7 +60,7 @@ function renderNextStep() {
   let card;  // [eyebrow, title, text, button]
   if (run.running) card = ["SEARCH RUNNING", runPhase(run.phase), runCounts(run.counts), go("#/leads", "Watch it live")];
   else if (agents.length) card = ["AI AT WORK", `${plural(agents.length, "agent")} working`, "", ""];
-  else if (!aiReady()) card = ["START HERE", "Sign in with ChatGPT", "JobPortal's AI runs on your own ChatGPT plan.", act("ai-signin", "Continue with ChatGPT")];
+  else if (!aiReady()) card = ["START HERE", "Connect your AI", "Sign in with ChatGPT, or use another AI.", act("ai-connect", "Connect")];
   else if (!profile.has_resume) card = ["NEXT STEP", "Drop your resume", "Add it with any certificates, awards or transcripts.", go("#/home", "Add documents")];
   else if (profile.busy) card = ["BUILDING YOUR PROFILE", humanize(profile.phase || "Working"), "Usually 1 to 4 minutes.", ""];
   else if (profile.error) card = ["NEEDS A LOOK", "The profile build stopped", "Try it again from Home.", go("#/home", "See what happened")];
@@ -76,15 +76,17 @@ function renderNextStep() {
 
 // The AI's usage, from S.state.usage (GET /api/stats, then "usage" events; ai/client.py usage() says what each field means):
 // the model in use (or the last one used, or the default), utilization as the AI tasks running out of the ones that may run
-// at once (Settings, AI), and this session's tokens and requests. Sign in with ChatGPT doesn't report how much of the plan
-// is used, so the card shows JobPortal's own numbers, and "Paused" while OpenAI's usage cap holds new work back.
+// at once (Settings, AI), and this session's tokens and requests. The providers don't report how much of a plan or credit
+// is used, so the card shows JobPortal's own numbers, and "Paused" while a cap, no credit or a rate limit holds new work back.
 function aiUsage() {
   const u = S.state.usage || {};
   const running = +u.running || 0, slots = Math.max(1, +u.slots || 1);
   const status = u.capped ? ["Paused", "warn"] : running ? ["Working", "on"] : ["Idle", ""];
-  const model = u.model ? `${esc(u.model)}${u.model_note ? ` <small>${esc(u.model_note)}</small>` : ""}` : "Picked from your plan";
-  const capped = u.capped ? `<p class="ai-capped">Your ChatGPT usage cap was reached. New AI work waits a few minutes.</p>` : "";
-  return `<div class="ai-usage"><div class="ai-usage-head"><span class="eyebrow">CHATGPT</span>`
+  const model = u.model ? `${esc(u.model)}${u.model_note ? ` <small>${esc(u.model_note)}</small>` : ""}` : "Picked for you";
+  const provider = u.provider || aiName();
+  const capped = !u.capped ? "" : `<p class="ai-capped">${provider === "ChatGPT" ? "Your ChatGPT usage cap was reached."
+    : `${esc(provider)} is holding JobPortal back for now (a limit, or no credit left).`} New AI work waits a few minutes.</p>`;
+  return `<div class="ai-usage"><div class="ai-usage-head"><span class="eyebrow">${esc(provider.toUpperCase())}</span>`
     + `<span class="ai-state ${status[1]}">${status[0]}</span></div>`
     + `<dl><div><dt>Model</dt><dd>${model}</dd></div>`
     + `<div><dt>Utilization</dt><dd>${running} of ${plural(slots, "AI task")}</dd></div>`
@@ -92,9 +94,13 @@ function aiUsage() {
     + `<div><dt>This session</dt><dd>${fmtTokens(+u.tokens || 0)} tokens, ${plural(+u.requests || 0, "request")}</dd></div></dl>${capped}</div>`;
 }
 
-// ---------------------------------------------------------------- ChatGPT
-// True once you're signed in with ChatGPT. The AI features only work then.
-const aiReady = () => !!(S.state.ai && S.state.ai.signed_in);
+// ---------------------------------------------------------------- the AI
+// True once the AI in use is ready: signed in with ChatGPT or OpenRouter, or its key saved (Settings, AI). The AI features
+// only work then.
+const aiReady = () => !!(S.state.ai && (S.state.ai.ready ?? S.state.ai.signed_in));
+// The name of the AI in use, like "ChatGPT" or "Gemini (Google)", and the short line the frame shows about it.
+const aiName = () => S.state.ai?.provider_name || "ChatGPT";
+const aiConnected = () => (aiReady() ? `${aiName()} connected` : "AI not connected");
 
 // Your name for the avatar: from your standard answers, else from your ChatGPT account.
 const yourName = () => String(S.onboarding?.answers?.name || "").trim() || String(S.state.ai?.name || "").trim();
@@ -103,7 +109,7 @@ const yourName = () => String(S.onboarding?.answers?.name || "").trim() || Strin
 function renderSidebarFoot() {
   const el = $("#sidebar-foot");
   if (!el) return;
-  setHtml(el, `<span class="status-dot${aiReady() ? "" : " off"}"></span><span>${aiReady() ? "ChatGPT connected" : "Not signed in"}</span>`
+  setHtml(el, `<span class="status-dot${aiReady() ? "" : " off"}"></span><span>${esc(aiConnected())}</span>`
     + `<span>v${esc(S.meta?.version || "")}</span>`);
 }
 
@@ -113,33 +119,35 @@ function renderUserButton() {
   if (!el) return;
   const name = yourName();
   setHtml(el, `<span class="avatar">${esc(initials(name)) || icon("user")}</span>`
-    + `<span class="user-name"><strong>${esc(name || "Your account")}</strong><small>${aiReady() ? "ChatGPT connected" : "Not signed in"}</small></span>${icon("chevron")}`);
+    + `<span class="user-name"><strong>${esc(name || "Your account")}</strong><small>${esc(aiConnected())}</small></span>${icon("chevron")}`);
   el.setAttribute("aria-label", `${name || "Your account"}, settings`);
 }
 
-// Handles an "ai" event (the sign-in changed): redraw the frame, say hello after signing in, and swap Home's welcome for
-// the dashboard (or back).
+// Handles an "ai" event (the AI, its sign-in or its key changed): redraw the frame, say so once the AI is ready, and swap
+// Home's welcome for the dashboard (or back).
 function onAIStatus(data) {
   const wasReady = aiReady();
   S.state.ai = data;
   renderFrame();
   if (wasReady === aiReady()) return;
-  if (aiReady()) toast("Signed in with ChatGPT", data.email || data.name || "JobPortal can use your plan now.");
+  if (aiReady()) toast(`${aiName()} is connected`, data.email || data.name || "JobPortal's AI can work now.");
   if (S.route[0] === "home") renderHome();
   if (S.route[0] === "settings" && S.route[1] === "ai" && !S.cfgDirty) renderSettings("ai");
 }
 
-// Starts Sign in with ChatGPT. It happens in the system browser: POST /api/ai/signin returns OpenAI's sign-in page, OpenAI
-// sends the browser back to this app's server when you're done, and the server publishes an "ai" event.
-async function aiSignIn() {
+// Starts Sign in with ChatGPT, or with OpenRouter. It happens in the system browser: the server returns the provider's
+// sign-in page (POST /api/ai/signin or /api/ai/openrouter/signin), the provider sends the browser back to this app's server
+// when you're done, and the server publishes an "ai" event.
+async function aiSignIn(provider = "chatgpt") {
+  const [endpoint, name] = provider === "openrouter" ? ["/api/ai/openrouter/signin", "OpenRouter"] : ["/api/ai/signin", "ChatGPT"];
   // In a normal tab, open the new tab now, during the click, so popup blockers allow it. Its address comes later.
   const tab = ownWindow() ? null : window.open("", "_blank");
   try {
-    const r = await api("/api/ai/signin", { method: "POST" });
+    const r = await api(endpoint, { method: "POST" });
     if (ownWindow()) await openUrl(r.url);
     else if (tab) tab.location = r.url;
     else location.href = r.url;
-    toast("Finish signing in", "Sign in with ChatGPT in your browser. JobPortal updates when you're done.");
+    toast("Finish signing in", `Sign in with ${name} in your browser. JobPortal updates when you're done.`);
   } catch (e) {
     if (tab) tab.close();
     toast("Couldn't start sign-in", e.message, "error");
@@ -297,13 +305,18 @@ const loadError = (err) => `<div class="empty-state"><h3>Couldn't load this</h3>
 
 // ---------------------------------------------------------------- actions
 onAction("ai-signin", () => aiSignIn());
+onAction("openrouter-signin", () => aiSignIn("openrouter"));
+onAction("ai-connect", () => {  // ChatGPT signs in from here; any other AI is set up in Settings, AI
+  if ((S.state.ai?.provider || "chatgpt") === "chatgpt") aiSignIn();
+  else location.hash = "#/settings/ai";
+});
 onAction("ai-signout", async () => {
   const r = await api("/api/ai/signout", { method: "POST" });
   toast("Signed out of ChatGPT", r.note || "JobPortal no longer uses your plan.");
 });
 onAction("run", async (el) => {
   // In a browser tab, the first run with alerts on asks for permission to notify.
-  if (S.notify && !desktop() && "Notification" in window && Notification.permission === "default") Notification.requestPermission();
+  if (S.alerts && !desktop() && "Notification" in window && Notification.permission === "default") Notification.requestPermission();
   try {
     await api("/api/run", { method: "POST", body: { mode: el.dataset.mode || "full" } });
   } catch (err) {

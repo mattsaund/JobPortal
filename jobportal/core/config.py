@@ -38,7 +38,7 @@ RESUME_DIR = DATA / "resume"  # the resume file the user imported during setup
 HOST = "127.0.0.1"  # the server only listens on this computer, never on the network
 PORT = int(os.environ.get("JOBPORTAL_PORT") or 8788)
 
-# Reasoning effort choices for each AI stage (Settings, AI). Models come from the signed-in ChatGPT account.
+# Reasoning effort choices for each AI stage (Settings, AI). Models come from the AI in use (ai.models()).
 EFFORTS = ["low", "medium", "high"]
 
 # Where the user is with each application. "new" is every lead's starting status: found, ranked and on the Leads page, but
@@ -72,7 +72,9 @@ _TITLE_INCLUDE, _TITLE_EXCLUDE = title_filters(DEFAULT_LEVELS)
 DEFAULT_SETTINGS = {
     # Settings, AI. Every AI request names a stage, and the stage picks the model and reasoning effort.
     "ai": {
-        "model": "",  # the default model; "" means the first model the signed-in ChatGPT account lists
+        "provider": "chatgpt",  # the AI in use: an id from ai/providers.PROVIDERS (ChatGPT, OpenRouter, an API key...)
+        "custom_url": "",  # the address of "Another service" (an OpenAI-compatible chat completions API)
+        "model": "",  # the default model; "" means the first model the provider lists for the account
         "stages": {  # per stage: "model" ("" uses the default above) and "effort" (one of EFFORTS)
             "prefill": {"model": "", "effort": "low"},  # setup: reads the resume to pre-fill the standard questions
             "triage": {"model": "", "effort": "low"},  # scores every job that passes the rule filters, in batches
@@ -94,8 +96,18 @@ DEFAULT_SETTINGS = {
         "package_web_research": True,  # packages research the web live: check the posting, company news, contacts
         "resume_review": True,  # a recruiter-style AI review pass on every tailored resume
         "max_age_days": 90,  # postings older than this are dropped
-        "auto_run_hours": 0,  # start a full run every N hours (0 = off); web/server.py checks once a minute
     },
+    # Settings, Search, "Search on a schedule" (search/schedule.py). Off until the user turns it on.
+    "schedule": {
+        "enabled": False,
+        "times": ["09:00", "17:00"],  # times of day in the computer's local time, 24-hour "HH:MM"
+        "days": [0, 1, 2, 3, 4, 5, 6],  # the days it searches, 0 is Monday
+        # Keep searching after the window closes, and start in the background when the user logs in (core/osutil.py)
+        "background": True,
+    },
+    # Settings, Appearance, "Desktop alerts". The open dashboard shows them while its window is in the background, and the
+    # server sends them itself when no window is open (a scheduled search in the background, search/schedule.py).
+    "alerts": {"desktop": False},
     # The search area: where jobs may be. Filled in from the standard answers, then edited in the search area editor
     # (Home's "Where to search", or Settings, Search). search/pipeline.py checks every job with textutil.LocationMatcher.
     "locations": {
@@ -165,7 +177,8 @@ DEFAULT_SETTINGS = {
         "usajobs": {"enabled": True, "api_key": "", "email": ""},  # free key from developer.usajobs.gov
         "adzuna": {"enabled": False, "app_id": "", "app_key": ""},  # needs a free key, so off by default
         "serpapi": {"enabled": False, "api_key": ""},  # Google Jobs through SerpAPI, needs a key
-        # Remotive, RemoteOK and We Work Remotely, used only when "Remote" is an allowed location.
+        # Remotive, RemoteOK, We Work Remotely, Himalayas, Jobicy and Working Nomads, used only when "Remote" is an allowed
+        # location.
         "remote_boards": {"enabled": True},
         # General hiring subreddits (each one checked to carry job posts). The collector adds the ones for the user's fields.
         "reddit": {"enabled": True, "subreddits": ["forhire", "jobbit", "hiring"]},
@@ -175,6 +188,9 @@ DEFAULT_SETTINGS = {
                      "tags": ["hiring", "jobs", "getfedihired", "fedihired", "nowhiring"]},
         "rss": {"enabled": True, "feeds": []},  # any RSS or Atom feeds: [{"name": ..., "url": ...}]
         "bluesky": {"enabled": False, "handle": "", "app_password": ""},  # needs the user's handle and an app password
+        # X's official search, with the user's own developer app (a Bearer token). X charges per post its API returns, so
+        # it's off by default. searches: queries per run; posts_per_search: 10 to 100.
+        "x": {"enabled": False, "bearer_token": "", "searches": 3, "posts_per_search": 25},
         # AI hunt missions. depth is "quick", "standard" or "deep"; missions_per_run is how many missions an "Everything"
         # run rotates through (0 = all). An empty missions list is filled from ai/prompts.DEFAULT_MISSIONS by settings.get().
         "ai_hunt": {"enabled": True, "depth": "standard", "missions_per_run": 7, "missions": []},

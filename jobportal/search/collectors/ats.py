@@ -13,6 +13,7 @@ descriptions out of their lists; collectors/details.py fetches those later, one 
 keeps."""
 import asyncio
 import re
+import xml.etree.ElementTree as ET
 from urllib.parse import quote_plus, urlparse
 
 import httpx
@@ -244,8 +245,41 @@ async def smartrecruiters(ctx: Ctx, b: dict) -> list[RawJob]:
     return out
 
 
+async def recruitee(ctx: Ctx, b: dict) -> list[RawJob]:
+    """Recruitee: GET <slug>.recruitee.com/api/offers/ lists every published opening with its description (an official
+    public API, no key)."""
+    d = await ctx.get_json(f"https://{b['slug']}.recruitee.com/api/offers/")
+    out = []
+    for j in d.get("offers", []) if isinstance(d, dict) else []:
+        places = [", ".join(x for x in [p.get("city"), p.get("country")] if x) for p in j.get("locations") or [] if isinstance(p, dict)]
+        location = " | ".join(p for p in places if p) or j.get("location") or ""
+        if j.get("remote"):
+            location = f"{location} | Remote" if location else "Remote"
+        out.append(RawJob(source="ats", title=j.get("title", ""), company=b["name"], url=j.get("careers_url") or "",
+                          location=location, description=html_to_text(j.get("description") or "")[:10000],
+                          posted_at=parse_date(j.get("published_at") or j.get("created_at")), dream=bool(b.get("dream")),
+                          source_detail=f"Recruitee: {b['name']}", found_url=f"https://{b['slug']}.recruitee.com", meta={"ats": "recruitee"}))
+    return out
+
+
+async def personio(ctx: Ctx, b: dict) -> list[RawJob]:
+    """Personio: GET <company>.jobs.personio.de/xml lists every published opening (an official public feed, no key). Each
+    position's description comes in parts, each with a heading."""
+    root = ET.fromstring(await ctx.get_text(f"{b['url'].rstrip('/')}/xml"))
+    out = []
+    for position in root.iter("position"):
+        field = lambda name: (position.findtext(name) or "").strip()  # noqa: E731
+        parts = [f"{(d.findtext('name') or '').strip()}\n{html_to_text(d.findtext('value') or '')}"
+                 for d in position.iter("jobDescription")]
+        out.append(RawJob(source="ats", title=field("name"), company=b["name"], url=f"{b['url'].rstrip('/')}/job/{field('id')}",
+                          location=field("office"), description="\n\n".join(p.strip() for p in parts if p.strip())[:10000],
+                          posted_at=parse_date(field("createdAt")), dream=bool(b.get("dream")), source_detail=f"Personio: {b['name']}",
+                          found_url=b["url"], meta={"ats": "personio"}))
+    return out
+
+
 HANDLERS = {"greenhouse": greenhouse, "lever": lever, "ashby": ashby, "workday": workday, "ukg": ukg,
-            "icims": icims, "smartrecruiters": smartrecruiters}
+            "icims": icims, "smartrecruiters": smartrecruiters, "recruitee": recruitee, "personio": personio}
 
 
 async def collect(ctx: Ctx) -> list[RawJob]:
@@ -312,4 +346,8 @@ def detect(url: str) -> dict | None:
         return {"ats": "ukg", "url": board.group(1)} if board else None
     if host.endswith(".icims.com"):
         return {"ats": "icims", "url": f"https://{host}"}
+    if host.endswith(".recruitee.com") and host.count(".") == 2:  # <company>.recruitee.com
+        return {"ats": "recruitee", "slug": host.split(".")[0]}
+    if re.fullmatch(r"[a-z0-9-]+\.jobs\.personio\.(de|com)", host):  # <company>.jobs.personio.de
+        return {"ats": "personio", "url": f"https://{host}"}
     return None

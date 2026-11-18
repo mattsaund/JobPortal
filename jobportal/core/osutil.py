@@ -1,9 +1,10 @@
 """Everything that differs between Windows, macOS and Linux, kept in one place so the rest of the app doesn't have to care.
 
 What's here: opening files, folders and links with the system's own apps, desktop notifications, keeping helper programs
-from flashing a console window on Windows, and finding two outside programs. The PDF engine (Chrome Headless Shell bundled
-with the app, or an installed Chrome, Edge, Chromium or Brave) prints resumes to PDF for documents/render.py. LibreOffice
-reads old .doc files for documents/extract.py. app/doctor.py reports what was found.
+from flashing a console window on Windows, starting JobPortal in the background when the user logs in (search/schedule.py
+turns that on and off), and finding two outside programs. The PDF engine (Chrome Headless Shell bundled with the app, or
+an installed Chrome, Edge, Chromium or Brave) prints resumes to PDF for documents/render.py. LibreOffice reads old .doc
+files for documents/extract.py. app/doctor.py reports what was found.
 
 Key ideas:
 - Everything is best effort. Functions return False or None when something isn't available instead of raising, and the
@@ -215,3 +216,113 @@ def find_soffice() -> str | None:
     if IS_WIN:
         return _first_existing(Path(d) / r"LibreOffice\program\soffice.exe" for d in _win_dirs())
     return None
+
+
+# ---------------------------------------------------------------- starting with the computer
+
+# The name JobPortal's login item goes by: the Windows Run value, and the start of the macOS LaunchAgent and Linux
+# autostart file names. Tests point it at a name of their own.
+LOGIN_ITEM_NAME = "JobPortal"
+_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"  # programs Windows starts when this user logs in
+
+
+def self_command() -> list[str]:
+    """How to start this copy of JobPortal from outside it: the packaged app's own program, or this Python running the
+    package. Two exceptions: an AppImage's program lives in a temporary mount that's gone after it quits, so the
+    .AppImage file itself is used, and on Windows a source checkout uses pythonw.exe (when it's next to python.exe), which
+    opens no console window."""
+    if getattr(sys, "frozen", False):  # PyInstaller sets sys.frozen in the packaged app
+        return [os.environ.get("APPIMAGE") or sys.executable] if IS_LINUX else [sys.executable]
+    python = Path(sys.executable)
+    quiet = python.with_name("pythonw.exe")
+    if IS_WIN and python.name.lower() == "python.exe" and quiet.is_file():
+        python = quiet
+    return [str(python), "-m", "jobportal"]
+
+
+def desktop_exec_arg(arg: str) -> str:
+    """Quote one argument for a Linux desktop entry's Exec key. The desktop entry spec unescapes the value twice: first as
+    a string value, where a doubled backslash stands for one, then by the Exec quoting rules, where a double quote,
+    backtick, dollar sign or backslash inside double quotes needs a backslash in front. So a backslash is written four
+    times. A percent sign starts a field code (like %f), so a literal one is written twice."""
+    out = arg.replace("\\", "\\\\\\\\")
+    for ch in '"`$':
+        out = out.replace(ch, "\\\\" + ch)
+    return '"' + out.replace("%", "%%") + '"'
+
+
+def _home() -> Path:
+    """The user's home folder. Tests point it somewhere else."""
+    return Path.home()
+
+
+def login_item_path() -> Path | None:
+    """The file that starts JobPortal at login: a LaunchAgent on macOS, an XDG autostart entry on Linux (and other
+    Unix desktops, which read the same folder). None on Windows, where it's a registry value instead."""
+    if IS_WIN:
+        return None
+    if IS_MAC:
+        return _home() / "Library" / "LaunchAgents" / f"io.github.mattsaund.{LOGIN_ITEM_NAME.lower()}.plist"
+    config_home = os.environ.get("XDG_CONFIG_HOME") or str(_home() / ".config")
+    return Path(config_home) / "autostart" / f"{LOGIN_ITEM_NAME.lower()}-background.desktop"
+
+
+def _autostart_entry(command: list[str]) -> str:
+    """A Linux autostart desktop entry that runs `command` at login. NoDisplay keeps it out of the app menu."""
+    return ("[Desktop Entry]\nType=Application\nName=JobPortal (scheduled searches)\n"
+            "Comment=Runs the job searches you scheduled in JobPortal, in the background\n"
+            f"Exec={' '.join(desktop_exec_arg(a) for a in command)}\nIcon=jobportal\nTerminal=false\nNoDisplay=true\n"
+            "X-GNOME-Autostart-enabled=true\n")
+
+
+def set_login_item(command: list[str] | None) -> bool:
+    """Run `command` every time this user logs in, or stop that when `command` is None. Returns whether it worked.
+
+    Windows: a value in the user's Run key in the registry. macOS: a LaunchAgent in ~/Library/LaunchAgents. Linux: an
+    entry in ~/.config/autostart, which GNOME, KDE, Xfce and most other desktops start. Each holds only JobPortal's own
+    item, so nothing else is touched. The command starts at the next login; nothing is started now.
+
+    On macOS, AbandonProcessGroup lets the server that `--background` starts keep running after the command itself ends
+    (launchd would otherwise stop every process the job started)."""
+    try:
+        if IS_WIN:
+            import winreg
+            if not command:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                        winreg.DeleteValue(key, LOGIN_ITEM_NAME)
+                except FileNotFoundError:
+                    pass  # no Run key, or no JobPortal value in it: nothing to remove
+                return True
+            # CreateKeyEx opens the Run key, or makes it: a Windows profile can be new enough not to have one yet.
+            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, LOGIN_ITEM_NAME, 0, winreg.REG_SZ, subprocess.list2cmdline(command))
+            return True
+        path = login_item_path()
+        if not command:
+            path.unlink(missing_ok=True)
+            return True
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if IS_MAC:
+            import plistlib
+            path.write_bytes(plistlib.dumps({"Label": path.stem, "ProgramArguments": command, "RunAtLoad": True,
+                                             "ProcessType": "Background", "AbandonProcessGroup": True}))
+        else:
+            path.write_text(_autostart_entry(command), encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def has_login_item() -> bool:
+    """Whether JobPortal is set to start at login (set_login_item), for the Settings page and --doctor."""
+    if IS_WIN:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+                winreg.QueryValueEx(key, LOGIN_ITEM_NAME)
+            return True
+        except OSError:  # no Run key, or no JobPortal value in it
+            return False
+    path = login_item_path()
+    return bool(path and path.is_file())

@@ -4,7 +4,7 @@ missing.
 Who calls it: app/cli.py. CI runs it after the tests, and the release build checks that its "PDF export" row says "built in".
 
 Each row is marked "ok" (works), "MISS" (needed and missing, counted as a problem) or "opt" (optional or not set up yet,
-such as the ChatGPT sign-in). The exit code is always 0; the last line says how many problems there are."""
+such as the AI's sign-in or key). The exit code is always 0; the last line says how many problems there are."""
 import platform
 import socket
 import sys
@@ -51,9 +51,9 @@ def _port_free(port: int) -> bool:
 
 
 def run() -> int:
-    """Print the report: Python, the data folder (tested by writing a file), the ChatGPT sign-in, the PDF engine,
-    LibreOffice, the window toolkit and the port."""
-    from jobportal.ai import signin
+    """Print the report: Python, the data folder (tested by writing a file), the AI (its sign-in or key), searching on a
+    schedule (whether JobPortal starts at login), the PDF engine, LibreOffice, the window toolkit and the port."""
+    from jobportal.ai import providers
     from jobportal.core.config import CACHE, DATA, PORT
     print(f"JobPortal {__version__} on {platform.system()} {platform.release()} ({osutil.os_name()}), Python {platform.python_version()}")
     rows, problems = [], 0
@@ -72,11 +72,14 @@ def run() -> int:
         rows.append(_row(False, "Data folder", f"{DATA} isn't writable: {e}"))
     rows.append(_row(True, "Cache folder", str(CACHE)))
 
-    status = signin.status()
-    if status["signed_in"]:
-        rows.append(_row(True, "ChatGPT", f"signed in as {status['email'] or status['name'] or 'your account'}"))
+    status = providers.status()
+    if status["ready"] and status["auth"] == "chatgpt":
+        rows.append(_row(True, "AI", f"ChatGPT, signed in as {status['email'] or status['name'] or 'your account'}"))
+    elif status["ready"]:
+        rows.append(_row(True, "AI", f"{status['provider_name']}, key {status['keys'].get(status['provider'], 'saved')}"))
     else:
-        rows.append(_row(None, "ChatGPT", "not signed in yet. Open JobPortal and click Continue with ChatGPT (needs a Go, Plus or Pro plan)."))
+        rows.append(_row(None, "AI", f"{status['provider_name']}: {providers.problem()} Open JobPortal to connect it."))
+    rows.append(_row(True, "Starts at login", "yes, for scheduled searches" if osutil.has_login_item() else "no"))
 
     engine = osutil.find_pdf_engine()
     if engine:

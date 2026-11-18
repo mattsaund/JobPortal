@@ -1,21 +1,23 @@
 ## What's new
 
-- A new look: the team's green design in light and dark themes, a new logo and app icon, and a simpler layout with five
-  menus: Home, Leads, Tracker, Analysis and Settings.
-- JobPortal works for any job and any level now, from high school and the trades to graduate degrees. Searches, sources,
-  keywords and the Analysis page adapt to your own fields, and tech is one field among many.
-- Home is where you start: sign in with ChatGPT, drop your resume with your certificates, licenses, cover letters and
-  awards all at once, and answer questions one at a time as they come in.
-- JobPortal reads each document you add: a certificate's name, issuer, dates and skills go into your profile.
-- Click a lead to open all of it in place: why it fits, the tailored resume and cover letter, emails, contacts and
-  interview prep.
-- The Tracker has five columns (Ready to apply, Application sent, In interview, Accepted and Rejected). Drag cards between
-  them, add a job in seconds, delete one, and find your contacts right there.
-- The Analysis chart is built from job titles in your own resume, documents and searches, and it changes as they do. Add
-  or remove roles any time.
-- The AI card at the bottom of the sidebar shows the model in use, how busy the AI is, and what this session has used.
-- About 85 fixes from a full cleanup, including a security fix for desktop notifications and answers on Home that now set
-  up your search area the moment setup is done.
+- **Pick your AI.** ChatGPT is still one click, and JobPortal now works without a ChatGPT plan too: sign in with
+  OpenRouter (it has free models), or use an API key from Google Gemini (with a free tier), Claude, OpenAI, Mistral, Groq,
+  DeepSeek, xAI or any OpenAI-compatible service. Choose in Settings, AI. Keys stay on your computer.
+- **Search on a schedule.** Pick the times and days in Settings, Search, and JobPortal searches by itself. Turn on
+  background searching and it keeps going after you close the window and after a restart. Off until you turn it on.
+- **No resume? No problem.** Answer a few questions and fill in a few boxes on Home, and JobPortal writes your first
+  resume from exactly what you wrote. With a resume, it still fills in everything your resume covers.
+- **Next moves** on Home: applications with no reply after three weeks, new openings at companies that turned you down
+  before, and companies with several openings that fit you.
+- **More places to look.** Himalayas, Jobicy and Working Nomads join the remote boards, Recruitee and Personio join the
+  company boards, and X is an option for people with their own X developer key. For Discord, Slack, Facebook groups,
+  Threads and LinkedIn posts, paste what you see there and JobPortal finds the jobs in it.
+- **Desktop alerts that work in the background,** with a Send a test alert button in Settings, Appearance.
+- **An app for Intel Macs** next to the Apple Silicon one.
+- Every AI answer is checked against what its task asked for, and the AI fixes one that doesn't fit before JobPortal
+  uses it.
+- Clearer first-run help on the welcome screen, and short waits a provider asks for are waited out instead of pausing
+  your search.
 
 Download the file for your system and open it. There's nothing else to install.
 
@@ -23,10 +25,11 @@ Download the file for your system and open it. There's nothing else to install.
 |---|---|---|
 | Windows 10 or 11 | `JobPortal-Windows-Setup.exe` | Double-click it. It installs JobPortal, adds Start menu and desktop shortcuts, and opens it. If SmartScreen warns, click More info, then Run anyway. |
 | macOS (Apple Silicon) | `JobPortal-macOS.dmg` | Open it and drag JobPortal into Applications. If macOS blocks it, open System Settings, Privacy & Security, and click Open Anyway. |
+| macOS (Intel) | `JobPortal-macOS-Intel.dmg` | The same, for Macs with an Intel processor. |
 | Linux (x86_64) | `JobPortal-Linux-x86_64.AppImage` | Run `chmod +x` on it, then open it. The first run adds it to your app menu. |
 
-Everything JobPortal needs comes inside the download, including PDF export. The only thing you bring is a ChatGPT Go,
-Plus or Pro plan for the AI.
+Everything JobPortal needs comes inside the download, including PDF export. For the AI, bring a ChatGPT Go, Plus or Pro
+plan, an OpenRouter account, or an API key.
 
 On Linux, JobPortal opens in its own window when Chrome, Edge, Chromium or Brave is installed. Otherwise it opens in a
 browser tab.

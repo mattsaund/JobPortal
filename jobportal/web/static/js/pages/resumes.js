@@ -20,7 +20,8 @@ let libProgress = "";
 let libItems = [];
 
 // Where a saved resume came from: imported, or saved from a lead (with a link to it).
-const libSource = (item) => (item.source === "imported" ? "Imported" : item.lead_id ? `Saved from <a href="#/leads/${item.lead_id}">a lead</a>` : "Saved");
+const libSource = (item) => (item.source === "imported" ? "Imported" : item.source === "builder" ? "Written from your answers"
+  : item.lead_id ? `Saved from <a href="#/leads/${item.lead_id}">a lead</a>` : "Saved");
 
 // The collection, or one resume's editor. The tab is drawn once: searching and picking a tag only show and hide the
 // cards, and an import only redraws the cards. Nothing reloads the thumbnails, and nothing redraws the playbook card,

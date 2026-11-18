@@ -138,6 +138,8 @@ QUESTIONS = [
          "placeholder": "Work or projects that aren't on your resume, a license in progress, schedule or travel limits"},
     ]},
 ]
+# The main resume's file name when the resume builder wrote it (candidate/builder.py), for someone who had no resume.
+BUILDER_FILENAME = "Resume made in JobPortal.md"
 # Every field by id, plus the id of its section and whether its answer may reach the AI.
 FIELDS = {f["id"]: {**f, "section": s["id"], "ai": s.get("ai", True)} for s in QUESTIONS for f in s["fields"]}
 REQUIRED = [k for k, f in FIELDS.items() if f.get("required")]
@@ -542,7 +544,8 @@ def state() -> dict:
     """Everything setup needs (Home asks the questions, and Settings, Profile shows the answers and the resume): the
     questions, the saved answers over the defaults, the required ids still empty, the answers filled in from the resume
     and not checked yet, the resume's details and the first 4,000 characters of its text, the latest pre-fill, the
-    progress flags, the profile status, the file types an upload accepts, and the extra documents."""
+    progress flags, the profile status, the file types an upload accepts, the extra documents, and whether the resume
+    builder wrote the main resume."""
     imported = profile_mod.resume()
     answers = profile_mod.standard_answers()
     built = profile_mod.is_built()
@@ -552,4 +555,5 @@ def state() -> dict:
             "resume": profile_mod.resume_info(), "resume_preview": (imported or {}).get("text", "")[:4000],
             "prefill": db.kv_get("onboarding.prefill") or {}, "answers_saved": bool(answers.get("_saved_at")), "profile_built": built,
             "complete": bool(imported and answers.get("_saved_at") and built), "status": profile_mod.status_snapshot(),
-            "accept": extract.ACCEPT, "documents": documents.listing()}
+            "accept": extract.ACCEPT, "documents": documents.listing(),
+            "resume_from_builder": (imported or {}).get("filename") == BUILDER_FILENAME}

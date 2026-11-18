@@ -14,6 +14,11 @@ os.environ.pop("JOBPORTAL_PORT", None)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+from jobportal.core import osutil as _osutil  # noqa: E402 (osutil reads no settings, so importing it here is safe)
+
+# The real login item functions, before the login_items fixture swaps them out, for the tests of the functions themselves.
+REAL_LOGIN_ITEM = (_osutil.set_login_item, _osutil.has_login_item)
+
 
 @pytest.fixture(autouse=True)
 def zero_data():
@@ -36,6 +41,17 @@ def zero_data():
     signin._pending.clear()
     yield
     db.close()
+
+
+@pytest.fixture(autouse=True)
+def login_items(monkeypatch) -> list:
+    """No test touches this computer's real login items (the Windows Run key, a LaunchAgent, an autostart entry).
+    osutil.set_login_item only records each command it's asked to set (None to remove), in the list this returns.
+    Tests of the real functions use REAL_LOGIN_ITEM with a home folder and an item name of their own."""
+    asked: list = []
+    monkeypatch.setattr(_osutil, "set_login_item", lambda command: asked.append(command) or True)
+    monkeypatch.setattr(_osutil, "has_login_item", lambda: bool(asked and asked[-1]))
+    return asked
 
 
 def pytest_sessionfinish(session, exitstatus):

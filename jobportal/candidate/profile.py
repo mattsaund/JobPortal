@@ -700,7 +700,7 @@ def overview() -> dict:
 # ---------------------------------------------------------------- background sync of answers
 
 WATCH_EVERY_SEC = 15  # how often answers_watcher() looks for work
-# After a sync fails (signed out of ChatGPT, the plan's usage cap, no connection), the same sync waits this long before it
+# After a sync fails (the AI signed out or its key refused, a usage limit, no connection), the same sync waits this long before it
 # is tried again, so the user gets one error toast instead of one every WATCH_EVERY_SEC.
 RETRY_AFTER_FAILURE_SEC = 600
 _last_failure: dict = {}  # the sync that failed last: {"key": what it was for, "at": when}
