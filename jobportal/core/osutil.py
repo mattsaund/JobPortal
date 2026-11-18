@@ -287,14 +287,16 @@ def set_login_item(command: list[str] | None) -> bool:
     try:
         if IS_WIN:
             import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
-                if command:
-                    winreg.SetValueEx(key, LOGIN_ITEM_NAME, 0, winreg.REG_SZ, subprocess.list2cmdline(command))
-                else:
-                    try:
+            if not command:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
                         winreg.DeleteValue(key, LOGIN_ITEM_NAME)
-                    except FileNotFoundError:
-                        pass  # it wasn't there
+                except FileNotFoundError:
+                    pass  # no Run key, or no JobPortal value in it: nothing to remove
+                return True
+            # CreateKeyEx opens the Run key, or makes it: a Windows profile can be new enough not to have one yet.
+            with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, LOGIN_ITEM_NAME, 0, winreg.REG_SZ, subprocess.list2cmdline(command))
             return True
         path = login_item_path()
         if not command:
