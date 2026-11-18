@@ -11,10 +11,10 @@ from jobportal.search.collectors import COLLECTORS, ats
 from jobportal.search.collectors.base import Ctx
 from jobportal.search.pipeline import RuleFilters
 
-SUPPORTED_BOARDS = "Greenhouse, Lever, Ashby, Workday, UKG, iCIMS, SmartRecruiters"  # named in the "not found" message
+SUPPORTED_BOARDS = "Greenhouse, Lever, Ashby, Workday, UKG, iCIMS, SmartRecruiters, Recruitee, Personio"  # named in the "not found" message
 # Careers pages often embed or link the real job board. This finds such a link in the page's HTML.
 BOARD_LINK = re.compile(r"(https?://[a-z0-9.-]*(?:myworkdayjobs\.com|greenhouse\.io|lever\.co|ashbyhq\.com|icims\.com"
-                        r"|ultipro\.com|smartrecruiters\.com)[^\"'\s<>]*)", re.I)
+                        r"|ultipro\.com|smartrecruiters\.com|recruitee\.com|jobs\.personio\.(?:de|com))[^\"'\s<>]*)", re.I)
 
 
 def _quiet(*_args, **_kwargs) -> None:

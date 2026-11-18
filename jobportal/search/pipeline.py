@@ -745,9 +745,11 @@ async def stop() -> None:
 # ---------------------------------------------------------------- re-checking saved leads
 
 
-async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filtered", "qualified")) -> dict:
+async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filtered", "qualified"),
+                         lead_ids: list[int] | None = None) -> dict:
     """Score saved leads again against the current profile: below-threshold leads and qualified ones still waiting for a
     package. A new answer (a skill, a project, a certification) can turn an earlier "no" into a match, or the other way.
+    lead_ids limits it to those leads (the jobs from pasted posts, scored for the first time).
 
     Only leads without a resume and not in the trash are checked, RETRIAGE_BATCH per AI request (stage "triage"). Each lead's
     score, verdict, triage notes and stage are updated, unless its stage changed or it got a resume while the AI was
@@ -761,13 +763,17 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
         placeholders = ",".join("?" * len(stages))
         leads = [db.lead_row(r) for r in db.q(
             f"SELECT * FROM leads WHERE stage IN ({placeholders}) AND app_status!='trashed' AND resume_md IS NULL", stages)]
+        if lead_ids is not None:
+            wanted = set(lead_ids)
+            leads = [lead for lead in leads if lead["id"] in wanted]
         if not leads:
             return {"ok": True, "checked": 0, "promoted": 0, "demoted": 0}
         min_score = int(cfg["run"].get("min_score", 60))
         system = triage_system(cfg)
         promoted, demoted, checked = [], [], 0
-        bus.publish("toast", {"title": "Re-evaluating leads",
-                              "body": f"{len(leads)} below-threshold and queued leads against your updated profile ({reason})."})
+        bus.publish("toast", {"title": "Scoring the new jobs" if lead_ids is not None else "Re-evaluating leads",
+                              "body": f"{len(leads)} jobs from {reason}." if lead_ids is not None
+                              else f"{len(leads)} below-threshold and queued leads against your updated profile ({reason})."})
         for offset in range(0, len(leads), RETRIAGE_BATCH):
             batch = leads[offset:offset + RETRIAGE_BATCH]
             items = [_triage_item(k, title=lead["title"], company=lead["company"], location=lead["location"], kind=lead["kind"],

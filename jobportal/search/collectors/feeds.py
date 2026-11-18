@@ -15,10 +15,12 @@ Social sources (Hacker News comments, Reddit, Mastodon, Bluesky) return posts, n
 line and strict_titles is False. A post is kept only when it matches the user's level or roles (_post_re) and also uses a
 hiring word. Each function's docstring notes its site's limits and API parameters."""
 import asyncio
+import html
 import random
 import re
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from urllib.parse import quote, urlencode
 
 from jobportal.core.genres import DEFAULT_GENRES
@@ -464,10 +466,12 @@ def _wwr_items(xml: str) -> list[dict]:
 
 
 async def remote_boards(ctx: Ctx) -> list[RawJob]:
-    """Three remote-only job boards, used only when the search area allows remote work: Remotive's free API, searched once
-    per term; RemoteOK, whose whole feed comes in one request; and We Work Remotely's RSS feeds for the user's fields
-    (_wwr_feeds), whose titles read "Company: Role". The board's own location note, such as "USA only", stays in the
-    location so the location filter can judge it."""
+    """Six remote-only job boards, used only when the search area allows remote work: Remotive's free API, searched once
+    per term; RemoteOK, whose whole feed comes in one request; We Work Remotely's RSS feeds for the user's fields
+    (_wwr_feeds), whose titles read "Company: Role"; and three free public APIs (_more_remote_boards): Himalayas and Jobicy,
+    searched by term, and Working Nomads' feed. The board's own location note, such as "USA only", stays in the location so
+    the location filter can judge it. Each board's link is kept as it gives it, and the lead names the board, as their terms
+    ask."""
     if not _remote_allowed(ctx):
         return []
     out = []
@@ -503,7 +507,53 @@ async def remote_boards(ctx: Ctx) -> list[RawJob]:
             out.append(RawJob(source="remote", title=role or company, company=company if role else "", url=item["link"],
                               location=f"Remote ({item['region']})" if item["region"] else "Remote",
                               description=item["description"][:10000], posted_at=item["date"], source_detail="We Work Remotely"))
+    out += await _more_remote_boards(ctx, terms[:3])
     ctx.log("remote", f"{len(out)} remote postings (pre-filter)")
+    return out
+
+
+def _unix_date(value) -> str | None:
+    """A Unix time in seconds (Himalayas' dates) as an ISO date, or None."""
+    try:
+        return datetime.fromtimestamp(float(value), tz=timezone.utc).date().isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+async def _more_remote_boards(ctx: Ctx, terms: list[str]) -> list[RawJob]:
+    """Himalayas (searched per term, 20 a page), Jobicy (per term, its tag search) and Working Nomads (its whole feed): free
+    public APIs with no key. A board that fails is logged and skipped."""
+    out = []
+    for term in terms:
+        try:
+            d = await ctx.get_json("https://himalayas.app/jobs/api/search?" + urlencode({"q": term, "page": 1}))
+            for j in d.get("jobs", []) if isinstance(d, dict) else []:
+                places = ", ".join(j.get("locationRestrictions") or [])
+                out.append(RawJob(source="remote", title=j.get("title", ""), company=j.get("companyName", ""),
+                                  url=j.get("applicationLink") or j.get("guid", ""), location=f"Remote ({places})" if places else "Remote",
+                                  description=html_to_text(j.get("description") or j.get("excerpt") or "")[:10000],
+                                  posted_at=_unix_date(j.get("pubDate")), source_detail="Himalayas", found_url=j.get("guid") or ""))
+        except Exception as e:  # noqa: BLE001 (one failed term shouldn't end the others)
+            ctx.log("remote", f"himalayas: {e}", "warn")
+        try:
+            d = await ctx.get_json("https://jobicy.com/api/jobs?" + urlencode({"count": 50, "tag": term}))
+            for j in d.get("jobs", []) if isinstance(d, dict) else []:
+                geo = j.get("jobGeo") or ""
+                out.append(RawJob(source="remote", title=html.unescape(j.get("jobTitle", "")), company=j.get("companyName", ""),
+                                  url=j.get("url", ""), location=f"Remote ({geo})" if geo else "Remote",
+                                  description=html_to_text(j.get("jobDescription") or j.get("jobExcerpt") or "")[:10000],
+                                  posted_at=parse_date(j.get("pubDate")), source_detail="Jobicy"))
+        except Exception as e:  # noqa: BLE001
+            ctx.log("remote", f"jobicy: {e}", "warn")
+    try:
+        d = await ctx.get_json("https://www.workingnomads.com/api/exposed_jobs/")
+        for j in d if isinstance(d, list) else []:
+            place = j.get("location") or ""
+            out.append(RawJob(source="remote", title=j.get("title", ""), company=j.get("company_name", ""), url=j.get("url", ""),
+                              location=f"Remote ({place})" if place else "Remote", description=html_to_text(j.get("description", ""))[:10000],
+                              posted_at=parse_date(j.get("pub_date")), source_detail="Working Nomads"))
+    except Exception as e:  # noqa: BLE001
+        ctx.log("remote", f"working nomads: {e}", "warn")
     return out
 
 
@@ -630,6 +680,55 @@ def _bsky_queries(ctx: Ctx) -> list[str]:
     else:
         base = ["we're hiring"]
     return base + [f"hiring {r}" for r in roles]
+
+
+X_SEARCH = "https://api.x.com/2/tweets/search/recent"  # X's official search: public posts from the last 7 days
+
+
+def _x_queries(ctx: Ctx) -> list[str]:
+    """X search queries: hiring words, then the user's search terms (quoted when longer than a word), without reposts and
+    replies. One query per term, up to the "searches" setting."""
+    count = max(1, int((ctx.cfg["sources"].get("x") or {}).get("searches") or 3))
+    terms = _queries(ctx, count) or ["jobs"]
+    quoted = [f'"{t}"' if " " in t else t for t in terms]
+    return [f'(hiring OR "we\'re hiring" OR "now hiring") {t} -is:retweet -is:reply lang:en' for t in quoted]
+
+
+async def x_search(ctx: Ctx) -> list[RawJob]:
+    """Hiring posts on X through its official API, with the user's own developer key (a Bearer token). X charges for every
+    post its API returns (about half a cent each), so this is off until the user turns it on and adds a key, and
+    "posts_per_search" caps each search. Scraping X is against its terms, so there's no other way in. Only posts that read
+    like hiring posts at the user's level are kept."""
+    sc = ctx.cfg["sources"].get("x") or {}
+    token = str(sc.get("bearer_token") or "").strip()
+    if not token:
+        ctx.log("x", "skipped: add the Bearer token of your X developer app in Sources", "warn")
+        return []
+    headers = {"Authorization": f"Bearer {token}"}
+    per_search = max(10, min(100, int(sc.get("posts_per_search") or 25)))
+    out, seen = [], set()
+    post_re = _post_re(ctx)
+    for query in _x_queries(ctx):
+        params = {"query": query, "max_results": per_search, "tweet.fields": "created_at,author_id", "expansions": "author_id",
+                  "user.fields": "username,name"}
+        try:
+            d = await ctx.get_json(f"{X_SEARCH}?" + urlencode(params), headers=headers)
+        except Exception as e:  # noqa: BLE001 (one failed search shouldn't end the others)
+            ctx.log("x", f"“{query[:60]}”: {e}", "warn")
+            continue
+        users = {u.get("id"): u for u in (d.get("includes") or {}).get("users", []) if isinstance(u, dict)}
+        for post in d.get("data") or []:
+            text = post.get("text", "")
+            user = users.get(post.get("author_id")) or {}
+            url = f"https://x.com/{user.get('username') or 'i'}/status/{post.get('id')}"
+            if url in seen or not post_re.search(text) or not HIRING_RE.search(text):
+                continue
+            seen.add(url)
+            out.append(RawJob(source="x", title=clean(text.split("\n")[0])[:140], company=user.get("name", ""), url=url, description=text,
+                              posted_at=parse_date(post.get("created_at")), strict_titles=False, found_url=url,
+                              source_detail=f"X @{user.get('username', '')}"))
+    ctx.log("x", f"{len(out)} hiring posts")
+    return out
 
 
 async def bluesky(ctx: Ctx) -> list[RawJob]:

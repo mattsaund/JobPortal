@@ -356,7 +356,7 @@ function cardActions(l, open) {
 // Short names for "found at" links. (LABEL_SRC in core.js names the sources on the cards.)
 const FOUND_NAME = { github: "GitHub list", ats: "Company board", linkedin: "LinkedIn", hackernews: "Hacker News", reddit: "Reddit",
   mastodon: "Mastodon", bluesky: "Bluesky", themuse: "The Muse", usajobs: "USAJobs", remote: "Remote board", rss: "RSS feed",
-  adzuna: "Adzuna", google: "Google Jobs", manual: "Your link" };
+  adzuna: "Adzuna", google: "Google Jobs", manual: "Your link", x: "X post", paste: "Your pasted post" };
 
 // The places a lead was found that have a usable link, each with its link as safeUrl() returns it (trimmed, and only
 // web or mail links), so every href built from these is safe.
@@ -400,7 +400,7 @@ function foundMenu(l) {
 
 // ---------------------------------------------------------------- add a job
 // The "Add a job" dialog: a link or the pasted posting. POST /api/leads/manual starts tailoring it, or returns the saved
-// lead when the same job was added before.
+// lead when the same job was added before. Its footer leads to Paste posts, for many jobs at once from a community.
 function addJobDialog() {
   const kinds = [["posting", "A job posting"], ["program", "A program"], ["event", "An event"], ["intel", "A lead with no posting yet"]];
   openDialog(`<h2>Add a job</h2>
@@ -411,11 +411,52 @@ function addJobDialog() {
       <label class="field"><span class="field-label">Job title (optional)</span><input type="text" id="aj-title"></label>
       <label class="field"><span class="field-label">Company (optional)</span><input type="text" id="aj-company"></label>
       <label class="field"><span class="field-label">What is it?</span><select id="aj-kind">${selectOptions(kinds)}</select></label></div>
+    <p class="muted-note">Posts from Discord, Slack, Facebook groups, LinkedIn or another community?
+      <button class="text-button" type="button" data-act="paste-posts">Paste several at once ${icon("arrow")}</button></p>
     <div class="dialog-actions"><button class="button outline" type="button" data-act="close-dialog">Cancel</button>
       <button class="button primary" type="button" data-act="add-job-go">Add and tailor ${icon("arrow")}</button></div>`, { eyebrow: "ADD A JOB" });
 }
 
+// The "Paste posts" dialog: posts copied from a community apps can't read (Discord, Slack, Facebook groups, LinkedIn,
+// Threads, X). POST /api/leads/paste has the AI find each opening in them; the new leads are scored in the background, and
+// the good ones are queued for their packages like any search's.
+function pastePostsDialog() {
+  closeDialog();
+  openDialog(`<h2>Paste posts</h2>
+    <p>Copy job posts you can see in your communities and paste them all here. JobPortal finds each opening, adds it to your
+      leads and scores it like any other. Nothing is read from the community itself.</p>
+    <div class="form-grid">
+      <label class="field wide"><span class="field-label">The posts</span><textarea id="pp-text" rows="12"
+        placeholder="Paste as many posts as you like, with their links"></textarea></label>
+      <label class="field wide"><span class="field-label">Where they're from (optional)</span><input type="text" id="pp-where"
+        placeholder="Nursing jobs Discord, Ohio welders Facebook group"></label></div>
+    <div class="dialog-actions"><button class="button outline" type="button" data-act="close-dialog">Cancel</button>
+      <button class="button primary" type="button" data-act="paste-posts-go">Find the jobs ${icon("arrow")}</button></div>`, { eyebrow: "ADD JOBS" });
+}
+
 // ---------------------------------------------------------------- actions
+onAction("paste-posts", () => pastePostsDialog());
+onAction("paste-posts-go", async (el) => {
+  const dialog = el.closest("dialog"), text = $("#pp-text", dialog).value.trim();
+  if (!text) {
+    toast("Paste some posts first", "Copy them from your community, with their links if they have any.", "error");
+    return;
+  }
+  const label = el.innerHTML;
+  el.disabled = true;
+  el.innerHTML = `${spinner()}Reading the posts`;
+  try {
+    const r = await api("/api/leads/paste", { method: "POST", body: { text, where: $("#pp-where", dialog).value.trim() } });
+    closeDialog(dialog);
+    const already = r.existing ? ` ${r.existing} ${r.existing === 1 ? "was" : "were"} already in your leads.` : "";
+    if (r.added) toast(`${plural(r.added, "new job")} added`, `They're being scored now.${already}`);
+    else toast(r.found ? "No new jobs" : "No job openings found", r.found ? `All of them were already in your leads.` : "The posts didn't read like openings.");
+    if (S.route[0] === "leads") loadLeads();
+  } finally {
+    el.disabled = false;
+    el.innerHTML = label;
+  }
+});
 onAction("lead-open", (el) => {
   const id = +el.dataset.id;
   location.hash = S.route[0] === "leads" && S.expanded === id ? "#/leads" : `#/leads/${id}`;

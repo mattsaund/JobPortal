@@ -13,7 +13,7 @@ from jobportal.search.collectors import ats, feeds, github_lists, linkedin
 
 COLLECTORS = {
     "github_lists": ("GitHub tech internship & new-grad lists (tech targets only)", github_lists.collect),
-    "ats_boards": ("Company job boards (Greenhouse / Lever / Ashby / Workday / UKG / iCIMS / SmartRecruiters)", ats.collect),
+    "ats_boards": ("Company job boards (Greenhouse / Lever / Ashby / Workday / UKG / iCIMS / SmartRecruiters / Recruitee / Personio)", ats.collect),
     "linkedin": ("LinkedIn public job search", linkedin.collect),
     "usajobs": ("USAJobs (U.S. federal jobs)", feeds.usajobs),
     "hackernews": ("Hacker News hiring threads (tech targets only)", feeds.hackernews),
@@ -21,7 +21,8 @@ COLLECTORS = {
     "reddit": ("Reddit search feeds", feeds.reddit),
     "mastodon": ("Mastodon hiring hashtags", feeds.mastodon),
     "bluesky": ("Bluesky search (app password)", feeds.bluesky),
-    "remote_boards": ("Remote boards (Remotive, RemoteOK, We Work Remotely)", feeds.remote_boards),
+    "x": ("X recent search (your own paid developer key)", feeds.x_search),
+    "remote_boards": ("Remote boards (Remotive, RemoteOK, We Work Remotely, Himalayas, Jobicy, Working Nomads)", feeds.remote_boards),
     "rss": ("Custom RSS / Atom feeds", feeds.rss),
     "adzuna": ("Adzuna aggregator (API key)", feeds.adzuna),
     "serpapi": ("Google Jobs via SerpAPI (API key)", feeds.serpapi),

@@ -377,7 +377,7 @@ const S = {
 // Display names for where a lead came from (lead.source and lead.sources).
 const LABEL_SRC = { github: "GitHub lists", ats: "Company board", linkedin: "LinkedIn", ai_hunt: "AI hunt", hackernews: "Hacker News",
   themuse: "The Muse", usajobs: "USAJobs", reddit: "Reddit", mastodon: "Mastodon", bluesky: "Bluesky", remote: "Remote board",
-  rss: "RSS", adzuna: "Adzuna", google: "Google Jobs", manual: "Added by you" };
+  rss: "RSS", adzuna: "Adzuna", google: "Google Jobs", manual: "Added by you", x: "X", paste: "Pasted posts" };
 // The resume layouts, as named in RESUME_THEMES in documents/render.py on the server.
 const RESUME_THEMES = ["classic", "modern", "compact", "academic"];
 

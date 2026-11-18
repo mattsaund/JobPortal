@@ -10,7 +10,7 @@ from jobportal.candidate import profile
 from jobportal.core import background, bus, db
 from jobportal.core.config import APP_STATUSES, APPLIED_STATUSES, LEADS_DIR, TRACKER_STATUSES
 from jobportal.core.textutil import coverage
-from jobportal.search import packages, pipeline
+from jobportal.search import packages, pipeline, posts
 from jobportal.web.common import ai_error, lead_or_404
 
 router = APIRouter()
@@ -198,6 +198,19 @@ async def add_manual_lead(body: dict):
     summary = packages.lead_summary(lead_id)
     bus.publish("lead", summary)
     return summary
+
+
+@router.post("/api/leads/paste")
+async def paste_posts(body: dict):
+    """Find the jobs in posts the user pasted from a community ({"text": "...", "where": "Nursing jobs Discord"}) and add
+    each new one as a lead, scored in the background (search/posts.py). Returns how many were found, added and already
+    saved. 400 for a paste too short to hold a post."""
+    try:
+        return await posts.add_posts(str(body.get("text") or ""), str(body.get("where") or ""))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except ai.AIError as e:
+        raise ai_error(e)
 
 
 @router.delete("/api/leads/{lead_id}")

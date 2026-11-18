@@ -177,7 +177,8 @@ DEFAULT_SETTINGS = {
         "usajobs": {"enabled": True, "api_key": "", "email": ""},  # free key from developer.usajobs.gov
         "adzuna": {"enabled": False, "app_id": "", "app_key": ""},  # needs a free key, so off by default
         "serpapi": {"enabled": False, "api_key": ""},  # Google Jobs through SerpAPI, needs a key
-        # Remotive, RemoteOK and We Work Remotely, used only when "Remote" is an allowed location.
+        # Remotive, RemoteOK, We Work Remotely, Himalayas, Jobicy and Working Nomads, used only when "Remote" is an allowed
+        # location.
         "remote_boards": {"enabled": True},
         # General hiring subreddits (each one checked to carry job posts). The collector adds the ones for the user's fields.
         "reddit": {"enabled": True, "subreddits": ["forhire", "jobbit", "hiring"]},
@@ -187,6 +188,9 @@ DEFAULT_SETTINGS = {
                      "tags": ["hiring", "jobs", "getfedihired", "fedihired", "nowhiring"]},
         "rss": {"enabled": True, "feeds": []},  # any RSS or Atom feeds: [{"name": ..., "url": ...}]
         "bluesky": {"enabled": False, "handle": "", "app_password": ""},  # needs the user's handle and an app password
+        # X's official search, with the user's own developer app (a Bearer token). X charges per post its API returns, so
+        # it's off by default. searches: queries per run; posts_per_search: 10 to 100.
+        "x": {"enabled": False, "bearer_token": "", "searches": 3, "posts_per_search": 25},
         # AI hunt missions. depth is "quick", "standard" or "deep"; missions_per_run is how many missions an "Everything"
         # run rotates through (0 = all). An empty missions list is filled from ai/prompts.DEFAULT_MISSIONS by settings.get().
         "ai_hunt": {"enabled": True, "depth": "standard", "missions_per_run": 7, "missions": []},
