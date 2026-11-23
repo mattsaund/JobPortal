@@ -398,7 +398,8 @@ function toast(title, body = "", level = "", leadId = null, action = null) {
     }
     el.remove();
   });
-  const box = $("#toasts");
+  const box = $("#toasts"), home = $$("dialog[open]").at(-1) || document.body;  // an open dialog would cover it otherwise
+  if (box.parentElement !== home) home.appendChild(box);
   box.prepend(el);
   $$(".toast", box).slice(4).forEach((old) => old.remove());  // four at most
   setTimeout(() => el.remove(), level === "error" ? 12000 : action ? 10000 : 6500);
@@ -444,6 +445,7 @@ function openDialog(html, opts = {}) {
       S.dirty = false;
       S.cfgDirty = false;
     }
+    if (dialog.contains($("#toasts"))) ($$("dialog[open]").at(-1) || document.body).appendChild($("#toasts"));  // toasts outlive it
     dialog.remove();
     if (dialog.jp.onClose) dialog.jp.onClose();
     if (main.dataset.page === page) refocus(document.body, openerKey);  // not after a move to another page
