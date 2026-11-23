@@ -24,6 +24,8 @@ from email.utils import parsedate_to_datetime
 from functools import lru_cache
 from urllib.parse import parse_qs, urlparse
 
+from jobportal.core.genres import BROAD_GENRES, LEVELLESS_GENRES, classify
+
 # ---------------------------------------------------------------- places
 
 # Two-letter code to name, for the 50 states and DC.
@@ -43,7 +45,7 @@ NAME_TO_ABBR = {v.lower(): k for k, v in STATES.items()}  # "ohio" -> "OH"
 
 # Cities that postings often name without their state, mapped to the state. state_of() checks them in this order and the
 # first match wins. Job fingerprints are built from state_of(), so an entry here should never be removed or changed (see
-# fingerprint()). Search locations come from MAJOR_CITIES instead.
+# fingerprint()).
 CITY_STATE = {
     # Washington, DC area, Maryland, Virginia, Pennsylvania and Delaware
     "baltimore": "MD", "columbia": "MD", "greenbelt": "MD", "laurel": "MD", "annapolis": "MD", "annapolis junction": "MD",
@@ -71,35 +73,6 @@ CITY_STATE = {
     "cape canaveral": "FL", "titusville": "FL", "merritt island": "FL", "orlando": "FL", "melbourne, fl": "FL",
     "phoenix": "AZ", "tucson": "AZ", "salt lake city": "UT", "albuquerque": "NM", "detroit": "MI", "minneapolis": "MN",
     "portland": "OR", "raleigh": "NC", "durham": "NC", "nashville": "TN", "miami": "FL", "tampa": "FL",
-}
-# The largest cities of every state and DC, biggest first: the places a search covers when the user names only a state
-# (search/collectors/feeds.py turns "Ohio" into these for The Muse, whose location filter wants cities).
-MAJOR_CITIES = {
-    "AL": ["Birmingham", "Huntsville", "Montgomery", "Mobile"], "AK": ["Anchorage", "Fairbanks", "Juneau"],
-    "AZ": ["Phoenix", "Tucson", "Mesa", "Scottsdale"], "AR": ["Little Rock", "Fayetteville", "Fort Smith"],
-    "CA": ["Los Angeles", "San Diego", "San Jose", "San Francisco", "Sacramento", "Fresno"],
-    "CO": ["Denver", "Colorado Springs", "Aurora", "Boulder"], "CT": ["Hartford", "New Haven", "Stamford", "Bridgeport"],
-    "DE": ["Wilmington", "Dover", "Newark"], "FL": ["Miami", "Orlando", "Tampa", "Jacksonville"],
-    "GA": ["Atlanta", "Savannah", "Augusta"], "HI": ["Honolulu", "Hilo"], "ID": ["Boise", "Meridian", "Idaho Falls"],
-    "IL": ["Chicago", "Naperville", "Rockford", "Springfield"], "IN": ["Indianapolis", "Fort Wayne", "Evansville"],
-    "IA": ["Des Moines", "Cedar Rapids", "Iowa City"], "KS": ["Wichita", "Overland Park", "Kansas City", "Topeka"],
-    "KY": ["Louisville", "Lexington", "Bowling Green"], "LA": ["New Orleans", "Baton Rouge", "Shreveport", "Lafayette"],
-    "ME": ["Portland", "Bangor", "Augusta"], "MD": ["Baltimore", "Columbia", "Rockville", "Frederick", "Annapolis"],
-    "MA": ["Boston", "Worcester", "Springfield", "Cambridge"], "MI": ["Detroit", "Grand Rapids", "Ann Arbor", "Lansing"],
-    "MN": ["Minneapolis", "Saint Paul", "Rochester", "Duluth"], "MS": ["Jackson", "Gulfport", "Hattiesburg"],
-    "MO": ["Kansas City", "St. Louis", "Springfield", "Columbia"], "MT": ["Billings", "Missoula", "Bozeman", "Helena"],
-    "NE": ["Omaha", "Lincoln"], "NV": ["Las Vegas", "Reno", "Henderson"], "NH": ["Manchester", "Nashua", "Concord"],
-    "NJ": ["Newark", "Jersey City", "Trenton", "Princeton"], "NM": ["Albuquerque", "Santa Fe", "Las Cruces"],
-    "NY": ["New York", "Buffalo", "Rochester", "Albany", "Syracuse"], "NC": ["Charlotte", "Raleigh", "Durham", "Greensboro"],
-    "ND": ["Fargo", "Bismarck", "Grand Forks"], "OH": ["Columbus", "Cleveland", "Cincinnati", "Dayton", "Toledo"],
-    "OK": ["Oklahoma City", "Tulsa", "Norman"], "OR": ["Portland", "Salem", "Eugene", "Bend"],
-    "PA": ["Philadelphia", "Pittsburgh", "Harrisburg", "Allentown"], "RI": ["Providence", "Warwick", "Newport"],
-    "SC": ["Charleston", "Columbia", "Greenville"], "SD": ["Sioux Falls", "Rapid City"],
-    "TN": ["Nashville", "Memphis", "Knoxville", "Chattanooga"], "TX": ["Houston", "Dallas", "Austin", "San Antonio", "Fort Worth"],
-    "UT": ["Salt Lake City", "Provo", "Ogden"], "VT": ["Burlington", "Montpelier"],
-    "VA": ["Richmond", "Virginia Beach", "Arlington", "Norfolk", "Alexandria"], "WA": ["Seattle", "Spokane", "Tacoma", "Bellevue"],
-    "WV": ["Charleston", "Morgantown", "Huntington"], "WI": ["Milwaukee", "Madison", "Green Bay"],
-    "WY": ["Cheyenne", "Casper", "Laramie"], "DC": ["Washington"],
 }
 # Text that names another country or region (EMEA, APAC, LATAM), or a Canadian province code after a comma ("Toronto,
 # ON"). Country names are case-insensitive. Province codes must be uppercase, so ", on-site" isn't read as Ontario.
@@ -771,6 +744,19 @@ _ALIAS_WORDS = {
     "janitor": ["custodian", "housekeeping", "cleaner"], "custodian": ["janitor", "housekeeping", "cleaner"],
     "counselor": ["therapist", "clinician"], "therapist": ["counselor", "clinician"], "social": ["lcsw", "msw", "caseworker"],
     "paralegal": ["legal"], "dental": ["dentist", "hygienist"], "hygienist": ["dental", "rdh"],
+    "hha": ["caregiver", "caretaker"], "health": ["hha", "caregiver"], "paraprofessional": ["paraeducator", "para", "aide"],
+    "professor": ["lecturer", "adjunct", "instructor", "faculty"], "substitute": ["sub", "guest"], "preschool": ["pre", "daycare", "childcare"],
+    "estate": ["realtor", "leasing", "broker"], "customer": ["csr", "client", "guest"], "administrative": ["receptionist", "secretary", "clerical"],
+    "receptionist": ["front", "administrative"], "police": ["patrol", "deputy", "sheriff", "trooper"], "security": ["guard"],
+    "firefighter": ["fire", "emt"], "farm": ["farmhand", "ranch", "harvest", "agricultural", "agriculture", "dairy", "crop"],
+    "landscaper": ["landscaping", "lawn", "groundskeeper", "gardener", "arborist"], "machinist": ["cnc", "lathe", "tooling"],
+    "designer": ["artist", "illustrator"], "actor": ["performer", "actress"], "musician": ["organist", "pianist", "vocalist", "singer"],
+    "journalist": ["reporter", "editor", "correspondent"], "reporter": ["journalist", "correspondent"], "veterinary": ["vet", "veterinarian"],
+    "pastor": ["minister", "clergy", "chaplain", "worship", "priest", "reverend"], "bartender": ["mixologist", "bar"],
+    "stylist": ["hairstylist", "cosmetologist", "barber", "salon"], "hair": ["hairstylist", "cosmetologist", "barber", "salon"],
+    "forklift": ["material", "warehouse"], "hvac": ["heating", "cooling", "refrigeration"], "electrician": ["electrical", "wireman", "lineman"],
+    "plumber": ["plumbing", "pipefitter"], "carpenter": ["carpentry", "framer"], "truck": ["cdl", "driver", "trucker", "otr"],
+    "flight": ["cabin", "steward"], "pilot": ["aviator"],
 }
 # Endings _role_stem() drops, longest first, so "nurse" and "nursing", "teacher" and "teaching", "therapist" and "therapy"
 # come out the same.
@@ -796,6 +782,12 @@ _EVERYDAY_SHORT = {"it", "hr", "md", "pa", "ma", "us", "am", "pm", "or", "do"}
 _PLACE_WORDS = {code.lower() for code in STATES} | set(NAME_TO_ABBR) | {city for city in CITY_STATE if " " not in city}
 
 
+@lru_cache(maxsize=20000)  # the same titles come back from board after board
+def _title_work(title: str) -> frozenset:
+    """The kinds of work a job title names (core/genres.py)."""
+    return frozenset(classify(title or ""))
+
+
 class TargetMatcher:
     """Tells whether a job is near what the user is after: their target roles, the profile's role families and the
     search queries (search/plan.target_phrases). search/pipeline.RuleFilters uses it as the cheap pre-filter before AI
@@ -809,7 +801,8 @@ class TargetMatcher:
       (three letters or fewer, such as RN or IT) must match a whole word.
     - A few aliases add other words for the same work (_ALIAS_WORDS): RN for nurse, developer for software.
     - A title passes with any one target word. A title without one still passes when the description uses two different
-      target words (short words that are also everyday words, such as "it" or "hr", don't count there).
+      target words (short words that are also everyday words, such as "it" or "hr", don't count there), or when it names
+      the same kind of work as a target (core/genres.py), so "Caregiver" reaches someone after "Home Health Aide".
     `places` is the user's search area ("Columbus, OH", "Remote"): its words are left out too, since queries often name
     the city. With no phrases at all the matcher is empty (bool() is False), and the pipeline lets every job through."""
 
@@ -825,6 +818,7 @@ class TargetMatcher:
                 for alias in _ROLE_ALIASES.get(term, []):
                     terms.add(alias if len(alias) <= 3 else _role_stem(alias))
         self.short = {t for t in terms if len(t) <= 3}  # whole words only
+        self.work = {g for phrase in phrases or [] for g in classify(str(phrase))} - BROAD_GENRES  # the kinds of work they're after
         self.stems = terms - self.short
         # Stems of five or more letters also match a longer or shorter stem that starts the same way ("electric" and
         # "electr"). Such a pair always shares its first five letters, so the stems are filed by those.
@@ -857,4 +851,9 @@ class TargetMatcher:
         Always True for an empty matcher."""
         if not self:
             return True
-        return bool(self.hits(title)) or len(self.hits((description or "")[:1500], description=True)) >= 2
+        return bool(self.hits(title)) or len(self.hits((description or "")[:1500], description=True)) >= 2 or bool(self.work & _title_work(title))
+
+    def same_levelless_work(self, title: str) -> bool:
+        """True when the title is the user's kind of work, in a field whose titles rarely name a level (genres.LEVELLESS_GENRES).
+        An early-career search keeps these: a new caregiver's job is just called "Caregiver"."""
+        return bool(self.work & LEVELLESS_GENRES & _title_work(title))

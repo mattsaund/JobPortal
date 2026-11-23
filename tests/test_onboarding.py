@@ -31,11 +31,11 @@ def test_regex_prefill(sample_resume):
 
 def test_questions_fit_any_field_and_schooling():
     education = {k for k, _ in onboarding.FIELDS["education_level"]["options"]}
-    assert {"high_school", "some_college", "trade", "apprenticeship", "associate", "bachelor", "master", "doctorate",
-            "professional"} <= education
+    assert {"none", "some_high_school", "high_school", "some_college", "trade", "apprenticeship", "military", "associate", "bachelor",
+            "master", "doctorate", "professional"} <= education
     assert {"seasonal", "per_diem", "apprenticeship", "part_time"} <= {k for k, _ in onboarding.FIELDS["job_types"]["options"]}
     assert "apprenticeship" in {k for k, _ in onboarding.FIELDS["levels"]["options"]}
-    assert "work samples" in onboarding.FIELDS["github"]["label"]  # the id stays "github" for saved answers
+    assert onboarding.FIELDS["github"]["label"] == "Portfolio"  # the id stays "github" for saved answers
     assert onboarding.FIELDS["licenses"]["type"] == "list" and "licenses" not in onboarding.REQUIRED
 
 
@@ -44,7 +44,7 @@ def test_licenses_reach_the_kit_and_old_industry_names_are_kept():
                                        "industries": ["Software & SaaS", "Education", "Bogus"]})
     assert answers["industries"] == ["Technology & Software", "Education"]  # renamed in v0.3.0, not dropped
     kit = {row["q"]: row["a"] for row in profile.get("qa")}
-    assert kit["Professional licenses and certifications"] == "CPR and First Aid, 2025, Food Handler card"
+    assert kit["Licenses and certifications"] == "CPR and First Aid, 2025, Food Handler card"
     assert "Food Handler card" in profile.digest()  # triage sees them
 
 
@@ -71,7 +71,7 @@ def test_answers_drive_settings_facts_and_kit():
     assert "Bachelor's degree in Computer Science" == facts["degree"]
     assert "no visa sponsorship needed" in facts["work_authorization"]
     qa = profile.get("qa")
-    assert {"q": "Are you legally authorized to work in the United States?", "a": "Yes"} in qa
+    assert {"q": "Authorized to work", "a": "Yes"} in qa
     assert all(x.get("eeo") for x in qa if x["q"] in ("Gender", "Disability status"))
     prompt_text = onboarding.answers_for_prompt(profile.standard_answers())
     assert "Gender" not in prompt_text and "Software Engineer" in prompt_text

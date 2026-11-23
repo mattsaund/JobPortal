@@ -33,9 +33,9 @@ def test_several_openings_at_one_company():
     lead("Charge Nurse", "Example Health", stage="filtered")  # didn't pass scoring
     lead("Barista", "Contoso Coffee")
     (move,) = moves.moves()
-    assert move["kind"] == "Several openings" and move["text"] == "2 openings at Example Health fit you"
-    assert move["why"] == "Registered Nurse, Nurse Aide. One contact there could help with all of them."
-    assert move["cta"] == {"label": "See them", "search": "Example Health"}
+    assert move["kind"] == "Several openings" and move["text"] == "2 openings at Example Health"
+    assert move["why"] == "Registered Nurse, Nurse Aide"
+    assert move["cta"] == {"label": "View", "search": "Example Health"}
 
 
 def test_a_new_opening_where_the_user_was_turned_down():
@@ -46,7 +46,7 @@ def test_a_new_opening_where_the_user_was_turned_down():
     lead("Shop Helper", "Contoso Fabrication", created="2026-09-15T10:00:00+00:00")  # found before they turned the user down
     found = moves.moves()
     assert [m["kind"] for m in found] == ["Second chance", "Several openings"]
-    assert found[0]["why"] == "You applied for Welder before. This one is Welder Fitter."
+    assert found[0]["why"] == "Welder Fitter"
     assert found[0]["cta"] == {"label": "Open", "href": f"#/leads/{newer}"}
 
 

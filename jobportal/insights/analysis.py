@@ -553,11 +553,11 @@ def _funnel(leads: list[dict]) -> list[dict]:
     applied = [lead for lead in leads if lead["applied_at"] is not None]
     statuses = Counter(lead["app_status"] for lead in applied)
     return [
-        {"stage": "Postings scanned", "n": scanned["found"]},
-        {"stage": "Passed your filters", "n": scanned["candidates"]},
-        {"stage": "AI-triaged", "n": len(leads)},
+        {"stage": "Scanned", "n": scanned["found"]},
+        {"stage": "Filtered", "n": scanned["candidates"]},
+        {"stage": "Scored", "n": len(leads)},
         {"stage": "Qualified", "n": sum(1 for lead in leads if lead["stage"] in QUALIFIED)},
-        {"stage": "Package ready", "n": sum(1 for lead in leads if lead["has_resume"])},
+        {"stage": "Tailored", "n": sum(1 for lead in leads if lead["has_resume"])},
         {"stage": "Applied", "n": len(applied)},
         {"stage": "Responses", "n": sum(statuses[s] for s in ("interviewing", "accepted", "rejected"))},
         {"stage": "Interviews", "n": statuses["interviewing"] + statuses["accepted"]},
@@ -715,15 +715,15 @@ def add_role(title: str) -> str:
     title = str(title or "").strip()
     label, key = clean_title(title, own=True), role_key(title)
     if not label:
-        raise ValueError("Type a job title first.")
+        raise ValueError("Job title is empty.")
     if len(title) > TITLE_MAX:
-        raise ValueError(f"Keep the title under {TITLE_MAX} characters.")
+        raise ValueError(f"Title over {TITLE_MAX} characters.")
     if not key:
-        raise ValueError("Type the job title itself, not only a level or a job type.")
+        raise ValueError("Enter a job title.")
     cfg = settings_mod.get()
     pinned = [t for t in _setting(cfg, "pinned_roles") if role_key(t) != key]
     if len(pinned) >= ROLES_MAX:
-        raise ValueError(f"You can add up to {ROLES_MAX} roles of your own. Remove one first.")
+        raise ValueError(f"Limit is {ROLES_MAX} roles.")
     cfg["analysis"]["pinned_roles"] = pinned + [label]
     cfg["analysis"]["hidden_roles"] = [t for t in _setting(cfg, "hidden_roles") if role_key(t) != key]
     settings_mod.save(cfg)
@@ -883,7 +883,7 @@ async def run_ai(reason: str = "manual") -> dict:
                                 "keys": {**{s["id"]: s["key"] for s in out["suggested_roles"]}, **{r["id"]: r["key"] for r in latest["roles"]}}})
             db.kv_set("analysis.history", fit_history[-40:])
             bus.publish("analysis", {"running": False, "ts": latest["ts"]})
-            bus.publish("toast", {"title": "Analysis updated", "body": out["summary"][:160]})
+            bus.publish("toast", {"title": "Analysis updated"})
             return {"ok": True, **latest}
         except Exception as e:
             bus.publish("analysis", {"running": False, "error": str(e)[:300]})
