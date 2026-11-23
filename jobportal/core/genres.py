@@ -42,7 +42,7 @@ DEFAULT_GENRES = [
                  r"patient care (?:tech|technician|assistant)|nursing assistant"},
     {"id": "allied_health", "label": "Allied Health & Therapy", "group": "healthcare",
      "keywords": r"physical therap|occupational therap|speech(?:-language)? patholog|respiratory therap|radiolog(?:ic|y) tech|"
-                 r"x-ray tech|sonograph|ultrasound tech|medical assistant|phlebotom|\bemt\b|paramedic|dental (?:assistant|hygienist)|"
+                 r"x-ray tech|sonograph|ultrasound tech|medical assistant|phlebotom|\bemt\b|emergency medical|paramedic|dental (?:assistant|hygienist)|"
                  r"surgical tech|medical lab|clinical lab|pharmacist|pharmacy tech|dietitian|athletic trainer|optician|audiolog|"
                  r"therapy assistant|rehab(?:ilitation)? tech"},
     {"id": "physicians", "label": "Physicians & Advanced Practice", "group": "healthcare",
@@ -59,11 +59,12 @@ DEFAULT_GENRES = [
                  r"insurance verification|prior authorization"},
     {"id": "caregiving", "label": "Caregiving & Home Health", "group": "healthcare",
      "keywords": r"caregiver|home health aide|\bhha\b|personal care (?:aide|assistant|attendant)|direct support (?:professional|staff)|"
-                 r"\bdsp\b|resident (?:assistant|aide)|patient sitter|in-home (?:care|support)|senior care|home care"},
+                 r"\bdsp\b|\bpca\b|resident (?:assistant|aide)|patient sitter|in-home (?:care|support)|senior care|home care|caretaker|"
+                 r"companion care"},
     # ---- education
     {"id": "teaching", "label": "Teaching", "group": "education",
      "keywords": r"teacher|teaching|educator|instructor|\btutor|professor|lecturer|paraprofessional|paraeducator|"
-                 r"substitute teacher|classroom|faculty|\besl\b|\btefl\b|special education|interventionist"},
+                 r"substitute teacher|classroom|faculty|\besl\b|\btefl\b|special education|interventionist|adjunct|instructional aide"},
     {"id": "early_childhood", "label": "Childcare & Early Childhood", "group": "education",
      "keywords": r"child ?care|preschool|pre-k|day ?care|early childhood|nanny|au pair|infant (?:teacher|room)|toddler|"
                  r"head start|babysit"},
@@ -79,14 +80,14 @@ DEFAULT_GENRES = [
     {"id": "admin_office", "label": "Administrative & Office", "group": "business",
      "keywords": r"administrative (?:assistant|associate|coordinator|specialist|support)|office (?:manager|assistant|administrator|"
                  r"coordinator|clerk)|receptionist|secretary|executive assistant|clerical|data entry|front desk|file clerk|"
-                 r"mail ?room|virtual assistant"},
+                 r"mail ?room|virtual assistant|office support"},
     {"id": "customer_service", "label": "Customer Service & Support", "group": "business",
      "keywords": r"customer (?:service|support|care|experience|success)|call center|contact center|client (?:services|support)|"
-                 r"guest services|member services|chat support|service desk agent"},
+                 r"guest services|member services|chat support|service desk agent|\bcsr\b"},
     {"id": "sales", "label": "Sales & Business Development", "group": "business",
      "keywords": r"\bsales\b|account (?:executive|manager)|business development|\b(?:bdr|sdr)\b|inside sales|outside sales|"
-                 r"territory (?:manager|representative)|real estate agent|realtor|insurance agent|loan officer|"
-                 r"leasing (?:agent|consultant)"},
+                 r"territory (?:manager|representative)|real estate|realtor|insurance (?:agent|sales)|loan officer|"
+                 r"leasing (?:agent|consultant)|\bbroker\b"},
     {"id": "marketing", "label": "Marketing & Communications", "group": "business",
      "keywords": r"marketing|brand (?:manager|ambassador|strategist)|social media|content (?:marketing|strategist|creator)|"
                  r"public relations|communications (?:specialist|manager|coordinator|director|associate)|\bseo\b|copywrit|"
@@ -112,13 +113,14 @@ DEFAULT_GENRES = [
     {"id": "food_hospitality", "label": "Food Service & Hospitality", "group": "service",
      "keywords": r"\bchef\b|\bcook\b|line cook|prep cook|kitchen|culinary|restaurant|waiter|waitress|bartend|barista|hostess|"
                  r"food service|catering|banquet|dishwasher|busser|\bbaker\b|pastry|hotel|hospitality|housekeep|room attendant|"
-                 r"concierge|\bvalet\b|resort|food and beverage|\bf&b\b"},
+                 r"concierge|\bvalet\b|resort|food and beverage|\bf&b\b|wait ?staff|bar ?staff|\bdining\b|"
+                 r"(?<!web )(?<!file )(?<!sql )(?<!database )\bserver\b(?! (?:admin|engineer|side|infrastructure|support|technician|analyst))"},
     {"id": "retail", "label": "Retail", "group": "service",
      "keywords": r"retail|cashier|store (?:associate|clerk|team member)|sales (?:associate|floor)|merchandis|stocker|"
                  r"stock associate|shift (?:lead|supervisor)|key ?holder|team member|grocery|loss prevention|department manager"},
     {"id": "personal_care", "label": "Personal Care, Beauty & Fitness", "group": "service",
      "keywords": r"cosmetolog|hair ?stylist|barber|esthetician|aesthetician|nail tech|manicurist|massage therap|\blmt\b|"
-                 r"\bday spa\b|med ?spa|spa (?:attendant|manager|coordinator|therapist)|salon|makeup artist|personal trainer|"
+                 r"\bday spa\b|med ?spa|spa (?:attendant|manager|coordinator|therapist)|salon|\bstylist\b|makeup artist|personal trainer|"
                  r"fitness (?:instructor|coach|trainer)|yoga instructor|pilates|lifeguard|recreation (?:aide|leader|coordinator)|"
                  r"camp counselor"},
     # ---- skilled trades and industry
@@ -139,12 +141,16 @@ DEFAULT_GENRES = [
      "keywords": r"mechanic|maintenance (?:technician|tech|worker|mechanic|supervisor)|repair (?:technician|tech)|automotive|"
                  r"auto (?:technician|body|tech)|diesel|collision|tire (?:technician|tech)|aircraft (?:mechanic|maintenance)|"
                  r"\ba&p\b|facilities (?:technician|maintenance)|building (?:engineer|maintenance)|groundskeep|custodian|janitor|"
-                 r"appliance repair|small engine"},
+                 r"appliance repair|small engine|lube tech|oil change"},
     {"id": "logistics", "label": "Logistics, Warehouse & Driving", "group": "trades",
      "keywords": r"warehouse|logistics|supply chain|forklift|shipping (?:and|&) receiving|(?:shipping|receiving) (?:clerk|"
                  r"associate)|inventory (?:specialist|control|associate|clerk)|material handler|order (?:picker|selector)|"
                  r"\bpicker\b|\bpacker\b|\bcdl\b|(?:truck|delivery|bus|van|route|commercial|shuttle|tow) driver|courier|"
-                 r"dispatcher|freight|procurement|purchasing (?:agent|manager|specialist)|distribution center|stockroom"},
+                 r"dispatcher|freight|procurement|purchasing (?:agent|manager|specialist)|distribution center|stockroom|\bdriver\b"},
+    {"id": "transport_crew", "label": "Aviation, Maritime & Rail", "group": "trades",
+     "keywords": r"\bpilot\b|first officer|flight (?:attendant|instructor|crew|dispatcher)|cabin crew|air traffic|aviation|deckhand|"
+                 r"merchant mariner|able seaman|ship'?s|marine (?:engineer|oiler)|tugboat|\bferry\b|locomotive|railroad|\brail\b|"
+                 r"train (?:conductor|operator|engineer)|transit operator"},
     # ---- arts, design and media
     {"id": "art_design", "label": "Art & Design", "group": "creative",
      "keywords": r"graphic design|designer|illustrat|art director|\bartist\b|animat(?:or|ion)|motion (?:graphics|designer)|"
@@ -159,15 +165,15 @@ DEFAULT_GENRES = [
      "keywords": r"musician|\bmusic\b|singer|vocalist|\bactor\b|actress|theat(?:er|re)|\bdance|choreograph|\bfilm\b|cinema|"
                  r"stage (?:manager|hand|crew)|production assistant|(?:audio|sound) (?:engineer|technician|designer)|"
                  r"lighting (?:technician|designer)|camera operator|cinematograph|composer|orchestra|band director|"
-                 r"voice actor|entertain"},
+                 r"voice actor|entertain|performer|organist|pianist|music director"},
     # ---- science, research and engineering
     {"id": "research", "label": "Research & Lab Science", "group": "science",
      "keywords": r"research|scientist|scientific|laborator|\blab (?:tech|technician|assistant|manager)|chemist|biolog|physic|"
                  r"biochem|genetic|clinical (?:research|trial)|postdoc|simulation|computational|\bhpc\b"},
     {"id": "environment_ag", "label": "Environment, Agriculture & Animals", "group": "science",
      "keywords": r"environmental (?:scientist|specialist|technician|engineer|compliance|health)|sustainab|conservation|ecolog|"
-                 r"forestry|forester|park ranger|wildlife|natural resources|agricultur|agronom|\bfarm|ranch|horticultur|"
-                 r"landscap|greenhouse|arborist|veterinar|vet tech|animal (?:care|caretaker|shelter|technician)|kennel|"
+                 r"forestry|forester|park ranger|wildlife|natural resources|agricultur|agronom|\bfarm|ranch|horticultur|harvest|"
+                 r"landscap|greenhouse|arborist|groundskeep|lawn care|gardener|veterinar|vet tech|animal (?:care|caretaker|shelter|technician)|kennel|"
                  r"groomer|zookeeper|aquarium|fisheries|water (?:quality|resources)|geolog|hydrolog|\bgis\b"},
     {"id": "engineering", "label": "Engineering (civil, mechanical, electrical and more)", "group": "science",
      "keywords": r"(?:mechanical|civil|structural|electrical|chemical|industrial|manufacturing|process|environmental|biomedical|"
@@ -184,9 +190,9 @@ DEFAULT_GENRES = [
      "keywords": r"nonprofit|non-profit|community (?:outreach|organizer|health worker|engagement|coordinator|liaison)|"
                  r"outreach (?:worker|coordinator|specialist)|volunteer (?:coordinator|manager)|fundrais|"
                  r"development (?:officer|associate|director|coordinator)|grant writ|advocacy|americorps|food bank|ministry|"
-                 r"pastor|youth (?:program|development)"},
+                 r"pastor|minister|clergy|chaplain|priest|rabbi|\bimam\b|deacon|worship|youth (?:program|development)"},
     {"id": "public_safety", "label": "Public Safety & Security", "group": "public",
-     "keywords": r"police|law enforcement|sheriff|patrol|correctional|corrections officer|detention officer|"
+     "keywords": r"police|law enforcement|sheriff|patrol|correctional|corrections officer|detention officer|armed guard|loss prevention|"
                  r"(?<!information )(?<!cyber )security (?:guard|officer)|firefight|fire (?:fighter|marshal|inspector|chief)|"
                  r"emergency (?:management|dispatcher)|911 dispatch|probation|parole|border patrol|park police"},
     # ---- technology (the ids from before v0.3.0, so the Analysis history of tech users keeps lining up)
@@ -227,6 +233,13 @@ DEFAULT_GENRES = [
      "keywords": r"solutions? (?:engineer|architect|consultant)|sales engineer|customer engineer|technical account|"
                  r"pre-?sales|field (?:application|service) engineer"},
 ]
+# Kinds of work whose job titles rarely say a level: a new cashier, caregiver or welder applies to "Cashier", "Caregiver" or
+# "Welder". A title in one of these, in the same kind of work as a target job, counts for an early-career search.
+LEVELLESS_GENRES = {"nursing", "allied_health", "caregiving", "teaching", "early_childhood", "library_museum", "admin_office",
+                    "customer_service", "food_hospitality", "retail", "personal_care", "skilled_trades", "construction", "manufacturing",
+                    "maintenance_auto", "logistics", "transport_crew", "environment_ag", "public_safety", "nonprofit", "performing_arts"}
+# Too broad to say two jobs are the same kind of work: every kind of manager lands in it.
+BROAD_GENRES = {"management_ops"}
 # The ids of the genres every version before v0.3.0 shipped (all technology). core/settings.py uses them to tell a genre
 # list nobody customized from one a user edited.
 LEGACY_GENRE_IDS = {"swe", "frontend_mobile", "data", "ml_ai", "cloud_devops", "cyber", "it_support", "embedded_hw",

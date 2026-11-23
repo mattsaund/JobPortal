@@ -41,7 +41,7 @@ def test_the_form_reuses_the_standard_questions():
 
 
 def test_missing_required_answers_are_named():
-    with pytest.raises(ValueError, match="Fill in Full name, Job titles you want"):
+    with pytest.raises(ValueError, match="Fill in Full name, Target jobs"):
         asyncio.run(builder.write_resume({"answers": {"email": "x@example.com", "city": "Dayton"}}))
 
 

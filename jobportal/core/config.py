@@ -72,8 +72,8 @@ _TITLE_INCLUDE, _TITLE_EXCLUDE = title_filters(DEFAULT_LEVELS)
 DEFAULT_SETTINGS = {
     # Settings, AI. Every AI request names a stage, and the stage picks the model and reasoning effort.
     "ai": {
-        "provider": "chatgpt",  # the AI in use: an id from ai/providers.PROVIDERS (ChatGPT, OpenRouter, an API key...)
-        "custom_url": "",  # the address of "Another service" (an OpenAI-compatible chat completions API)
+        "provider": "",  # the AI in use: an id from ai/providers.PROVIDERS, "" until one is connected
+        "endpoints": {},  # each provider's address parts, for the ones that have their own (ai/providers.py "fields")
         "model": "",  # the default model; "" means the first model the provider lists for the account
         "stages": {  # per stage: "model" ("" uses the default above) and "effort" (one of EFFORTS)
             "prefill": {"model": "", "effort": "low"},  # setup: reads the resume to pre-fill the standard questions
@@ -129,7 +129,7 @@ DEFAULT_SETTINGS = {
         "exclude_keywords": [],  # "Drop if description contains" (saving the standard answers adds clearance phrases)
     },
     "search": {
-        "queries": [],  # the Sources dialog, "Your own search terms": for LinkedIn, The Muse and the aggregators
+        "queries": [],  # the Sources dialog, "Your own search terms": for LinkedIn, the job sites and the aggregators
         "use_profile_plan": True,  # the Sources dialog: also search the queries and dream companies the profile derived
         "levels": list(DEFAULT_LEVELS),  # experience levels to search, from the standard answers (levels.py)
     },
@@ -156,9 +156,9 @@ DEFAULT_SETTINGS = {
     "dream_exclude": [],  # profile-suggested dream companies the user removed
     # The Sources dialog on Leads: every job source, each with an "enabled" switch. search/collectors/ reads these.
     # Sources that only carry one field's jobs adapt to the user (search/plan.py works out their fields from their
-    # targets): the GitHub lists and Hacker News carry tech jobs, so they skip themselves for everyone else, and Reddit,
-    # Mastodon, The Muse and the remote boards add communities, hashtags, categories and feeds for the user's fields on
-    # top of the general ones here.
+    # targets): the GitHub lists and Hacker News carry tech jobs, so they skip themselves for everyone else, Reddit,
+    # Mastodon and the remote boards add communities, hashtags and feeds for the user's fields on top of the general ones
+    # here, and the job sites in the catalog run only for the fields and countries they serve.
     "sources": {
         # Community tech internship and new-grad lists. Used only when the user's targets are in tech and their levels
         # include internship or entry level.
@@ -168,12 +168,17 @@ DEFAULT_SETTINGS = {
             "https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json",
         ]},
         "ats_boards": {"enabled": True, "boards": ATS_BOARDS},  # company job boards (see ATS_BOARDS above)
+        # The job sites and public job services in search/collectors/catalog.py. Each group has one master switch, and `off`
+        # lists the source ids the user turned off, so a source added to the catalog later is on for everyone without a
+        # migration. `keys` holds the free API keys some of them need: {source id: {key name: value}}. A source that needs
+        # a key stays off until it's entered.
+        "catalog": {"enabled": True, "groups": {"field": True, "general": True, "national": True, "community": True, "discovery": True},
+                    "off": [], "keys": {}},
         # time_window is LinkedIn's "posted within" filter in seconds ("r2592000" = 30 days). experience is LinkedIn's
         # experience filter ("1,2" = internship and entry level); "" picks it from the levels (levels.linkedin_experience).
         "linkedin": {"enabled": True, "max_requests": 100, "time_window": "r2592000", "experience": ""},
         # How many monthly "Who is hiring?" threads to read. Used only when the user's targets are in tech.
         "hackernews": {"enabled": True, "threads": 2},
-        "themuse": {"enabled": True, "pages": 8},  # result pages per run
         "usajobs": {"enabled": True, "api_key": "", "email": ""},  # free key from developer.usajobs.gov
         "adzuna": {"enabled": False, "app_id": "", "app_key": ""},  # needs a free key, so off by default
         "serpapi": {"enabled": False, "api_key": ""},  # Google Jobs through SerpAPI, needs a key
@@ -181,7 +186,8 @@ DEFAULT_SETTINGS = {
         # location.
         "remote_boards": {"enabled": True},
         # General hiring subreddits (each one checked to carry job posts). The collector adds the ones for the user's fields.
-        "reddit": {"enabled": True, "subreddits": ["forhire", "jobbit", "hiring"]},
+        # client_id and client_secret: the user's own free Reddit app, needed because Reddit now refuses most anonymous feeds.
+        "reddit": {"enabled": True, "subreddits": ["forhire", "jobbit", "hiring"], "client_id": "", "client_secret": ""},
         # General instances and hiring hashtags. The collector adds instances and hashtags for the user's fields and levels.
         "mastodon": {"enabled": True,
                      "instances": ["mastodon.social", "mastodon.online", "mas.to"],

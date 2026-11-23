@@ -31,21 +31,21 @@ STANDARD_IDS = ["name", "email", "phone", "city", "state", "linkedin", "github",
 REQUIRED_IDS = ["name", "email", "city", "target_roles"]
 # The builder's own fields, after the standard ones. Same shape as onboarding.QUESTIONS fields.
 EXTRA_FIELDS = [
-    {"id": "school_notes", "label": "Honors, activities or classes that fit the jobs you want (optional)", "type": "textarea",
+    {"id": "school_notes", "label": "Honors and activities", "type": "textarea",
      "placeholder": "Honor roll, Spanish club, Intro to Welding"},
-    {"id": "skills", "label": "Your skills, one per line", "type": "list",
+    {"id": "skills", "label": "Skills", "type": "list",
      "placeholder": "Customer service\nCash handling\nMicrosoft Excel\nForklift"},
-    {"id": "languages", "label": "Languages you speak (optional)", "type": "text", "placeholder": "English, Spanish"},
-    {"id": "projects", "label": "Projects, activities and awards (optional)", "type": "textarea",
+    {"id": "languages", "label": "Languages", "type": "text", "placeholder": "English, Spanish"},
+    {"id": "projects", "label": "Projects and awards", "type": "textarea",
      "placeholder": "Built a website for my church\nTeam captain, varsity soccer\nEmployee of the Month, June 2025"},
 ]
 # One entry in "Work and volunteering". Paid or not, any length.
 JOB_FIELDS = [
-    {"id": "role", "label": "Job title or role", "type": "text", "placeholder": "Cashier, Volunteer tutor, Babysitter"},
-    {"id": "organization", "label": "Where", "type": "text", "placeholder": "Corner Market"},
-    {"id": "place", "label": "City and state (optional)", "type": "text", "placeholder": "Columbus, OH"},
-    {"id": "dates", "label": "When", "type": "text", "placeholder": "June 2025 to now"},
-    {"id": "details", "label": "What you did, one thing per line", "type": "textarea",
+    {"id": "role", "label": "Role", "type": "text", "placeholder": "Cashier, Volunteer tutor, Babysitter"},
+    {"id": "organization", "label": "Employer", "type": "text", "placeholder": "Corner Market"},
+    {"id": "place", "label": "Location", "type": "text", "placeholder": "Columbus, OH"},
+    {"id": "dates", "label": "Dates", "type": "text", "placeholder": "June 2025 to now"},
+    {"id": "details", "label": "What you did", "type": "textarea",
      "placeholder": "Ran the register on busy weekends\nTrained two new hires"},
 ]
 EXTRA_IDS = [f["id"] for f in EXTRA_FIELDS]

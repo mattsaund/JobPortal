@@ -1,5 +1,5 @@
 """Reaching more places: the new remote boards (Himalayas, Jobicy, Working Nomads), the Recruitee and Personio company
-boards, X's official search, the sites fetch_url leaves alone, and jobs from pasted community posts. Every collector reads
+boards, X's official search, fetch_url opening any public page, and jobs from pasted community posts. Every collector reads
 canned replies; nothing here reaches the network."""
 import asyncio
 import json
@@ -95,18 +95,14 @@ def test_x_search_with_the_users_own_key():
     asyncio.run(ctx.close())
 
 
-def test_fetch_url_leaves_alone_sites_that_bar_automated_reading(monkeypatch):
+def test_fetch_url_opens_any_public_page(monkeypatch):
     async def public(host):
         return "93.184.215.14"
     monkeypatch.setattr(ai, "_public_address", public)
     for url in ("https://www.linkedin.com/posts/someone-hiring", "https://x.com/example/status/1", "https://m.facebook.com/groups/1",
-                "https://www.ziprecruiter.com/c/Example/Job/Nurse"):
+                "https://www.ziprecruiter.com/c/Example/Job/Nurse", "https://www.indeed.com/viewjob?jk=1"):
         refusal, target = asyncio.run(ai._check_url(url))
-        assert "doesn't allow automated reading" in refusal and target == {}, url
-    refusal, target = asyncio.run(ai._check_url("https://www.indeed.com/viewjob?jk=1"))
-    assert refusal == "" and target["host"] == "www.indeed.com"
-    refusal, _ = asyncio.run(ai._check_url("https://notlinkedin.com/jobs"))  # only the site itself, not names that end the same way
-    assert refusal == ""
+        assert refusal == "" and target["host"] == url.split("/")[2], url
 
 
 POSTS = """[Nursing jobs Discord] Sam (Example Health): We're hiring two night-shift RNs in Columbus, OH. Apply at https://examplehealth.example.com/jobs/rn-nights or DM me.

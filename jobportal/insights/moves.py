@@ -65,7 +65,7 @@ def moves() -> list[dict]:
         if lead["app_status"] == "applied" and days is not None and days >= STALE_DAYS:
             found.append(_move(f"noreply:{lead['id']}", "No reply", 300 + min(days, 90), lead,
                                f"No reply from {lead['company']} in {days} days",
-                               f"{lead['title']}. Follow up, or move it to Rejected so your Tracker stays current.",
+                               lead["title"],
                                {"label": "Follow up", "href": f"#/leads/{lead['id']}/emails"}))
     companies: dict[str, list[dict]] = defaultdict(list)
     for lead in leads:
@@ -86,14 +86,14 @@ def moves() -> list[dict]:
             if newer:
                 best = newer[0]
                 found.append(_move(f"again:{key}:{best['id']}", "Second chance", 200 + (best["score"] or 0) / 10, best,
-                                   f"New opening at {company}, which turned you down before",
-                                   f"You applied for {turned_down[0]['title']} before. This one is {best['title']}.",
+                                   f"New opening at {company}",
+                                   best["title"],
                                    {"label": "Open", "href": f"#/leads/{best['id']}"}))
         if len(open_roles) >= 2:
             found.append(_move(f"several:{key}", "Several openings", 100 + len(open_roles), open_roles[0],
-                               f"{len(open_roles)} openings at {company} fit you",
-                               f"{_titles(open_roles)}. One contact there could help with all of them.",
-                               {"label": "See them", "search": company}))
+                               f"{len(open_roles)} openings at {company}",
+                               _titles(open_roles),
+                               {"label": "View", "search": company}))
     hidden = _hidden()
     found = [move for move in found if move["key"] not in hidden]
     found.sort(key=lambda move: -move["priority"])

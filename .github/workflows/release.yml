@@ -1,5 +1,10 @@
 name: Release
 
+# Code signing turns on by itself once the certificates are repository secrets (CONTRIBUTING.md, Releases):
+#   Windows: WINDOWS_CERT_PFX (the .pfx file in base64) and WINDOWS_CERT_PASSWORD
+#   macOS: MACOS_CERT_P12 (the Developer ID certificate in base64), MACOS_CERT_PASSWORD, MACOS_SIGN_IDENTITY,
+#          APPLE_ID, APPLE_TEAM_ID and APPLE_APP_PASSWORD (for notarizing)
+# Without them the apps build unsigned, which is why each system warns on the first open.
 on:
   push:
     tags: ["v*"]
@@ -36,7 +41,31 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           python packaging/fetch_pdf_engine.py ${{ matrix.pdf_engine }} dist/JobPortal.app/Contents/Resources/pdf-engine
-          codesign --force --sign - dist/JobPortal.app
+      - name: Sign the app (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ]; then
+            codesign --force --sign - dist/JobPortal.app  # unsigned builds still need an ad hoc signature to run
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          security create-keychain -p temp "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p temp "$KEYCHAIN"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k temp "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          # Inside out: every library and program first, then the app around them.
+          find dist/JobPortal.app/Contents -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 |
+            xargs -0 -I{} sh -c 'file -b "$1" | grep -q Mach-O && codesign --force --options runtime --timestamp --entitlements packaging/macos/entitlements.plist --sign "$MACOS_SIGN_IDENTITY" "$1" || true' _ {}
+          codesign --force --options runtime --timestamp --entitlements packaging/macos/entitlements.plist --sign "$MACOS_SIGN_IDENTITY" dist/JobPortal.app
+          codesign --verify --strict --verbose=2 dist/JobPortal.app
       - name: Bundle the PDF engine (Linux)
         if: runner.os == 'Linux'
         run: python packaging/fetch_pdf_engine.py linux64 dist/JobPortal/pdf-engine
@@ -65,12 +94,26 @@ jobs:
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
+          $pfx = "$env:RUNNER_TEMP\cert.pfx"
+          function Sign($file) {
+            if (-not $env:WINDOWS_CERT_PFX) { return }
+            $tool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+            & $tool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 $file
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
+          if ($env:WINDOWS_CERT_PFX) { [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX)) }
+          Sign dist\JobPortal\JobPortal.exe
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           $version = python -c "import jobportal; print(jobportal.__version__)"
           & $iscc "/DAppVersion=$version" packaging\windows\jobportal.iss
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          Sign out\JobPortal-Windows-Setup.exe
+          if (Test-Path $pfx) { Remove-Item $pfx }
       - name: Test the installer (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -95,6 +138,19 @@ jobs:
           ditto dist/JobPortal.app dmg/JobPortal.app
           ln -s /Applications dmg/Applications
           hdiutil create -volname JobPortal -srcfolder dmg -ov -format UDZO out/${{ matrix.dmg }}
+      - name: Notarize (macOS)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ] || [ -z "$APPLE_ID" ]; then exit 0; fi
+          codesign --force --timestamp --sign "$MACOS_SIGN_IDENTITY" out/${{ matrix.dmg }}
+          xcrun notarytool submit out/${{ matrix.dmg }} --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple out/${{ matrix.dmg }}
       - name: Package (Linux)
         if: runner.os == 'Linux'
         run: |

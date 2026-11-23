@@ -4,8 +4,7 @@ The user picks one or more levels in the standard questions (candidate/onboardin
 setting). The levels then decide:
 - which job titles pass the rule filters: title_filters() builds the "filters.title_include" and "filters.title_exclude"
   settings, which search/pipeline.py applies to every job-board title
-- what the job boards are asked for: ats_search_terms() (Workday, iCIMS), linkedin_experience() (LinkedIn) and
-  muse_levels() (The Muse)
+- what the job boards are asked for: ats_search_terms() (Workday, iCIMS) and linkedin_experience() (LinkedIn)
 - which free-text hiring posts count as relevant: posting_regex() (Hacker News, Reddit, Mastodon, Bluesky)
 
 Key ideas:
@@ -23,12 +22,12 @@ import re
 from jobportal.core.textutil import unique
 
 LEVELS = [  # (id, label shown in the standard questions)
-    ("internship", "Internship, co-op or fellowship"),
-    ("apprenticeship", "Apprenticeship or trainee program"),
-    ("entry", "Entry level, new grad or first job"),
-    ("mid", "Mid level (about 2-5 years)"),
-    ("senior", "Senior or experienced (5+ years)"),
-    ("lead", "Lead, supervisor, manager or director"),
+    ("internship", "Internship"),
+    ("apprenticeship", "Apprenticeship"),
+    ("entry", "Entry level"),
+    ("mid", "Mid level"),
+    ("senior", "Senior"),
+    ("lead", "Lead or manager"),
 ]
 LEVEL_IDS = [k for k, _ in LEVELS]
 # Used until the user answers the standard questions: every level, so nothing about the user is assumed.
@@ -146,14 +145,6 @@ def linkedin_experience(levels) -> str:
     for k in clean(levels):
         out += [c for c in codes[k] if c not in out]
     return ",".join(sorted(out))
-
-
-def muse_levels(levels) -> list[str]:
-    """The Muse's level names for these levels (its "level" search parameter). The Muse has no apprenticeship level, so
-    apprenticeships search its internship and entry levels."""
-    names = {"internship": ["Internship"], "apprenticeship": ["Internship", "Entry Level"], "entry": ["Entry Level"],
-             "mid": ["Mid Level"], "senior": ["Senior Level"], "lead": ["Management"]}
-    return unique([name for k in clean(levels) for name in names[k]])
 
 
 # Words that show a free-text post is about early-career hiring.

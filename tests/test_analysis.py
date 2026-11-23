@@ -180,7 +180,7 @@ def test_the_user_removes_and_adds_roles(client):
     for title in ("Clinic Nurse", "School Nurse", "Hospice Nurse", "Travel Nurse", "Nurse Manager", "Case Manager", "Flight Nurse"):
         assert client.post("/api/analysis/roles/add", json={"title": title}).status_code == 200
     full = client.post("/api/analysis/roles/add", json={"title": "Clinical Research Nurse"})
-    assert full.status_code == 400 and "up to 8" in full.json()["detail"]
+    assert full.status_code == 400 and "Limit is 8" in full.json()["detail"]
     assert len(client.get("/api/analysis").json()["roles"]) == analysis.ROLES_MAX  # what the user added always shows
 
     gone = client.post("/api/analysis/roles/remove", json={"id": "nurse-educator"}).json()

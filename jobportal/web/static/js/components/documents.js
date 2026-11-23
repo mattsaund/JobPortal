@@ -12,12 +12,11 @@
 // The upload in progress: { done, total, name } while files go up, { reading: true } while the main resume is read.
 let docUpload = null;
 
-// The drop zone for documents. big = the card at the top of Home's questions before there's a resume.
+// The drop zone for documents. big = at the top of Home's questions before there's a resume.
 function documentsDropZone(big) {
   return `<label class="upload-zone${big ? " big" : ""}" data-drop="documents">${icon("upload")}
-      <strong>${big ? "Drop your resume and other documents here" : "Drop files or folders here"}</strong>
-      <small>Your resume, plus certificates, licenses, cover letters, awards and transcripts. PDF, Word, ODT, RTF or text.</small>
-      <span class="button light${big ? "" : " full"}">Browse files</span>
+      <strong>${big ? "Resume and documents" : "Add files"}</strong>
+      ${big ? `<span class="button primary">Browse</span>` : ""}
       <input type="file" multiple accept="${esc(S.onboarding?.accept || "")}" aria-label="Choose documents"></label>
     <p class="upload-note" data-doc-progress>${uploadNote()}</p>`;
 }
@@ -25,19 +24,17 @@ function documentsDropZone(big) {
 // What the upload is doing, for the line under every drop zone.
 function uploadNote() {
   if (!docUpload) return "";
-  if (docUpload.reading) return `${spinner()} Reading your resume. About 30 seconds.`;
-  return `${spinner()} Adding ${docUpload.done + 1} of ${docUpload.total}: ${esc(docUpload.name)}`;
+  if (docUpload.reading) return `${spinner()} Reading resume`;
+  return `${spinner()} ${docUpload.done + 1} of ${docUpload.total}: ${esc(docUpload.name)}`;
 }
 const showUploadNote = () => $$("[data-doc-progress]").forEach((el) => (el.innerHTML = uploadNote()));
 
-// The "Your documents" panel: the drop zone and the list, main resume first. "Or paste your resume's text" shows only
-// until there's a main resume.
+// The Documents section: the drop zone and the list, main resume first. Paste text shows only until there's a main resume.
 function documentsPanel() {
-  return `<div class="tool-heading"><span class="tool-icon blue">${icon("file")}</span>
-      <div><h2>Your documents</h2><p>Everything here goes into your profile.</p></div></div>
+  return `<div class="sect-head"><h2>Documents</h2></div>
     ${documentsDropZone(false)}
-    <div data-doc-list>${documentsList()}</div>
-    <button class="text-button" type="button" data-act="paste-resume" data-doc-paste${S.onboarding?.resume ? " hidden" : ""}>Or paste your resume's text ${icon("arrow")}</button>`;
+    <button class="text-button doc-paste" type="button" data-act="paste-resume" data-doc-paste${S.onboarding?.resume ? " hidden" : ""}>Paste text</button>
+    <div data-doc-list>${documentsList()}</div>`;
 }
 
 // Draws the panel into el the first time, and after that only its list and the paste button. The drop zone stays in
@@ -55,15 +52,19 @@ function renderDocumentsPanel(el) {
 // The list: the main resume, then each document with what kind it is and what was read from it.
 function documentsList() {
   const resume = S.onboarding?.resume, docs = S.documents || [];
-  const main = resume ? `<li class="doc main"><span class="doc-icon">${icon("file")}</span><div class="doc-body">
-      <div class="doc-name"><strong title="${esc(resume.filename)}">${esc(resume.filename)}</strong><span class="tag green">MAIN RESUME</span></div>
-      <small>Added ${esc(fmtTs(resume.imported_at))}</small>
-      <div class="doc-actions"><button class="text-button" type="button" data-act="resume-read">What it read</button>
-        ${S.onboarding.resume_from_builder ? `<button class="text-button" type="button" data-act="open-builder">Change your answers</button>` : ""}
-        <button class="text-button" type="button" data-act="resume-replace">Replace</button>
-        <button class="text-button" type="button" data-act="paste-resume">Paste text instead</button></div></div></li>` : "";
-  if (!main && !docs.length) return `<p class="muted-note">Nothing yet. Start with your resume.</p>`;
+  const main = resume ? `<li class="doc main">${icon("file")}<div class="doc-body">
+      <span class="doc-name" title="${esc(resume.filename)}">${esc(resume.filename)}</span><span class="doc-sub">Main resume</span></div>
+      ${docMenu([["resume-read", "View text", ""], S.onboarding.resume_from_builder && ["open-builder", "Edit answers", ""],
+        ["resume-replace", "Replace", ""], ["paste-resume", "Paste text", ""]])}</li>` : "";
+  if (!main && !docs.length) return "";
   return `<ul class="doc-list">${main}${docs.map(documentRow).join("")}</ul>`;
+}
+
+// A document's actions, behind one small menu button. Each item is [action, label, extra attributes].
+function docMenu(items) {
+  const buttons = items.filter(Boolean).map(([act, label, attrs]) => `<button type="button" role="menuitem" data-act="${act}" ${attrs}>${label}</button>`).join("");
+  return `<div class="menu-wrap"><button class="icon-button" type="button" data-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Actions" title="Actions">${icon("more")}</button>
+    <div class="menu" role="menu" hidden>${buttons}</div></div>`;
 }
 
 // One document. parsed (what the AI read: its kind, title, issuer, dates, skills and a summary) and parsing (being read
@@ -71,17 +72,14 @@ function documentsList() {
 function documentRow(doc) {
   const p = doc.parsed || {};
   const kind = p.kind || doc.kind || "document";
-  const dates = [p.issued && `Issued ${fmtDate(p.issued)}`, p.expires && `Expires ${fmtDate(p.expires)}`].filter(Boolean).join(", ");
-  const title = p.title ? `<div class="doc-title">${esc(p.title)}${p.issuer ? `<span>, ${esc(p.issuer)}</span>` : ""}</div>` : "";
-  const skills = (p.skills || []).length ? `<div class="tags">${p.skills.slice(0, 8).map((s) => `<span class="tag">${esc(s)}</span>`).join("")}</div>` : "";
+  const dates = p.expires ? `Expires ${fmtDate(p.expires)}` : p.issued ? fmtDate(p.issued) : "";
+  const sub = [p.title || humanize(kind), p.issuer, dates].filter(Boolean).join(", ");
   const resumeLike = ["resume", "document"].includes(kind);
-  return `<li class="doc"><span class="doc-icon">${icon(kind === "certificate" || kind === "license" ? "cert" : "file")}</span><div class="doc-body">
-      <div class="doc-name"><strong title="${esc(doc.name)}">${esc(doc.name)}</strong><span class="tag">${esc(kind.toUpperCase())}</span></div>
-      ${title}${dates ? `<small>${esc(dates)}</small>` : ""}${p.summary ? `<p>${esc(p.summary)}</p>` : ""}${skills}
-      ${doc.parsing ? `<small class="doc-reading">${spinner()} Reading it</small>` : ""}
-      <div class="doc-actions">${resumeLike ? `<button class="text-button" type="button" data-act="doc-main" data-id="${esc(doc.id)}">Use as main resume</button>` : ""}
-        <button class="text-button" type="button" data-act="doc-parse" data-id="${esc(doc.id)}">Read again</button>
-        <button class="text-button danger" type="button" data-act="doc-remove" data-id="${esc(doc.id)}" data-name="${esc(doc.name)}">Remove</button></div></div></li>`;
+  const id = `data-id="${esc(doc.id)}"`;
+  return `<li class="doc">${icon(kind === "certificate" || kind === "license" ? "cert" : "file")}<div class="doc-body">
+      <span class="doc-name" title="${esc(doc.name)}">${esc(doc.name)}</span>
+      ${doc.parsing ? `<span class="doc-reading">${spinner()} Reading</span>` : `<span class="doc-sub" title="${esc(p.summary || sub)}">${esc(sub)}</span>`}</div>
+      ${docMenu([resumeLike && ["doc-main", "Make main", id], ["doc-parse", "Read again", id], ["doc-remove", "Remove", `${id} data-name="${esc(doc.name)}"`]])}</li>`;
 }
 
 // Redraws every document list on the page (Home has one in its panel). A focused button gets the focus back.
@@ -109,12 +107,12 @@ const someNames = (names) => names.slice(0, 3).join(", ") + (names.length > 3 ? 
 // folder makes a few short toasts instead of one per file.
 async function addDocuments(files) {
   if (docUpload) {
-    toast("Still adding the last ones", "Drop these again in a moment.");
+    toast("Still uploading");
     return;
   }
   const skipped = files.filter((file) => !readable(file)).map((file) => file.name);
   files = files.filter(readable);
-  if (skipped.length) toast(`Skipped ${plural(skipped.length, "file")}`, `JobPortal reads PDF, Word, ODT, RTF and text files. Skipped: ${someNames(skipped)}.`);
+  if (skipped.length) toast(`Skipped ${plural(skipped.length, "file")}`, someNames(skipped));
   if (!files.length) return;
   const added = [], same = [], failed = new Map();  // failed: the server's message, then the names it was for
   const fail = (message, name) => failed.set(message, [...(failed.get(message) || []), name]);
@@ -142,11 +140,9 @@ async function addDocuments(files) {
   showUploadNote();
   await reloadOnboarding();
   const said = [added.length && `${plural(added.length, "document")} added`, same.length && `${same.length} already there`].filter(Boolean).join(", ");
-  if (picked) toast("Your main resume", `Using ${picked}. ${said}. Change it any time.`);
-  else if (said) toast("Documents added", `${said}. They go into your profile in about a minute.`);
-  if (!S.onboarding?.resume && !picked && (added.length || same.length)) {
-    toast("Which one is your resume?", "None of these looks like a resume. Pick one with Use as main resume, or paste the text.");
-  }
+  if (picked) toast("Main resume", picked);
+  else if (said) toast(said);
+  if (!S.onboarding?.resume && !picked && (added.length || same.length)) toast("No resume found", "Make one document the main resume.");
   if (failed.size) {
     const count = [...failed.values()].reduce((sum, names) => sum + names.length, 0);
     toast(`Couldn't add ${plural(count, "file")}`, [...failed].map(([message, names]) => `${someNames(names)}: ${message}`).join(" "), "error");
@@ -157,7 +153,7 @@ async function addDocuments(files) {
 // profile is rebuilt from it. Not while files are still going up: the batch would pick a main resume of its own.
 async function replaceResume(file) {
   if (docUpload) {
-    toast("Still adding your documents", "Replace your resume when they're in.");
+    toast("Still uploading");
     return;
   }
   const answered = !!S.onboarding?.answers_saved;
@@ -166,7 +162,7 @@ async function replaceResume(file) {
   try {
     await uploadFile(`/api/onboarding/resume?filename=${encodeURIComponent(file.name)}&prefill=${answered ? 0 : 1}`, file);
     if (answered && S.profileStatus?.built) await api("/api/profile/build", { method: "POST" });
-    toast("Resume replaced", answered ? "Your profile is being rebuilt with it." : "Your empty answers are filled in from it.");
+    toast("Resume replaced");
   } finally {
     docUpload = null;
     showUploadNote();
@@ -191,10 +187,10 @@ function pickOneFile(accept, pick) {
 
 // The paste dialog: your resume as plain text, read like a file.
 function pasteResumeDialog() {
-  const dialog = openDialog(`<h2>Paste your resume</h2><p>Copy all the text from your resume and paste it here.</p>
-    <textarea id="paste-text" rows="14" placeholder="Paste your whole resume" aria-label="Resume text"></textarea>
+  const dialog = openDialog(`<h2>Paste resume</h2>
+    <textarea id="paste-text" rows="14" aria-label="Resume text"></textarea>
     <div class="dialog-actions"><button class="button outline" type="button" data-act="close-dialog">Cancel</button>
-      <button class="button primary" type="button" data-act="paste-resume-go">Use this text</button></div>`, { eyebrow: "YOUR RESUME" });
+      <button class="button primary" type="button" data-act="paste-resume-go">Use text</button></div>`);
   $("#paste-text", dialog).focus();
 }
 
@@ -204,52 +200,49 @@ onAction("resume-replace", () => pickOneFile(S.onboarding?.accept || "", (file) 
   replaceResume(file).catch((err) => toast("Couldn't replace your resume", err.message, "error"));
 }));
 onAction("paste-resume", () => pasteResumeDialog());
-onAction("resume-read", () => {  // the text JobPortal read from the main resume (the server sends the first 4,000 characters)
-  const ob = S.onboarding, more = (ob.resume?.chars || 0) > 4000 ? " The first 4,000 characters are shown." : "";
-  openDialog(`<h2>${esc(ob.resume.filename)}</h2><p>The text JobPortal read from your resume. It's a source of facts, never a template:
-      every tailored resume is written fresh.${more}</p><pre class="posting-text">${esc(ob.resume_preview || "")}</pre>`, { eyebrow: "YOUR MAIN RESUME", wide: true });
+onAction("resume-read", () => {  // the text read from the main resume (the server sends the first 4,000 characters)
+  const ob = S.onboarding;
+  openDialog(`<h2>${esc(ob.resume.filename)}</h2><pre class="posting-text">${esc(ob.resume_preview || "")}</pre>`, { wide: true });
 });
 onAction("paste-resume-go", async (el) => {
   const text = $("#paste-text").value.trim();
   if (text.length < 80) {
-    toast("That's too short", "Paste your whole resume.", "error");
+    toast("Too short", "", "error");
     return;
   }
   el.disabled = true;
-  el.innerHTML = `${spinner()} Reading it`;
+  el.innerHTML = `${spinner()} Reading`;
   try {
     const answered = !!S.onboarding?.answers_saved;
     await api("/api/onboarding/resume-text", { method: "POST", body: { text, prefill: !answered } });
     if (answered && S.profileStatus?.built) await api("/api/profile/build", { method: "POST" });
     closeDialog(el.closest("dialog"));
-    toast("Resume read", answered ? "Your profile is being rebuilt with it." : "Your empty answers are filled in from it.");
+    toast("Resume added");
     await reloadOnboarding();
   } catch (err) {
     el.disabled = false;
-    el.textContent = "Use this text";
+    el.textContent = "Use text";
     throw err;
   }
 });
 onAction("doc-main", async (el) => {
   el.disabled = true;
-  el.innerHTML = `${spinner()} Switching`;
   try {
     await api(`/api/profile/documents/${el.dataset.id}/main`, { method: "POST" });
   } catch (err) {
     el.disabled = false;
-    el.textContent = "Use as main resume";
     throw err;
   }
-  toast("Main resume changed", "Your old main resume stays in your documents.");
+  toast("Main resume changed");
   await reloadOnboarding();
 });
 onAction("doc-parse", async (el) => {
   try {
     await api(`/api/profile/documents/${el.dataset.id}/parse`, { method: "POST" });
-    toast("Reading it again", "What JobPortal reads from it shows up here in a moment.");
+    toast("Reading again");
   } catch (err) {
     if (err.status !== 404 || err.message !== "Not Found") throw err;
-    toast("Can't read it again yet", "This version of JobPortal doesn't do that yet.", "error");  // an older server
+    toast("Not available", "", "error");  // an older server
   }
 });
 onAction("doc-remove", async (el) => {
@@ -257,5 +250,5 @@ onAction("doc-remove", async (el) => {
   await api(`/api/profile/documents/${el.dataset.id}`, { method: "DELETE" });
   S.documents = S.documents.filter((doc) => doc.id !== el.dataset.id);
   homeDocumentsChanged();
-  toast("Removed", "Your profile updates without it in about a minute.");
+  toast("Removed");
 });

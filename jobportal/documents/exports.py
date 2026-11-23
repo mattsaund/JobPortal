@@ -1,5 +1,6 @@
 """Downloads. Turns a lead's documents into the files the dashboard offers: PDF, Word (DOCX), Markdown, plain text, CSV, email
-(.eml) and one zip with everything. Saved resumes in the library download the same way.
+(.eml) and one zip with everything. leads_zip() does that for many leads at once, with a spreadsheet of them. Saved resumes
+in the library download the same way.
 
 A lead's documents are its resume, cover letter, interview prep, company brief, application answers, outreach emails,
 contacts and the original posting. Rendered resume and cover letter files are kept in the lead's folder in the data folder
@@ -15,7 +16,7 @@ from pathlib import Path
 
 from jobportal.candidate import profile
 from jobportal.candidate.library import LIB_DIR
-from jobportal.core.config import LEADS_DIR
+from jobportal.core.config import DATA, LEADS_DIR
 from jobportal.documents import render
 
 DOCS = {"resume", "cover_letter", "interview_prep", "company_intel", "answers", "emails", "contacts", "posting", "linkedin_note"}
@@ -24,6 +25,9 @@ TEXT_TYPES = ("pdf", "docx", "md", "txt")  # every document except contacts, whi
 PACKAGE_FILES = ("resume.pdf", "resume.docx", "cover_letter.pdf", "cover_letter.docx", "interview_prep.pdf", "company_intel.pdf",
                  "answers.docx", "emails.md", "contacts.csv", "posting.txt")
 CONTACT_COLUMNS = ("name", "title", "org", "email", "email_confidence", "linkedin", "status", "notes", "why", "source_url")
+MAX_EXPORT = 100  # leads in one export, best first: rendering each one's files takes a moment
+LEAD_COLUMNS = ("Match", "Title", "Company", "Location", "Status", "Industry", "Kind", "Found on", "Posted", "Deadline", "Follow up",
+                "Apply", "Posting", "Summary", "Contacts")
 
 
 class NotAvailable(Exception):
@@ -152,6 +156,50 @@ async def package_zip(lead: dict) -> tuple[Path, str]:
         for i, email in enumerate((lead.get("package") or {}).get("emails") or []):
             z.writestr(f"email-{i + 1}-{_email_name(email)}.eml", _email_bytes(email))
     return path, f"Application package - {safe_filename(lead['company'])} - {safe_filename(lead['title'])}.zip"
+
+
+def _cell(value) -> str:
+    """A value for a spreadsheet. Job postings are outside text, so a cell that starts like a formula gets a leading
+    apostrophe, and Excel or Sheets shows it as text instead of running it."""
+    text = str(value if value is not None else "")
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
+def leads_csv(leads: list[dict]) -> str:
+    """A spreadsheet of leads, one row each."""
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(LEAD_COLUMNS)
+    for lead in leads:
+        package = lead.get("package") or {}
+        summary = (lead.get("triage") or {}).get("summary") or (package.get("fit") or {}).get("summary") or ""
+        people = "; ".join(" ".join(x for x in (c.get("name"), f"<{c['email']}>" if c.get("email") else "") if x) for c in package.get("contacts") or [])
+        writer.writerow([_cell(x) for x in (lead.get("score"), lead.get("title"), lead.get("company"), lead.get("location"),
+                                            lead.get("app_status"), lead.get("industry"), lead.get("kind"), lead.get("source"),
+                                            lead.get("posted_at"), lead.get("deadline"), lead.get("follow_up_at"),
+                                            lead.get("apply_url") or lead.get("url"), lead.get("url"), summary, people)])
+    return out.getvalue()
+
+
+async def leads_zip(leads: list[dict]) -> tuple[Path, str]:
+    """Many leads in one zip: leads.csv, and a numbered folder per lead with its tailored documents and ready-to-send
+    emails. A document that doesn't exist yet, or a PDF on a computer with no PDF engine, is left out and the rest stay."""
+    folder = DATA / "exports"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "leads.zip"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("leads.csv", leads_csv(leads))
+        for number, lead in enumerate(leads[:MAX_EXPORT], 1):
+            base = f"{number:03d} {safe_filename(lead.get('company') or 'Unknown')} - {safe_filename(lead.get('title') or 'Job')}"[:90].strip()
+            for name in PACKAGE_FILES:
+                try:
+                    file, download_name = await lead_file(lead, name)
+                except (NotAvailable, render.PDFError):
+                    continue
+                z.write(file, f"{base}/{download_name}")
+            for i, email in enumerate((lead.get("package") or {}).get("emails") or []):
+                z.writestr(f"{base}/email-{i + 1}-{_email_name(email)}.eml", _email_bytes(email))
+    return path, f"JobPortal leads {date.today().isoformat()}.zip"
 
 
 def _email_name(email: dict) -> str:

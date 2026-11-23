@@ -207,11 +207,10 @@ const statusLabel = (status) => (S.meta?.status_labels || {})[status] || humaniz
 // A bullet list of escaped text. cls adds classes such as "good" or "warn", which color the bullets.
 const bulletList = (items, cls = "") => `<ul class="bullets${cls ? " " + cls : ""}">${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
 
-// The match pill on job cards: the fit score out of 100, tinted by how good it is.
+// A lead's fit score out of 100: a plain number, colored by how good it is.
 function matchPill(score) {
-  const level = score == null ? "none" : score >= 80 ? "high" : score >= 60 ? "mid" : "low";
-  return `<div class="match ${level}" title="How well this job fits you, out of 100">`
-    + `<strong>${score ?? "-"}</strong>${score == null ? "" : "<small>%</small>"}<span>${score == null ? "NOT SCORED" : "MATCH"}</span></div>`;
+  const level = score == null ? "" : score >= 80 ? " high" : score >= 60 ? " mid" : "";
+  return `<span class="score${level}" title="Match">${score ?? "-"}<span class="sr-only"> percent match</span></span>`;
 }
 
 // An on/off switch. attrs go on the checkbox inside (an id, or data-* attributes that say what it controls).
@@ -291,6 +290,7 @@ const ICONS = {
   back: '<path d="M15 6l-6 6 6 6"/>',
   search: '<circle cx="10.5" cy="10.5" r="7.5"/><path d="m16 16 5 5"/>',
   chevron: '<path d="m7 10 5 5 5-5"/>',
+  more: '<circle cx="5" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="19" cy="12" r="1.2" fill="currentColor"/>',
   up: '<path d="m7 14 5-5 5 5"/>',
   upload: '<path d="M12 16V3M7 8l5-5 5 5M4 16v5h16v-5"/>',
   download: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
@@ -335,7 +335,6 @@ const S = {
   logs: [],               // live feed lines {ts, source, level, msg}: the last run's log, then "log" events (600 at most)
   profileStatus: null,    // GET /api/profile/status and "profile_status" events: has_resume, answers_saved, built, busy,
                           // phase, error, unsynced (answers not yet in the profile), open_questions, last_built
-  buildDone: false,       // a profile build finished while you watched: Home says so until you move on
   onboarding: null,       // GET /api/onboarding: the standard questions, your answers, what's missing, the main resume
   documents: [],          // the extra documents (GET /api/onboarding, then "documents" events)
   questions: null,        // GET /api/questions and "questions" events: the questions JobPortal asks along the way
@@ -355,12 +354,12 @@ const S = {
   industry: "",           // "" (all) or one industry
   kind: "",               // "" (all), posting, program, event or intel (a company worth contacting, with no posting yet)
   dreamOnly: false,       // only dream companies and dream jobs
-  feedOpen: store.get("feedOpen") !== "0",  // the live search feed is expanded
+  feedOpen: false,        // the search log strip is expanded (leads.js restores it)
   expanded: null,         // the id of the lead card that's open
   openSources: false,     // an old #/sources link: Leads opens the Sources dialog once it's drawn
   // Lead details (lead.js), on Leads or in the Tracker's dialog
   lead: null,             // GET /api/leads/{id}: the lead on screen, with its package (documents, contacts, emails...)
-  leadView: null,         // where it's shown: { box, id, tab, hashBase, header } (hashBase: tabs change the address, as on Leads)
+  leadView: null,         // where it's shown: { box, id, tab, hashBase } (hashBase: tabs change the address, as on Leads)
   editor: null,           // the open resume editor's options, so the layout menu and Re-check can reach it
   // Settings (settings.js, sources.js and the tabs)
   cfg: null,              // GET /api/settings, edited in place by the form until you save
@@ -371,7 +370,7 @@ const S = {
   dreams: null,           // GET /api/dreams (dreams.js)
   libTag: "",             // the tag filter on Settings, Resumes (resumes.js)
   libQ: "",               // its search box
-  analysis: null,         // the latest analysis' search steering, for its "Add to search plan" buttons (analysis.js)
+  analysis: null,         // the latest analysis' search steering, for its "Add terms" and "Add companies" buttons (analysis.js)
 };
 
 // Display names for where a lead came from (lead.source and lead.sources).
@@ -399,7 +398,8 @@ function toast(title, body = "", level = "", leadId = null, action = null) {
     }
     el.remove();
   });
-  const box = $("#toasts");
+  const box = $("#toasts"), home = $$("dialog[open]").at(-1) || document.body;  // an open dialog would cover it otherwise
+  if (box.parentElement !== home) home.appendChild(box);
   box.prepend(el);
   $$(".toast", box).slice(4).forEach((old) => old.remove());  // four at most
   setTimeout(() => el.remove(), level === "error" ? 12000 : action ? 10000 : 6500);
@@ -416,18 +416,22 @@ function toast(title, body = "", level = "", leadId = null, action = null) {
 }
 
 // ---------------------------------------------------------------- dialogs
-// Opens a dialog with the given HTML under a top row (a small heading and a close button) and returns it. Dialogs stack:
-// one opened from another sits on top of it. Clicks inside run data-act actions like anywhere else.
-// opts: eyebrow (the small heading), wide (a large dialog, for a lead's details), guard (it edits: closing it with
-// unsaved edits asks first, and closing it drops them), onClose (runs once it has closed, whatever closed it).
+// Opens a dialog and returns it. Its title comes from opts.title, or from an <h2> at the very start of the HTML, and sits
+// in the top row with the close button. Dialogs stack: one opened from another sits on top of it. Clicks inside run
+// data-act actions like anywhere else.
+// opts: title, wide (a large dialog, for a lead's details), guard (it edits: closing it with unsaved edits asks first,
+// and closing it drops them), onClose (runs once it has closed, whatever closed it).
 // When it closes, the focus goes back to what opened it. The browser does that while the opener is still on the page;
 // when a live update redrew it meanwhile (a Tracker card, the search area card), its twin in the new HTML gets the focus.
 function openDialog(html, opts = {}) {
   const openerKey = focusKey(document.body), page = main.dataset.page;
   const dialog = document.createElement("dialog");
   dialog.className = opts.wide ? "wide" : "";
-  dialog.innerHTML = `<div class="dialog-body"><div class="dialog-top"><span class="eyebrow">${esc(opts.eyebrow || "")}</span>`
-    + `<button class="icon-button" type="button" data-act="close-dialog" aria-label="Close">${icon("close")}</button></div>${html}</div>`;
+  const lead = String(html).match(/^\s*<h2>([\s\S]*?)<\/h2>/);
+  const title = opts.title ? esc(opts.title) : lead ? lead[1] : "";
+  const body = lead && !opts.title ? String(html).slice(lead[0].length) : html;
+  dialog.innerHTML = `<div class="dialog-body"><div class="dialog-top"><h2>${title}</h2>`
+    + `<button class="icon-button" type="button" data-act="close-dialog" aria-label="Close">${icon("close")}</button></div>${body}</div>`;
   dialog.jp = { guard: !!opts.guard, onClose: opts.onClose };
   dialog.addEventListener("cancel", (e) => {  // Esc
     e.preventDefault();
@@ -441,6 +445,7 @@ function openDialog(html, opts = {}) {
       S.dirty = false;
       S.cfgDirty = false;
     }
+    if (dialog.contains($("#toasts"))) ($$("dialog[open]").at(-1) || document.body).appendChild($("#toasts"));  // toasts outlive it
     dialog.remove();
     if (dialog.jp.onClose) dialog.jp.onClose();
     if (main.dataset.page === page) refocus(document.body, openerKey);  // not after a move to another page

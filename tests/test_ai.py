@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from jobportal.ai import client as ai, signin
+from jobportal.ai import client as ai, providers, signin
 from jobportal.core import bus, db
 
 
@@ -149,13 +149,14 @@ def test_the_model_list_without_a_connection_is_an_ai_error(monkeypatch):
         return "test-token"
 
     monkeypatch.setattr(signin, "access_token", token)
+    providers.set_provider("chatgpt")
     mock_http(monkeypatch, offline)
-    with pytest.raises(ai.AIError, match="network problem"):  # the Settings route turns it into a 502, not a 500
+    with pytest.raises(ai.AIError, match="Can't reach"):  # the Settings route turns it into a 502, not a 500
         asyncio.run(ai.models(force=True))
 
 
 def test_not_signed_in_is_a_clear_error():
-    with pytest.raises(ai.NotSignedIn, match="Sign in with ChatGPT"):
+    with pytest.raises(ai.NotSignedIn, match="Connect an AI"):
         asyncio.run(ai.run("hi", system="s", schema={"type": "object"}, stage="triage", purpose="t"))
 
 
@@ -196,6 +197,7 @@ def openai_mock(monkeypatch):
     async def token():
         return "test-token"
     monkeypatch.setattr(signin, "access_token", token)
+    providers.set_provider("chatgpt")
     return state
 
 
@@ -398,6 +400,7 @@ def test_model_response_formats(monkeypatch, container, identifier):
         return "test-token"
 
     monkeypatch.setattr(signin, "access_token", token)
+    providers.set_provider("chatgpt")
 
     def handler(request):
         assert request.url.path.endswith("/models")

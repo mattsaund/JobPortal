@@ -1,20 +1,27 @@
-"""The two checks in the Sources dialog on Leads (web/routes/search.py calls them). Neither one saves anything.
+"""The checks in the Sources dialog on Leads (web/routes/search.py calls them). Neither one saves anything.
 
 detect_board finds the company job board behind a careers page address, so the user can add a company by pasting a link. It
-uses collectors/ats.py to recognize the board and read it once. test_collector runs one source by itself, with the current
-settings, and reports how many of its jobs would pass the same rule filters a search run uses (pipeline.RuleFilters)."""
+uses collectors/ats.py to recognize the board and read it once. test_collector runs one source by itself (a collector or
+one entry of the catalog), with the current settings, and reports how many of its jobs would pass the same rule filters a
+search run uses (pipeline.RuleFilters)."""
 import asyncio
 import re
 
+import httpx
+
 from jobportal.core import settings
-from jobportal.search.collectors import COLLECTORS, ats
+from jobportal.search.collectors import COLLECTORS, ats, catalog
 from jobportal.search.collectors.base import Ctx
 from jobportal.search.pipeline import RuleFilters
 
-SUPPORTED_BOARDS = "Greenhouse, Lever, Ashby, Workday, UKG, iCIMS, SmartRecruiters, Recruitee, Personio"  # named in the "not found" message
+SUPPORTED_BOARDS = ", ".join(ats.SYSTEM_NAMES.values())  # named in the "not found" message
 # Careers pages often embed or link the real job board. This finds such a link in the page's HTML.
-BOARD_LINK = re.compile(r"(https?://[a-z0-9.-]*(?:myworkdayjobs\.com|greenhouse\.io|lever\.co|ashbyhq\.com|icims\.com"
-                        r"|ultipro\.com|smartrecruiters\.com|recruitee\.com|jobs\.personio\.(?:de|com))[^\"'\s<>]*)", re.I)
+BOARD_LINK = re.compile(r"(https?://[a-z0-9.-]*(?:myworkdayjobs\.com|myworkdaysite\.com|greenhouse\.io|lever\.co|ashbyhq\.com|icims\.com"
+                        r"|ultipro\.com|smartrecruiters\.com|recruitee\.com|jobs\.personio\.(?:de|com)|workable\.com|oraclecloud\.com"
+                        r"|successfactors\.\w+|jobs2web\.com|taleo\.net|workforcenow\.adp\.com|paylocity\.com|bamboohr\.com|applytojob\.com"
+                        r"|saashr\.com|applicantpro\.com|isolvedhire\.com|peopleadmin\.com|jibeapply\.com|avature\.net|jobvite\.com"
+                        r"|teamtailor\.com|breezy\.hr|pinpointhq\.com|rippling\.com|applicantstack\.com|jobs\.gem\.com|careers-page\.com"
+                        r"|join\.com/companies|softgarden\.io|loxo\.co|traffit\.com)[^\"'\s<>]*)", re.I)
 
 
 def _quiet(*_args, **_kwargs) -> None:
@@ -39,6 +46,8 @@ def _reason(e: Exception) -> str:
     """An exception as a short reason for the Sources dialog. Some, like a timeout, have no message of their own."""
     if isinstance(e, TimeoutError):
         return "no answer in time"
+    if isinstance(e, httpx.HTTPStatusError):  # the status alone, since the address can hold a user's key
+        return f"HTTP {e.response.status_code}"
     return str(e) or type(e).__name__
 
 
@@ -63,14 +72,18 @@ async def detect_board(url: str, name: str = "") -> dict:
 
 async def test_collector(key: str) -> dict:
     """Run one source with the current settings, then apply the same rule filters a search run uses. Returns the counts,
-    the source's log and up to 12 jobs that passed."""
+    the source's log and up to 12 jobs that passed. `key` is a collector, or the id of one source in the catalog, which is
+    read by itself whether or not it would run for this person."""
     cfg = settings.get()
     if key == "linkedin":
         cfg["sources"]["linkedin"]["max_requests"] = 4  # a quick look, not a full crawl that could get rate-limited
     logs: list[str] = []
     ctx = Ctx(cfg, lambda _source, msg, level="info": logs.append(f"[{level}] {msg}"))
     try:
-        jobs = await asyncio.wait_for(COLLECTORS[key][1](ctx), timeout=300)
+        if key in COLLECTORS:
+            jobs = await asyncio.wait_for(COLLECTORS[key][1](ctx), timeout=300)
+        else:
+            jobs = await catalog.read_source(ctx, catalog.BY_ID[key])
     except Exception as e:  # noqa: BLE001 (report any failure, including a timeout, in the Sources dialog)
         return {"ok": False, "error": _reason(e), "logs": logs}
     finally:

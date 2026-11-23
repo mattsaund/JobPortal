@@ -1,0 +1,53 @@
+/* home.css: the Home page's own styles, on top of base.css. The numbers run across the top; under them, two panes that
+   scroll on their own. */
+main[data-page="home"] { overflow: hidden; }
+.home { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+.home .view-split { min-height: 0; }
+
+/* the welcome, before an AI is connected */
+.welcome { display: grid; align-content: center; justify-items: center; gap: 30px; height: 100%; padding: 32px var(--gutter); text-align: center; }
+.welcome h2 { max-width: 760px; font-size: clamp(30px, 4.2vw, 50px); letter-spacing: -1.2px; line-height: 1.08; }
+.welcome-steps { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 34px; margin: 6px 0 0; padding: 0; color: var(--muted); font-size: 14px; list-style: none; }
+.welcome-steps li { display: inline-flex; align-items: center; gap: 8px; }
+.welcome-steps span { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--mint); color: var(--green-dark); font-size: 12px; font-weight: 700; }
+
+/* the questions */
+.feed { display: grid; gap: 22px; }
+.feed-card { display: grid; gap: 12px; min-width: 0; }
+.feed-card > h3 { font-size: 21px; font-weight: 700; letter-spacing: -0.3px; line-height: 1.25; }
+.feed-card textarea, .feed-card .answer input { max-width: 720px; }
+.feed-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.feed-card.status { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.feed-card.status h3 { font-size: 15px; }
+.feed-card.status p { font-size: 13px; overflow-wrap: anywhere; }
+.status-mark { display: inline-grid; place-items: center; width: 24px; color: var(--green-dark); }
+
+/* the right side: who you are and how far setup is */
+.who { display: flex; align-items: center; gap: 12px; }
+.who .row-title { font-size: 15px; }
+#home-profile progress { margin-top: 14px; }
+.setup-list { display: grid; gap: 6px; margin: 12px 0 0; padding: 0; color: var(--text); font-size: 13.5px; list-style: none; }
+.setup-list li { display: flex; align-items: center; gap: 9px; }
+.setup-list li.done { color: var(--muted); }
+.setup-list svg { width: 15px; height: 15px; color: var(--green-dark); stroke-width: 2.4; }
+.setup-dot { width: 15px; height: 15px; border: 1.5px solid var(--field-border); border-radius: 50%; flex-shrink: 0; }
+
+/* the documents list */
+.doc-list { display: block; margin: 12px calc(var(--gutter) * -1) -22px; padding: 0; border-top: 1px solid var(--line); list-style: none; }
+.doc { display: flex; align-items: flex-start; gap: 10px; padding: 9px var(--gutter); border-bottom: 1px solid var(--line); }
+.doc:last-child { border-bottom: 0; }
+.doc > svg { margin-top: 2px; color: var(--muted); }
+.doc.main > svg { color: var(--green-dark); }
+.doc-body { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.doc-name { overflow: hidden; font-size: 13.5px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.doc-sub { overflow: hidden; color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+.doc-reading { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.doc .menu { min-width: 150px; }
+.doc-paste { margin-top: 10px; }
+
+@media (max-width: 980px) {
+  main[data-page="home"] { overflow: auto; }
+  .home { display: block; height: auto; }
+  .feed-card.status { grid-template-columns: auto minmax(0, 1fr); }
+  .feed-card.status .feed-actions { grid-column: 2; }
+}

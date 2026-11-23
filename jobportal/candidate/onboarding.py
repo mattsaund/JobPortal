@@ -37,105 +37,92 @@ from jobportal.documents import extract
 
 # Answer options as [saved id, label shown]. Saved answers keep the id, so renaming an id breaks answers already saved.
 YES_NO = [["yes", "Yes"], ["no", "No"]]
-DECLINE = ["decline", "Decline to answer"]
-EDUCATION = [["high_school", "High school or GED"], ["some_college", "Some college"],
-             ["trade", "Trade, technical or vocational certificate"], ["apprenticeship", "Apprenticeship (finished or in progress)"],
-             ["bootcamp", "Bootcamp or certificate program"], ["associate", "Associate degree"], ["bachelor", "Bachelor's degree"],
-             ["master", "Master's degree"], ["professional", "Professional degree (such as JD, MD, PharmD or DDS)"],
-             ["doctorate", "Doctorate (PhD, EdD and the like)"], ["other", "Other"]]
-EXPERIENCE = [["0", "None yet"], ["lt1", "Less than 1 year"], ["1-2", "1-2 years"], ["3-5", "3-5 years"], ["6-10", "6-10 years"],
-              ["10+", "More than 10 years"]]
-CLEARANCE = [["none", "No clearance"], ["eligible", "None, but eligible to obtain one"], ["public_trust", "Public Trust"],
+DECLINE = ["decline", "Decline"]
+EDUCATION = [["none", "No formal schooling"], ["some_high_school", "Some high school"], ["high_school", "High school or GED"],
+             ["some_college", "Some college"], ["trade", "Trade certificate"], ["apprenticeship", "Apprenticeship"],
+             ["bootcamp", "Bootcamp or certificate"], ["military", "Military training"], ["associate", "Associate degree"],
+             ["bachelor", "Bachelor's degree"], ["master", "Master's degree"], ["professional", "Professional (JD, MD, DDS)"],
+             ["doctorate", "Doctorate"], ["other", "Other"]]
+EXPERIENCE = [["0", "None"], ["lt1", "Under 1 year"], ["1-2", "1-2 years"], ["3-5", "3-5 years"], ["6-10", "6-10 years"],
+              ["10+", "10+ years"]]
+CLEARANCE = [["none", "None"], ["eligible", "Eligible"], ["public_trust", "Public Trust"],
              ["confidential", "Confidential"], ["secret", "Secret"], ["top_secret", "Top Secret"], ["ts_sci", "TS/SCI"]]
-CITIZENSHIP = [["us_citizen", "U.S. citizen"], ["permanent_resident", "U.S. permanent resident"], ["visa", "Visa holder"],
+CITIZENSHIP = [["us_citizen", "U.S. citizen"], ["permanent_resident", "Permanent resident"], ["visa", "Visa holder"],
                ["other", "Other"], DECLINE]
 JOB_TYPES = [["full_time", "Full-time"], ["part_time", "Part-time"], ["contract", "Contract"], ["temporary", "Temporary"],
-             ["seasonal", "Seasonal"], ["per_diem", "Per diem or PRN"], ["freelance", "Freelance or gig work"],
+             ["seasonal", "Seasonal"], ["per_diem", "Per diem"], ["freelance", "Freelance or gig"],
              ["internship", "Internship"], ["co_op", "Co-op"], ["apprenticeship", "Apprenticeship"]]
 WORK_MODES = [["remote", "Remote"], ["hybrid", "Hybrid"], ["onsite", "On-site"]]
-RELOCATE = [["yes", "Yes"], ["no", "No"], ["depends", "Depends on the job"]]
+RELOCATE = [["yes", "Yes"], ["no", "No"], ["depends", "Depends"]]
 
 # The standard questions, grouped the way most application forms group them. Each field has an id (the key its answer is
 # saved under), a label and a type: text | email | tel | url | select (pick one) | multi (pick several) | list (type
 # several, one per line) | textarea. Optional keys: required, default, options, placeholder and help. A section marked
 # "ai": False never reaches the AI.
 QUESTIONS = [
-    {"id": "contact", "title": "Contact details", "fields": [
+    {"id": "contact", "title": "Contact", "fields": [
         {"id": "name", "label": "Full name", "type": "text", "required": True},
         {"id": "email", "label": "Email", "type": "email", "required": True},
         {"id": "phone", "label": "Phone", "type": "tel"},
         {"id": "city", "label": "City", "type": "text", "required": True},
-        {"id": "state", "label": "State or province", "type": "text"},
+        {"id": "state", "label": "State", "type": "text"},
         {"id": "country", "label": "Country", "type": "text", "default": "United States"},
-        {"id": "linkedin", "label": "LinkedIn URL", "type": "url"},
+        {"id": "linkedin", "label": "LinkedIn", "type": "url"},
         # The id stays "github" because saved answers use it. It's any link to the user's work.
-        {"id": "github", "label": "Portfolio, GitHub or work samples link", "type": "url",
-         "placeholder": "https://www.behance.net/you", "help": "An online portfolio, a GitHub page, published writing, a reel or photos of your work."},
-        {"id": "website", "label": "Personal website", "type": "url"},
+        {"id": "github", "label": "Portfolio", "type": "url", "placeholder": "https://example.com/work"},
+        {"id": "website", "label": "Website", "type": "url"},
     ]},
-    {"id": "eligibility", "title": "Work eligibility", "fields": [
-        {"id": "work_authorized", "label": "Are you legally authorized to work in the United States?", "type": "select",
-         "options": YES_NO, "required": True},
-        {"id": "sponsorship", "label": "Will you now or in the future require visa sponsorship?", "type": "select",
-         "options": YES_NO, "required": True},
-        {"id": "citizenship", "label": "Citizenship status", "type": "select", "options": CITIZENSHIP,
-         "help": "Some government jobs and government contractors require U.S. citizenship."},
+    {"id": "eligibility", "title": "Eligibility", "fields": [
+        {"id": "work_authorized", "label": "Authorized to work", "type": "select", "options": YES_NO, "required": True},
+        {"id": "sponsorship", "label": "Needs visa sponsorship", "type": "select", "options": YES_NO, "required": True},
+        {"id": "citizenship", "label": "Citizenship", "type": "select", "options": CITIZENSHIP},
         {"id": "clearance", "label": "Security clearance", "type": "select", "options": CLEARANCE, "default": "none"},
-        {"id": "over_18", "label": "Are you 18 or older?", "type": "select", "options": YES_NO},
-        {"id": "background_check", "label": "Are you willing to undergo a background check?", "type": "select", "options": YES_NO},
+        {"id": "over_18", "label": "18 or older", "type": "select", "options": YES_NO},
+        {"id": "background_check", "label": "Background check OK", "type": "select", "options": YES_NO},
     ]},
-    {"id": "education", "title": "Education and credentials", "fields": [
-        {"id": "education_level", "label": "Highest level of education (finished or in progress)", "type": "select", "options": EDUCATION},
-        {"id": "school", "label": "School or training program", "type": "text"},
-        {"id": "field_of_study", "label": "Major, field or trade", "type": "text", "placeholder": "Nursing, Welding, Graphic Design"},
-        {"id": "graduation", "label": "Graduation or completion date (or expected)", "type": "text", "placeholder": "May 2027"},
-        {"id": "gpa", "label": "GPA (optional)", "type": "text", "placeholder": "3.4"},
-        {"id": "enrolled", "label": "Are you currently enrolled in school or a training program?", "type": "select", "options": YES_NO},
-        {"id": "licenses", "label": "Professional licenses and certifications (optional, one per line)", "type": "list",
-         "placeholder": "RN license, Ohio\nCDL Class A\nServSafe Manager\nCPA\nCompTIA A+",
-         "help": "Include the state for a license and the year for a certification, and ones in progress (say so)."},
+    {"id": "education", "title": "Education", "fields": [
+        {"id": "education_level", "label": "Highest education", "type": "select", "options": EDUCATION},
+        {"id": "school", "label": "School or program", "type": "text"},
+        {"id": "field_of_study", "label": "Field or trade", "type": "text", "placeholder": "Nursing, Welding, Design"},
+        {"id": "graduation", "label": "Completion date", "type": "text", "placeholder": "May 2027"},
+        {"id": "gpa", "label": "GPA", "type": "text", "placeholder": "3.4"},
+        {"id": "enrolled", "label": "Enrolled now", "type": "select", "options": YES_NO},
+        {"id": "licenses", "label": "Licenses and certifications", "type": "list",
+         "placeholder": "RN license, Ohio\nCDL Class A\nServSafe Manager"},
     ]},
-    {"id": "search", "title": "What you're looking for", "fields": [
-        {"id": "target_roles", "label": "Job titles you want (one per line)", "type": "list", "required": True,
-         "placeholder": "Medical Assistant\nElectrician Apprentice\nMarketing Coordinator"},
-        {"id": "levels", "label": "Experience levels to search", "type": "multi", "options": [list(x) for x in LEVELS], "required": True},
-        {"id": "experience_years", "label": "Years of professional experience", "type": "select", "options": EXPERIENCE},
+    {"id": "search", "title": "Job search", "fields": [
+        {"id": "target_roles", "label": "Target jobs", "type": "list", "required": True,
+         "placeholder": "Medical Assistant\nElectrician Apprentice\nLine Cook"},
+        {"id": "levels", "label": "Experience levels", "type": "multi", "options": [list(x) for x in LEVELS], "required": True},
+        {"id": "experience_years", "label": "Years of experience", "type": "select", "options": EXPERIENCE},
         {"id": "job_types", "label": "Job types", "type": "multi", "options": JOB_TYPES},
-        {"id": "work_modes", "label": "Work arrangement", "type": "multi", "options": WORK_MODES, "default": ["remote", "hybrid", "onsite"]},
-        {"id": "locations", "label": "Where you can work: states or cities (one per line)", "type": "list",
-         "placeholder": "Texas\nDenver, CO", "help": "Remote jobs are included when you pick Remote above."},
-        {"id": "anywhere_us", "label": "Open to jobs anywhere in the United States?", "type": "select", "options": YES_NO, "default": "no"},
-        {"id": "relocate", "label": "Are you willing to relocate?", "type": "select", "options": RELOCATE},
-        {"id": "start_date", "label": "Earliest start date or availability", "type": "text", "placeholder": "June 2027, or 2 weeks' notice"},
-        {"id": "salary", "label": "Desired salary or pay rate (optional)", "type": "text", "placeholder": "$75,000 or $25/hour"},
-        {"id": "industries", "label": "Industries you're most interested in (optional)", "type": "multi",
-         "options": [[x, x] for x in DEFAULT_INDUSTRIES if x != "Other"]},
-        {"id": "dream_companies", "label": "Dream companies (optional, one per line)", "type": "list"},
-        {"id": "dealbreakers", "label": "Anything you want to avoid? (optional)", "type": "textarea",
-         "placeholder": "No travel over 25%, no night shifts"},
+        {"id": "work_modes", "label": "Work mode", "type": "multi", "options": WORK_MODES, "default": ["remote", "hybrid", "onsite"]},
+        {"id": "locations", "label": "Locations", "type": "list", "placeholder": "Texas\nDenver, CO"},
+        {"id": "anywhere_us", "label": "Anywhere in the US", "type": "select", "options": YES_NO, "default": "no"},
+        {"id": "relocate", "label": "Willing to relocate", "type": "select", "options": RELOCATE},
+        {"id": "start_date", "label": "Start date", "type": "text", "placeholder": "2 weeks' notice"},
+        {"id": "salary", "label": "Desired pay", "type": "text", "placeholder": "$75,000 or $25/hour"},
+        {"id": "industries", "label": "Industries", "type": "multi", "options": [[x, x] for x in DEFAULT_INDUSTRIES if x != "Other"]},
+        {"id": "dream_companies", "label": "Dream employers", "type": "list"},
+        {"id": "dealbreakers", "label": "Dealbreakers", "type": "textarea", "placeholder": "No night shifts"},
     ]},
-    {"id": "eeo", "title": "Voluntary self-identification (optional)", "ai": False,
-     "help": "Many applications ask these. Your answers only fill in the Application kit so you can copy them; they are never sent to the AI.",
-     "fields": [
+    {"id": "eeo", "title": "Self-identification (never sent to AI)", "ai": False, "fields": [
          {"id": "gender", "label": "Gender", "type": "select", "default": "decline",
           "options": [DECLINE, ["female", "Female"], ["male", "Male"], ["nonbinary", "Non-binary"], ["other", "Other"]]},
-         {"id": "hispanic", "label": "Are you Hispanic or Latino?", "type": "select", "default": "decline",
+         {"id": "hispanic", "label": "Hispanic or Latino", "type": "select", "default": "decline",
           "options": [DECLINE, ["yes", "Yes"], ["no", "No"]]},
          {"id": "race", "label": "Race", "type": "select", "default": "decline",
           "options": [DECLINE, ["american_indian", "American Indian or Alaska Native"], ["asian", "Asian"],
                       ["black", "Black or African American"], ["pacific_islander", "Native Hawaiian or Other Pacific Islander"],
                       ["white", "White"], ["two_or_more", "Two or more races"]]},
          {"id": "veteran", "label": "Veteran status", "type": "select", "default": "decline",
-          "options": [DECLINE, ["not_veteran", "I am not a protected veteran"],
-                      ["veteran", "I identify as one or more of the classifications of protected veteran"]]},
+          "options": [DECLINE, ["not_veteran", "Not a protected veteran"], ["veteran", "Protected veteran"]]},
          {"id": "disability", "label": "Disability status", "type": "select", "default": "decline",
-          "options": [DECLINE, ["yes", "Yes, I have a disability (or previously had one)"], ["no", "No, I don't have a disability"]]},
+          "options": [DECLINE, ["yes", "Yes"], ["no", "No"]]},
      ]},
-    {"id": "about", "title": "Help it sound like you (optional)", "fields": [
-        {"id": "writing_sample", "label": "Paste something you wrote: a past cover letter, a LinkedIn summary or an essay",
-         "type": "textarea", "help": "Cover letters, emails and application answers are written in your voice when this is filled in."},
-        {"id": "extra", "label": "Anything else the search should know?", "type": "textarea",
-         "placeholder": "Work or projects that aren't on your resume, a license in progress, schedule or travel limits"},
+    {"id": "about", "title": "Writing voice", "fields": [
+        {"id": "writing_sample", "label": "Writing sample", "type": "textarea", "placeholder": "A past cover letter or email"},
+        {"id": "extra", "label": "Notes", "type": "textarea", "placeholder": "Anything not on your resume"},
     ]},
 ]
 # The main resume's file name when the resume builder wrote it (candidate/builder.py), for someone who had no resume.
@@ -390,6 +377,9 @@ def apply_to_profile(a: dict) -> None:
     profile_mod.save("qa", qa_from_answers(a))
 
 
+_US_NAMES = {"us", "u.s.", "usa", "u.s.a.", "united states", "united states of america", "america"}
+
+
 def allowed_locations(a: dict) -> list[str]:
     """The search area the location questions describe, as the list kept in settings locations.allowed.
 
@@ -398,7 +388,7 @@ def allowed_locations(a: dict) -> list[str]:
     - The states and cities listed under "Where you can work" come first.
     - Answering yes to "Open to jobs anywhere in the United States?" puts "Anywhere in the US" in front.
     - With neither of those, on-site and hybrid jobs are searched near home: the home state from the contact details, or
-      the whole US without one. That holds when Remote is picked too (the default picks all three arrangements), so
+      the whole US without one. Someone outside the US searches their own country. That holds when Remote is picked too (the default picks all three arrangements), so
       skipping the optional places question never leaves a remote-only search. Only a user who picked nothing but Remote
       gets no home area.
     - Picking Remote under "Work arrangement" adds "Remote"."""
@@ -407,7 +397,11 @@ def allowed_locations(a: dict) -> list[str]:
     if a.get("anywhere_us") == "yes":
         allowed.insert(0, "Anywhere in the US")
     elif not allowed and (not modes or {"onsite", "hybrid"} & set(modes)):
-        allowed.append(a["state"] if a.get("state") else "Anywhere in the US")
+        country = str(a.get("country") or "").strip()
+        if country and country.lower() not in _US_NAMES:
+            allowed.append(country)
+        else:
+            allowed.append(a["state"] if a.get("state") else "Anywhere in the US")
     if "remote" in modes:
         allowed.append("Remote")
     return allowed

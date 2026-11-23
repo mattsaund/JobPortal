@@ -117,7 +117,7 @@ def test_resume_upload_errors(client):
 
 def test_chatgpt_sign_in_endpoints(client):
     assert client.get("/api/ai/status").json()["signed_in"] is False
-    url = client.post("/api/ai/signin").json()["url"]
+    url = client.post("/api/ai/signin", json={"provider": "chatgpt"}).json()["url"]
     assert url.startswith("https://auth.openai.com/api/accounts/authorize?") and "127.0.0.1%3A8788%2Fauth%2Fcallback" in url
     page = client.get("/auth/callback?state=bogus&code=x")
     assert page.status_code == 200 and "Sign-in didn" in page.text
@@ -145,6 +145,28 @@ def test_lead_downloads(client):
     assert "Subject: Internship" in get("email-0.eml").text
     assert get("interview_prep.docx").content[:2] == b"PK"  # a Word file is a zip
     assert get("email-5.eml").status_code == 404 and get("cover_letter.md").status_code == 404 and get("resume.exe").status_code == 404
+
+
+def test_every_lead_exports_at_once_with_its_documents(client):
+    import csv
+    import io
+    import zipfile
+
+    from jobportal.core import db
+    lead_id = _lead_with_documents()
+    db.update_lead(lead_id, stage="ready", score=91, title="=HYPERLINK(1)", package={
+        "emails": [{"kind": "recruiter", "to": "hr@example.com", "subject": "Hello", "body": "Hi"}],
+        "contacts": [{"name": "Sam Lee", "email": "sam@example.com"}]})
+    got = client.get("/api/export/leads.zip", params={"tab": "ready"})
+    assert got.status_code == 200 and "attachment" in got.headers["content-disposition"]
+    archive = zipfile.ZipFile(io.BytesIO(got.content))
+    names = archive.namelist()
+    assert "leads.csv" in names and any(n.endswith(".eml") and n.startswith("001 Example Robotics") for n in names)
+    assert any(n.endswith("Resume - Example Robotics.docx") for n in names)
+    rows = list(csv.DictReader(io.StringIO(archive.read("leads.csv").decode())))
+    assert rows[0]["Match"] == "91" and "Sam Lee" in rows[0]["Contacts"]
+    assert rows[0]["Title"].startswith("'=")  # a job's text can't run as a spreadsheet formula
+    assert client.get("/api/export/leads.zip", params={"tab": "closed"}).status_code == 404
 
 
 def test_any_email_draft_downloads(client):

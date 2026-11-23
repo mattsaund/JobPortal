@@ -1,0 +1,149 @@
+/* tracker.css: the Tracker page's own styles, on top of base.css. The numbers run across the top and the board fills the
+   rest: five lanes split by thin lines, each scrolling on its own, with plain rows inside. Below 980px the lanes stack as
+   grouped lists and the page scrolls. Contacts is a full-width table. */
+main[data-page="tracker"] { overflow: hidden; }
+#tracker-body { height: 100%; }
+.board-view, .contacts-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+/* the numbers, with Add job at the end */
+.tracker-top { display: flex; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.tracker-top .stat-strip { flex: 1; min-width: 0; border-bottom: 0; }
+.tracker-top .stat-strip > div { position: relative; }
+.tracker-top .stat-strip > :first-child { flex: 1.35; }
+.tracker-top .stat-strip strong small { margin-left: 7px; color: var(--muted); font-size: 13px; font-weight: 400; }
+.tracker-add { display: flex; align-items: center; padding: 0 var(--gutter); border-left: 1px solid var(--line); flex-shrink: 0; }
+.tracker-top .weekly { position: absolute; top: 15px; right: var(--gutter); bottom: 15px; display: flex; align-items: flex-end; justify-content: flex-end; gap: 3px; width: 42%; overflow: visible; }
+.weekly i { display: block; flex: 0 1 6px; min-width: 2px; background: var(--green); }
+
+/* the follow-ups due: a label on the left, their rows on the right */
+.tracker-due { display: grid; grid-template-columns: 190px minmax(0, 1fr); border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.tracker-due h2 { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 0 0 var(--gutter); font-size: 13.5px; white-space: nowrap; }
+.tracker-due h2 svg { width: 16px; height: 16px; color: var(--warn-text); }
+.tracker-due h2 span { color: var(--muted); font-weight: 400; }
+.due-rows { max-height: 120px; margin: 0; padding: 0; overflow-y: auto; list-style: none; scrollbar-width: thin; }
+.due-rows li { display: flex; align-items: center; gap: 14px; min-height: 40px; padding: 5px var(--gutter) 5px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.due-rows li:last-child { border-bottom: 0; }
+.due-date { width: 62px; color: var(--muted); font-size: 13px; white-space: nowrap; flex-shrink: 0; }
+.due-date.late { color: var(--warn-text); font-weight: 700; }
+.due-name { flex: 1; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.due-name b { color: var(--text); }
+
+/* the board: five lanes */
+.lanes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); flex: 1; min-height: 0; }
+.lane { display: flex; flex-direction: column; min-width: 0; min-height: 0; transition: background 0.12s; }
+.lane + .lane { border-left: 1px solid var(--line); }
+.lane.over { background: var(--mint); }
+.lane-head { display: flex; align-items: center; gap: 7px; height: 44px; padding: 0 7px 0 14px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
+.lane-head h2 { min-width: 0; overflow: hidden; font-size: 13.5px; line-height: 1.2; }
+.lane-count { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.lane-head .icon-button { width: 28px; height: 28px; margin-left: auto; }
+.lane-head .icon-button svg { width: 16px; height: 16px; }
+.lane-rows { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.lane-empty { padding: 12px 14px; color: var(--muted); font-size: 13px; }
+.lane:first-child .lane-head, .lane:first-child .lane-open, .lane:first-child .lane-empty { padding-left: var(--gutter); }
+
+/* one application: a plain row. Its tools show on hover or focus, over the end of the row. */
+.lane-row { position: relative; border-bottom: 1px solid var(--line); }
+.lane-row:hover, .lane-row:focus-within { background: var(--hover); }
+.lane.over .lane-row { background: none; }
+.lane-row.dragging { opacity: 0.45; }
+.lane-open { display: grid; gap: 2px; padding: 10px 14px 11px; color: var(--text); cursor: pointer; }
+.lane-open:focus-visible { outline: 2px solid var(--green); outline-offset: -2px; }
+.lane-open strong { display: -webkit-box; overflow: hidden; font-size: 13.5px; line-height: 1.35; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.lane-open > span { overflow: hidden; color: var(--muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.lane-follow { display: flex; align-items: center; gap: 5px; margin-top: 3px; color: var(--muted); font-size: 12.5px; }
+.lane-follow svg { width: 13px; height: 13px; }
+.lane-follow.late { color: var(--warn-text); font-weight: 700; }
+.lane-tools { position: absolute; top: 5px; right: 5px; display: flex; align-items: center; gap: 2px; padding: 1px; border-radius: 6px; background: var(--hover); opacity: 0; }
+.lane-row:hover .lane-tools, .lane-tools:focus-within { opacity: 1; }
+.lane-tools .icon-button { width: 28px; height: 28px; }
+.lane-tools .icon-button svg { width: 15px; height: 15px; }
+.lane-move { position: relative; display: inline-flex; align-items: center; gap: 3px; height: 28px; padding: 0 5px 0 8px; border-radius: 6px; color: var(--muted); font-size: 12.5px; cursor: pointer; }
+.lane-move:hover { color: var(--green-dark); }
+.lane-move:focus-within { outline: 2px solid var(--green); outline-offset: 1px; }
+.lane-move svg { width: 13px; height: 13px; }
+.lane-move select { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+/* touch screens have no hover: the tools stay on, on their own line */
+@media (hover: none) {
+  .lane-tools { position: static; justify-content: flex-end; padding: 0 5px 5px; background: none; opacity: 1; }
+}
+
+/* contacts */
+.contacts-view .toolbar { flex-shrink: 0; }
+.contacts-view #contact-q { flex: 0 1 260px; width: 260px; }
+.contacts-scroll { flex: 1; min-height: 0; overflow: auto; }
+.contacts-table th { position: sticky; top: 0; z-index: 1; border-bottom: 0; background: var(--surface); box-shadow: inset 0 -1px var(--line); }
+.contacts-table td { vertical-align: top; }
+.contacts-table b { font-size: 13.5px; }
+.contacts-table .text-button { font-size: 13.5px; white-space: normal; text-align: left; }
+.contacts-table select, .contacts-table input[type=text] { height: 32px; margin: -6px 0; padding-top: 4px; padding-bottom: 4px; border-color: transparent; background-color: transparent; font-size: 13px; }
+.contacts-table select { width: 136px; }
+.contacts-table select:hover, .contacts-table input[type=text]:hover, .contacts-table select:focus, .contacts-table input[type=text]:focus { border-color: var(--field-border); background-color: var(--surface); }
+.contacts-table input[type=text] { min-width: 170px; }
+.contacts-table .cell-note { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.contact-email { overflow-wrap: anywhere; }
+.contacts-table .cell-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; }
+td > .contact-email + .cell-row { margin-top: 3px; }
+.contacts-none td { padding: 0; }
+
+@media (max-width: 1200px) {
+  .lane-head { gap: 4px; padding: 0 3px 0 12px; }
+  .lane-head h2 { font-size: 13px; }
+  .lane-head .icon-button { width: 26px; height: 26px; }
+  .lane-open, .lane-empty { padding-right: 10px; padding-left: 12px; }
+}
+
+@media (max-width: 980px) {
+  main[data-page="tracker"] { overflow: auto; }
+  #tracker-body, .board-view, .contacts-view { height: auto; }
+  .contacts-scroll { overflow: visible; }
+
+  /* the lanes stack as grouped lists, each under a sticky name */
+  .lanes { display: block; }
+  .lane + .lane { border-left: 0; }
+  .lane-head { position: sticky; top: 0; z-index: 2; background: var(--rail-bg); }
+  .lane.over .lane-head { background: var(--mint); }
+  .lane-rows { overflow: visible; }
+  .lane-empty { padding-top: 10px; padding-bottom: 10px; }
+  .lane-head, .lane-open, .lane-empty { padding-left: var(--gutter); }
+  .lane-head { gap: 7px; padding-right: calc(var(--gutter) - 7px); }
+  .lane-head h2 { font-size: 13.5px; }
+  .lane-open { padding-right: 130px; }
+  .lane-tools { top: 50%; right: calc(var(--gutter) - 6px); background: none; opacity: 1; transform: translateY(-50%); }
+  .tracker-top .stat-strip > * { padding-right: 14px; padding-left: 14px; }
+  .tracker-top .stat-strip > :first-child { padding-left: var(--gutter); }
+  .tracker-top .weekly { right: 14px; }
+
+  /* each contact is a block: person and job side by side, then the rest */
+  .contacts-table, .contacts-table tbody { display: block; }
+  .contacts-table thead { display: none; }
+  .contacts-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 20px; padding: 12px var(--gutter); border-bottom: 1px solid var(--line); }
+  .contacts-table tr:last-child { border-bottom: 0; }
+  .contacts-table td, .contacts-table td:first-child, .contacts-table td:last-child { display: block; min-width: 0; padding: 0; border: 0; }
+  .contacts-table select, .contacts-table input[type=text] { width: 100%; min-width: 0; margin: 0; border-color: var(--field-border); }
+  .contacts-none { display: block !important; }
+}
+
+/* the numbers two by two, with Add job on its own line */
+@media (max-width: 760px) {
+  .tracker-top { flex-direction: column; }
+  .tracker-top .stat-strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tracker-top .stat-strip > *, .tracker-top .stat-strip > :first-child { padding-right: var(--gutter); padding-left: var(--gutter); }
+  .tracker-top .stat-strip > :nth-child(odd) { border-left: 0; }
+  .tracker-top .stat-strip > :nth-child(n+3) { border-top: 1px solid var(--line); }
+  .tracker-top .weekly { right: var(--gutter); }
+  .tracker-add { padding: 8px var(--gutter); border-top: 1px solid var(--line); border-left: 0; }
+  .tracker-add .button { width: 100%; }
+}
+
+@media (max-width: 680px) {
+  .tracker-due { grid-template-columns: 1fr; }
+  .due-rows { max-height: none; padding-left: var(--gutter); }
+  .due-rows li { padding-left: 0; }
+  .due-name b, .due-name span { display: block; overflow: hidden; text-overflow: ellipsis; }
+  .lane-open { padding-right: 110px; }
+  .contacts-view .toolbar .spacer { display: none; }
+  .contacts-view #contact-q { flex: 1 1 100%; width: 100%; }
+  .contacts-view .toolbar select { flex: 1; }
+  .contacts-table tr { grid-template-columns: minmax(0, 1fr); }
+}

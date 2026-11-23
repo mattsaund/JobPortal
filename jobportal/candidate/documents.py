@@ -426,7 +426,7 @@ def add(filename: str, data: bytes, text: str | None = None) -> dict:
         if same:
             return {**_entry(same), "duplicate": True}
         if len(docs) >= MAX_DOCUMENTS:
-            raise ValueError(f"You can keep up to {MAX_DOCUMENTS} documents. Remove one first.")
+            raise ValueError(f"Limit is {MAX_DOCUMENTS} documents.")
         if text is None:
             text = read_text(filename, data)
         name = osutil.storable_name(filename, "document.txt")
@@ -486,7 +486,7 @@ async def _read_in_background(doc_id: str) -> None:
     except KeyError:
         pass  # removed while it was being read
     except ai.AIError as e:
-        bus.publish("toast", {"title": "Couldn't read a document with AI", "body": str(e)[:300], "level": "error"})
+        bus.publish("toast", {"title": "Couldn't read document", "body": str(e)[:300], "level": "error"})
 
 
 async def parse_with_ai(doc_id: str, changed: bool = False) -> dict:
@@ -543,7 +543,7 @@ async def parse_pending() -> int:
         except KeyError:
             continue  # removed meanwhile
         except ai.AIError as e:
-            bus.publish("toast", {"title": "Couldn't read your documents with AI", "body": str(e)[:300], "level": "error"})
+            bus.publish("toast", {"title": "Couldn't read documents", "body": str(e)[:300], "level": "error"})
             break
     return done
 

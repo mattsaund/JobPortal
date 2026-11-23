@@ -1,33 +1,31 @@
 """Which AI JobPortal runs on, and the user's sign-in or key for it.
 
-The user picks one provider in Settings, AI (the welcome screen leads there too):
-- ChatGPT: Sign in with ChatGPT, on the user's Go, Plus or Pro plan (ai/signin.py).
-- OpenRouter: Sign in with OpenRouter, or a pasted OpenRouter key. One account reaches hundreds of models, some of them free
-  within a daily limit.
-- An API key from OpenAI, Anthropic (Claude), Google (Gemini, with a free tier), Mistral, Groq, DeepSeek or xAI (Grok), or
-  from any other service that speaks OpenAI's chat completions API.
-Those are the providers that let an app like this one work for the user. Anthropic and Google don't let other apps sign
-people in with a Claude or Gemini subscription, and GitHub retired GitHub Models, so those come by API key or not at all.
+The user picks a provider in the Connect popup (web/static/js/components/connect.js). There is no default: JobPortal works
+with any of them, and nothing runs until one is connected. Each connects one of three ways:
+- a sign-in in the browser (ChatGPT through ai/signin.py, OpenRouter and Pollinations through OAuth PKCE here);
+- an API key, with the page where the user gets one;
+- an address, for a service with its own URL or a model server on this computer (the "fields" of its entry).
 
 Key ideas:
-- PROVIDERS is data. Each provider has a name, the "wire" its requests travel on (OpenAI's Responses API, the chat
-  completions API most services share, or Anthropic's Messages API), its address, how the user connects ("chatgpt" sign-in
-  or a "key"), where to get a key, and whether it can search the web. ai/client.py sends every request the provider's way.
+- PROVIDERS is data (ai/provider_list.py). A provider that speaks one of the three request formats ("wires": OpenAI's Responses API, the chat
+  completions API most services share, or Anthropic's Messages API) needs only an entry here. ai/client.py sends every
+  request the provider's way.
 - Keys live only in ai_keys.json in the data folder, created readable by the owner alone (on macOS and Linux; Windows
   keeps the data folder private to the user). They never reach the dashboard: status() names the providers that have a
   key and shows its last four characters.
-- The chosen provider is the "ai.provider" setting, with "ai.custom_url" for another service. Switching providers clears
-  the model choices, since model names differ between providers (set_provider).
-- Sign in with OpenRouter is OAuth PKCE with no app registration: OpenRouter sends the browser back to this computer with
-  a one-time code, and the code becomes a key on the user's own account (openrouter_start, openrouter_finish). OpenRouter
-  can't delete that key from here, so forgetting it points the user to their key page.
+- The chosen provider is the "ai.provider" setting, and "ai.endpoints" holds each provider's address parts. Switching
+  providers clears the model choices, since model names differ between providers (set_provider).
+- OpenRouter and Pollinations sign in with OAuth PKCE and no app registration: the provider sends the browser back to this
+  computer with a one-time code, and the code becomes a key on the user's own account (key_signin_start, key_signin_finish).
+  That key can't be deleted from here, so forgetting it points the user to their key page.
 
-Who calls it: ai/client.py (credential, current, info), web/routes/ai.py (status, providers, keys, the OpenRouter
-sign-in), ai/signin.py (publish, after a ChatGPT sign-in change) and app/doctor.py (status)."""
+Who calls it: ai/client.py (credential, current, info), web/routes/ai.py (status, listing, keys, endpoints, the sign-ins),
+ai/signin.py (publish, after a ChatGPT sign-in change) and app/doctor.py (status)."""
 import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import time
 from urllib.parse import urlencode
@@ -35,56 +33,28 @@ from urllib.parse import urlencode
 import httpx
 
 from jobportal.ai import signin
+from jobportal.ai.provider_list import PROVIDERS
 from jobportal.core import bus, settings as settings_mod
 from jobportal.core.config import DATA
 
 KEYS = DATA / "ai_keys.json"  # the saved API keys: {provider id: {"key", "added_at", "via"}}
-OPENROUTER_AUTH = "https://openrouter.ai/auth"  # where the user approves JobPortal on OpenRouter
-OPENROUTER_EXCHANGE = "https://openrouter.ai/api/v1/auth/keys"  # trades the one-time code for the user's key
-OPENROUTER_CALLBACK = "/auth/openrouter"  # where OpenRouter sends the browser back to, on JobPortal's own server
-SIGN_IN_TIMEOUT = 900  # a started OpenRouter sign-in must be finished within 15 minutes
-
-# Every provider. wire: how requests are sent (ai/client.py). base: the API's address. auth: "chatgpt" (Sign in with
-# ChatGPT) or "key". signin: also offers a sign-in that makes the key. search: can search the web itself. key_url: where
-# the user gets a key. key_prefix: how its keys start, as a hint. models: the model list's path, when it isn't /models.
-# effort: how the provider takes the reasoning effort ("reasoning" object, "reasoning_effort" field, or none).
-# tool_name: tool replies name their tool (Mistral wants that). free: the provider has free models or a free tier.
-PROVIDERS = {
-    "chatgpt": {"name": "ChatGPT", "wire": "responses", "base": "https://api.openai.com/v1", "auth": "chatgpt", "search": True,
-                "note": "Runs on your ChatGPT Go, Plus or Pro plan. Nothing else to buy or set up."},
-    "openrouter": {"name": "OpenRouter", "wire": "chat", "base": "https://openrouter.ai/api/v1", "auth": "key", "signin": True,
-                   "free": True, "models": "/models/user", "effort": "reasoning", "key_prefix": "sk-or-",
-                   "key_url": "https://openrouter.ai/settings/keys",
-                   "note": "One account for hundreds of models, including free ones with a daily limit. You pay as you go for the rest."},
-    "openai": {"name": "OpenAI API", "wire": "responses", "base": "https://api.openai.com/v1", "auth": "key", "search": True,
-               "key_prefix": "sk-", "key_url": "https://platform.openai.com/api-keys",
-               "note": "Pay as you go with an OpenAI API key, separate from a ChatGPT plan."},
-    "anthropic": {"name": "Claude (Anthropic)", "wire": "anthropic", "base": "https://api.anthropic.com/v1", "auth": "key",
-                  "search": True, "key_prefix": "sk-ant-", "key_url": "https://platform.claude.com/settings/keys",
-                  "note": "Pay as you go with an Anthropic API key. Claude.ai plans can't be used by other apps."},
-    "gemini": {"name": "Gemini (Google)", "wire": "chat", "base": "https://generativelanguage.googleapis.com/v1beta/openai",
-               "auth": "key", "free": True, "effort": "reasoning_effort", "key_prefix": "AIza",
-               "key_url": "https://aistudio.google.com/apikey",
-               "note": "A free tier with daily limits. On the free tier, Google may use what you send and people may review it, "
-                       "so add billing to your key if you want your resume kept private."},
-    "mistral": {"name": "Mistral", "wire": "chat", "base": "https://api.mistral.ai/v1", "auth": "key", "tool_name": True,
-                "key_url": "https://console.mistral.ai/api-keys", "note": "Pay as you go with a Mistral API key."},
-    "groq": {"name": "Groq", "wire": "chat", "base": "https://api.groq.com/openai/v1", "auth": "key", "free": True,
-             "key_prefix": "gsk_", "key_url": "https://console.groq.com/keys",
-             "note": "Fast open models, with a free tier that has tight limits."},
-    "deepseek": {"name": "DeepSeek", "wire": "chat", "base": "https://api.deepseek.com", "auth": "key", "key_prefix": "sk-",
-                 "key_url": "https://platform.deepseek.com/api_keys", "note": "Pay as you go with a DeepSeek API key."},
-    "xai": {"name": "Grok (xAI)", "wire": "chat", "base": "https://api.x.ai/v1", "auth": "key", "key_prefix": "xai-",
-            "key_url": "https://console.x.ai", "note": "Pay as you go with an xAI API key."},
-    "custom": {"name": "Another service", "wire": "chat", "base": "", "auth": "key", "custom": True,
-               "note": "Any service with an OpenAI-compatible chat completions API: give its address and a key."},
+# Providers whose browser sign-in hands back a key: where the user approves JobPortal, where the one-time code is traded for
+# the key, and where the browser comes back to on JobPortal's own server. Both promise any port on "localhost".
+KEY_SIGNINS = {
+    "openrouter": {"authorize": "https://openrouter.ai/auth", "token": "https://openrouter.ai/api/v1/auth/keys", "callback": "/auth/openrouter"},
+    "pollinations": {"authorize": "https://enter.pollinations.ai/authorize", "token": "https://enter.pollinations.ai/api/oauth/token",
+                     "callback": "/auth/pollinations"},
 }
-DEFAULT = "chatgpt"
+SIGN_IN_TIMEOUT = 900  # a started sign-in must be finished within 15 minutes
+POLLINATIONS_KEY_DAYS = 30  # how long a key from Sign in with Pollinations lasts (it has no refresh, and the default is 7)
 
-# Sign-ins with OpenRouter started but not finished, keyed by their state value: {verifier, created}. In memory only, so a
-# sign-in can't outlive the server process that started it.
+NO_PROVIDER = {"name": "AI", "wire": "chat", "base": "", "auth": "none"}  # stands in until one is connected
+NOT_CONNECTED = "Connect an AI first."
+LOCAL_KEY = "local"  # sent to a server that needs no key
+
+# Key sign-ins started but not finished, keyed by their state value: {provider, verifier, callback, created}. In memory only,
+# so a sign-in can't outlive the server process that started it.
 _pending: dict[str, dict] = {}
-
 
 class NoCredential(Exception):
     """The chosen provider has no sign-in or key yet. ai/client.py turns this into its NotSignedIn."""
@@ -93,39 +63,114 @@ class NoCredential(Exception):
 # ---------------------------------------------------------------- the chosen provider
 
 def current(cfg: dict | None = None) -> str:
-    """The id of the provider in use (Settings, AI). An unknown id falls back to ChatGPT."""
-    chosen = str(((cfg or settings_mod.get()).get("ai") or {}).get("provider") or DEFAULT)
-    return chosen if chosen in PROVIDERS else DEFAULT
+    """The id of the provider in use, or "" when none is connected yet. Someone signed in with ChatGPT before providers
+    could be picked has no stored choice and keeps ChatGPT."""
+    chosen = str(((cfg or settings_mod.get()).get("ai") or {}).get("provider") or "")
+    if chosen in PROVIDERS:
+        return chosen
+    return "chatgpt" if signin.status().get("signed_in") else ""
+
+
+def _endpoint(pid: str, cfg: dict) -> dict:
+    """The address parts saved for a provider, with each field's default where nothing is saved."""
+    ai = cfg.get("ai") or {}
+    saved = dict((ai.get("endpoints") or {}).get(pid) or {})
+    if pid == "custom" and not saved.get("url") and ai.get("custom_url"):  # saved by v0.4.0
+        saved["url"] = ai["custom_url"]
+    return {f["id"]: str(saved.get(f["id"]) or f.get("default") or "").strip() for f in PROVIDERS[pid].get("fields", [])}
+
+
+def _base(entry: dict, cfg: dict) -> str:
+    """The provider's API address. One with fields gets it from them, and it's "" until the required ones are filled in."""
+    fields = entry.get("fields")
+    if not fields:
+        return entry["base"]
+    values = _endpoint(entry["id"], cfg)
+    if any(f.get("required", True) and not values[f["id"]] for f in fields):
+        return ""
+    return values["url"].rstrip("/") if "url" in values else entry["base"].format(**values)
 
 
 def info(provider: str | None = None, cfg: dict | None = None) -> dict:
-    """The provider's entry from PROVIDERS plus its id, with "base" filled in for another service (ai.custom_url)."""
+    """The provider's entry from PROVIDERS plus its id and its address. With no provider connected, a stand-in entry whose
+    requests stop at "Connect an AI"."""
     cfg = cfg or settings_mod.get()
-    pid = provider or current(cfg)
+    pid = current(cfg) if provider is None else provider
+    if not pid:
+        return {**NO_PROVIDER, "id": ""}
     entry = {**PROVIDERS[pid], "id": pid}
-    if entry.get("custom"):
-        entry["base"] = str((cfg.get("ai") or {}).get("custom_url") or "").strip().rstrip("/")
+    entry["base"] = _base(entry, cfg)
+    if entry.get("headers"):  # a header can carry an address part, such as a project id
+        values = _endpoint(pid, cfg)
+        entry["headers"] = {name: value.format(**values) for name, value in entry["headers"].items()}
     return entry
 
 
-def set_provider(provider: str, custom_url: str | None = None) -> dict:
+def set_provider(provider: str) -> dict:
     """Switch to another provider and return the settings. The model choices go back to the provider's default, since a
-    model name from one provider means nothing to another. custom_url is the address of another service."""
-    if provider not in PROVIDERS:
+    model name from one provider means nothing to another. "" means none."""
+    if provider and provider not in PROVIDERS:
         raise ValueError(f"unknown provider {provider!r}")
     cfg = settings_mod.get()
     ai = cfg["ai"]
-    if ai.get("provider", DEFAULT) != provider:
+    if current(cfg) != provider:
         ai["model"] = ""
         for stage in ai["stages"].values():
             stage["model"] = ""
     ai["provider"] = provider
-    if custom_url is not None:
-        url = custom_url.strip().rstrip("/")
-        if url and not url.lower().startswith(("http://", "https://")):
-            raise ValueError("The address must start with http:// or https://")
-        ai["custom_url"] = url
     return settings_mod.save(cfg)
+
+
+def set_endpoint(provider: str, values: dict) -> None:
+    """Save a provider's address parts. A "url" must be http(s), and the others (a resource name, a region, an account id)
+    go into its address, so they may hold only letters, digits, dots, dashes and underscores. Raises ValueError."""
+    if provider not in PROVIDERS:
+        raise ValueError(f"unknown provider {provider!r}")
+    clean = {}
+    for field in PROVIDERS[provider].get("fields", []):
+        value = str(values.get(field["id"]) or "").strip().rstrip("/")
+        if field["id"] == "url":
+            if value and (not value.lower().startswith(("http://", "https://")) or re.search(r"\s", value)):
+                raise ValueError("The address must start with http:// or https://")
+        elif value and not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", value):
+            raise ValueError(f"{field['label']} has characters it can't have.")
+        clean[field["id"]] = value
+    cfg = settings_mod.get()
+    cfg["ai"].setdefault("endpoints", {})[provider] = clean
+    settings_mod.save(cfg)
+
+
+def set_model(model: str) -> None:
+    """Make this the default model, for a provider that has no model list to pick from."""
+    cfg = settings_mod.get()
+    cfg["ai"]["model"] = model.strip()
+    settings_mod.save(cfg)
+
+
+def saved_state(provider: str) -> dict:
+    """What's saved now for a provider, for restore() to put back when a new connection fails its check."""
+    cfg = settings_mod.get()
+    return {"provider": provider, "current": current(cfg), "key": get_key(provider), "model": cfg["ai"].get("model", ""),
+            "endpoint": ((cfg["ai"].get("endpoints") or {}).get(provider))}
+
+
+def restore(state: dict) -> None:
+    """Put back what saved_state() recorded."""
+    pid = state["provider"]
+    if state["key"]:
+        save_key(pid, state["key"])
+    else:
+        forget_key(pid)
+    cfg = settings_mod.get()
+    endpoints = cfg["ai"].setdefault("endpoints", {})
+    if state["endpoint"] is None:
+        endpoints.pop(pid, None)
+    else:
+        endpoints[pid] = state["endpoint"]
+    settings_mod.save(cfg)
+    if current() != state["current"]:
+        set_provider(state["current"])
+    set_model(state["model"])
 
 
 # ---------------------------------------------------------------- keys
@@ -166,7 +211,7 @@ def save_key(provider: str, key: str, via: str = "pasted") -> None:
     if provider not in PROVIDERS or PROVIDERS[provider]["auth"] != "key":
         raise ValueError(f"{provider} doesn't take a key")
     if not key or len(key) > 500 or any(ch.isspace() for ch in key):
-        raise ValueError("That doesn't look like an API key. Copy the whole key, with no spaces.")
+        raise ValueError("That doesn't look like an API key.")
     keys = _load_keys()
     keys[provider] = {"key": key, "added_at": time.time(), "via": via}
     _save_keys(keys)
@@ -191,29 +236,38 @@ def _hint(key: str) -> str:
 async def credential(provider: str | None = None) -> str:
     """What authorizes a request to the provider: the ChatGPT access token (refreshed when needed) or the saved key.
     Raises NoCredential when there is none yet, and lets ai/signin.py's own errors through for ChatGPT."""
-    pid = provider or current()
-    if PROVIDERS[pid]["auth"] == "chatgpt":
+    pid = current() if provider is None else provider
+    if not pid:
+        raise NoCredential(NOT_CONNECTED)
+    entry = PROVIDERS[pid]
+    if entry["auth"] == "chatgpt":
         return await signin.access_token()
     key = get_key(pid)
-    if not key:
-        raise NoCredential(f"Add your {PROVIDERS[pid]['name']} key first (Settings, AI).")
-    return key
+    if key:
+        return key
+    if entry.get("needs_key") is False:
+        return LOCAL_KEY  # a server with no keys ignores it, and some clients and servers still want the header
+    raise NoCredential(f"Add your {entry['name']} key.")
 
 
 def problem(cfg: dict | None = None) -> str:
     """Why the AI can't run right now, worded for the user, or "" when it can."""
     entry = info(cfg=cfg)
+    if not entry["id"]:
+        return NOT_CONNECTED
     if entry["auth"] == "chatgpt":
-        return "" if signin.status().get("signed_in") else "Sign in with ChatGPT first (Settings, AI)."
-    if entry.get("custom") and not entry["base"]:
-        return "Give the address of your AI service first (Settings, AI)."
-    return "" if get_key(entry["id"]) else f"Add your {entry['name']} key first (Settings, AI)."
+        return "" if signin.status().get("signed_in") else "Sign in with ChatGPT."
+    if entry.get("fields") and not entry["base"]:
+        return f"Add the {entry['name']} address."
+    if entry.get("needs_key") is False:
+        return ""
+    return "" if get_key(entry["id"]) else f"Add your {entry['name']} key."
 
 
 def status(cfg: dict | None = None) -> dict:
-    """The AI's status, safe to send to the dashboard: the provider in use, whether it's ready, the ChatGPT account (name
-    and email, when that's the provider), which providers have a saved key (shown by their last four characters), and the
-    custom address. "signed_in" means ready too, so older parts of the dashboard keep working. Never includes a key."""
+    """The AI's status, safe to send to the dashboard: the provider in use, whether it's ready, the signed-in account (name
+    and email, when that's the provider), which providers have a saved key (shown by their last four characters), and
+    each provider's saved address parts. "signed_in" means ready too. Never includes a key."""
     cfg = cfg or settings_mod.get()
     entry = info(cfg=cfg)
     account = signin.status() if entry["auth"] == "chatgpt" else {}
@@ -222,15 +276,23 @@ def status(cfg: dict | None = None) -> dict:
     return {"provider": entry["id"], "provider_name": entry["name"], "auth": entry["auth"], "ready": ready, "signed_in": ready,
             "name": account.get("name", ""), "email": account.get("email", ""), "chatgpt_signed_in": signin.status().get("signed_in", False),
             "keys": {pid: _hint(str(k.get("key") or "")) for pid, k in keys.items() if pid in PROVIDERS and k.get("key")},
-            "custom_url": entry["base"] if entry.get("custom") else str((cfg.get("ai") or {}).get("custom_url") or "")}
+            "endpoints": {pid: _endpoint(pid, cfg) for pid, p in PROVIDERS.items() if p.get("fields")}}
 
 
 def listing() -> list[dict]:
-    """Every provider for the dashboard's picker: id, name, how to connect, where to get a key, the note, and whether it
-    has free models and web search."""
-    return [{"id": pid, "name": p["name"], "auth": p["auth"], "signin": bool(p.get("signin")), "key_url": p.get("key_url", ""),
-             "key_prefix": p.get("key_prefix", ""), "note": p["note"], "free": bool(p.get("free")), "search": bool(p.get("search")),
-             "custom": bool(p.get("custom"))} for pid, p in PROVIDERS.items()]
+    """Every provider for the Connect popup, by name within each group: how it connects ("signin" or "key"), its group
+    (signin, key, local or custom), its address fields, where to get a key, a note when one matters, and whether it has a
+    free tier or web search."""
+    def group(p: dict) -> str:
+        if p["auth"] == "chatgpt" or p.get("signin"):
+            return "signin"
+        return "custom" if p.get("custom") else "local" if p.get("local") else "key"
+
+    rows = [{"id": pid, "name": p["name"], "group": group(p), "connect": "signin" if group(p) == "signin" else "key",
+             "fields": p.get("fields", []), "needs_key": p.get("needs_key", p["auth"] == "key"), "key_url": p.get("key_url", ""),
+             "key_prefix": p.get("key_prefix", ""), "note": p.get("note", ""), "free": bool(p.get("free")),
+             "search": bool(p.get("search")), "aliases": p.get("aliases", "")} for pid, p in PROVIDERS.items()]
+    return sorted(rows, key=lambda row: row["name"].lower())
 
 
 def publish() -> None:
@@ -239,52 +301,72 @@ def publish() -> None:
     bus.publish("ai", bus.state["ai"])
 
 
-# ---------------------------------------------------------------- Sign in with OpenRouter
+async def disconnect(provider: str) -> None:
+    """Stop using a provider: sign out of ChatGPT, or forget the saved key. When it's the one in use, no AI is in use."""
+    if provider == "chatgpt":
+        await signin.sign_out()
+    else:
+        forget_key(provider)
+    if current() == provider:
+        set_provider("")
+    publish()
+
+
+# ---------------------------------------------------------------- browser sign-ins that hand back a key
 
 def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
-def openrouter_start(port: int) -> str:
-    """Start Sign in with OpenRouter: the address of OpenRouter's approval page, for the dashboard to open in the browser.
-    PKCE (S256) means only this process can trade the code that comes back, and the state value ties the callback to this
-    sign-in, so a forged callback is refused. The key OpenRouter makes is labeled JobPortal."""
+def key_signin_start(provider: str, port: int) -> str:
+    """Start a provider's sign-in: the address of its approval page, for the dashboard to open in the browser. PKCE (S256)
+    means only this process can trade the code that comes back, and the state value ties the callback to this sign-in, so
+    a forged callback is refused."""
+    flow = KEY_SIGNINS[provider]
     now = time.time()
     for state in [s for s, p in _pending.items() if now - p["created"] > SIGN_IN_TIMEOUT]:
         _pending.pop(state, None)
     verifier = _b64url(secrets.token_bytes(48))
     state = _b64url(secrets.token_bytes(24))
-    _pending[state] = {"verifier": verifier, "created": now}
-    challenge = _b64url(hashlib.sha256(verifier.encode()).digest())
-    callback = f"http://127.0.0.1:{port}{OPENROUTER_CALLBACK}"
-    return f"{OPENROUTER_AUTH}?" + urlencode({"callback_url": callback, "code_challenge": challenge, "code_challenge_method": "S256",
-                                              "state": state, "key_label": "JobPortal"})
+    callback = f"http://localhost:{port}{flow['callback']}"
+    _pending[state] = {"provider": provider, "verifier": verifier, "callback": callback, "created": now}
+    challenge = {"code_challenge": _b64url(hashlib.sha256(verifier.encode()).digest()), "code_challenge_method": "S256", "state": state}
+    if provider == "openrouter":
+        return f"{flow['authorize']}?" + urlencode({"callback_url": callback, **challenge, "key_label": "JobPortal"})
+    return f"{flow['authorize']}?" + urlencode({"response_type": "code", "redirect_uri": callback, **challenge, "expiry": POLLINATIONS_KEY_DAYS})
 
 
-async def openrouter_finish(params: dict) -> None:
-    """Finish Sign in with OpenRouter from the callback's query parameters: check the state, trade the code for the key,
-    save it and switch to OpenRouter. Raises ValueError with a message for the user when anything is off. Network call."""
-    pending = _pending.pop(str(params.get("state") or ""), None)
-    if not pending or time.time() - pending["created"] > SIGN_IN_TIMEOUT:
-        raise ValueError("This sign-in link is old or didn't come from JobPortal. Start again from JobPortal.")
+async def key_signin_finish(provider: str, params: dict) -> None:
+    """Finish a sign-in from the callback's query parameters: check the state, trade the code for the key, save it and
+    switch to that provider. Raises ValueError with a message for the user when anything is off. Network call."""
+    name = PROVIDERS[provider]["name"]
+    pending = _pending.get(str(params.get("state") or ""))
+    if not pending or pending["provider"] != provider or time.time() - pending["created"] > SIGN_IN_TIMEOUT:
+        raise ValueError("This sign-in link is old. Start again from JobPortal.")
+    _pending.pop(str(params["state"]), None)
     code = str(params.get("code") or "")
     if not code:
-        raise ValueError("OpenRouter didn't approve the sign-in.")
+        raise ValueError(f"{name} didn't approve the sign-in.")
+    url = KEY_SIGNINS[provider]["token"]
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(OPENROUTER_EXCHANGE, json={"code": code, "code_verifier": pending["verifier"],
-                                                             "code_challenge_method": "S256"})
+            if provider == "openrouter":
+                r = await client.post(url, json={"code": code, "code_verifier": pending["verifier"], "code_challenge_method": "S256"})
+            else:
+                r = await client.post(url, data={"grant_type": "authorization_code", "code": code, "redirect_uri": pending["callback"],
+                                                 "code_verifier": pending["verifier"]})
     except httpx.HTTPError as e:
-        raise ValueError(f"Couldn't reach OpenRouter to finish signing in ({type(e).__name__}). Try again.") from None
+        raise ValueError(f"Couldn't reach {name} ({type(e).__name__}). Try again.") from None
     try:
-        key = r.json().get("key") if r.status_code == 200 else None
+        reply = r.json() if r.status_code == 200 else {}
     except ValueError:
-        key = None
+        reply = {}
+    key = reply.get("key") or reply.get("access_token") if isinstance(reply, dict) else None
     if not isinstance(key, str) or not key:
-        raise ValueError(f"OpenRouter didn't hand over a key (HTTP {r.status_code}). Try again.")
-    save_key("openrouter", key, via="sign-in")
-    if current() != "openrouter":
-        set_provider("openrouter")
+        raise ValueError(f"{name} didn't hand over a key (HTTP {r.status_code}). Try again.")
+    save_key(provider, key, via="sign-in")
+    if current() != provider:
+        set_provider(provider)
     publish()
 
 

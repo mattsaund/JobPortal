@@ -2,14 +2,14 @@
 
 How it fits: the search, candidate, documents and insights packages build a prompt (system prompts and schemas come from
 ai/prompts.py) and await run(). run() picks the model for the task's stage, then holds a conversation with the provider
-the user chose in Settings, AI (ai/providers.py) until the model hands back a JSON result. The user's own account pays:
-their ChatGPT plan through Sign in with ChatGPT (ai/signin.py), or their key with OpenRouter, OpenAI, Anthropic, Google or
-another service.
+the user connected (ai/providers.py) until the model hands back a JSON result. The user's own account pays, through its
+sign-in or key, or it runs on their own computer.
 
 Key ideas:
 - Results come back through a function call. Every request offers a `submit_result` function whose parameters are the
   task's JSON schema. When the model calls it with every required field, those arguments are the result. The call is
-  never forced (several providers refuse that), so a turn that ends without it gets a short reminder instead.
+  never forced (several providers refuse that), so a turn that ends without it gets a short reminder instead. A model or
+  server without tool calling is asked for the same JSON as plain text.
 - One request loop (_Conversation) works with every provider. A "wire" for each kind of API turns the conversation into
   that API's requests and its replies back into text and tool calls: _ResponsesWire (OpenAI's Responses API, for ChatGPT
   and the OpenAI API), _ChatWire (the chat completions API most other services share) and _AnthropicWire (Claude's
@@ -54,10 +54,6 @@ USAGE_CAP_PAUSE = 900  # seconds that usage_high() stays True after a provider r
 MAX_NUDGES = 2  # plain-text answers a model may give (and be reminded to call submit_result) before its task fails
 GRACE_TURNS = 2  # tool turns a model still gets after it is told its tool budget is used up
 MAX_FETCHES_PER_TURN = 6  # fetch_url calls answered in one turn (max_steps counts turns, not calls)
-# Sites whose rules (robots.txt and terms) bar automated reading by anyone but search engines. fetch_url doesn't open
-# them; the model works from what search results show and finds the same job on the employer's own site.
-NO_FETCH_HOSTS = ("linkedin.com", "x.com", "twitter.com", "threads.com", "threads.net", "facebook.com", "instagram.com",
-                  "ziprecruiter.com")
 MAX_RETRIES = 2  # times a request is sent again after a short wait the provider asked for
 MAX_RETRY_WAIT = 60  # seconds: a longer wait counts as a rate limit, and searching pauses instead
 ANTHROPIC_VERSION = "2023-06-01"  # the Messages API version JobPortal speaks
@@ -94,6 +90,10 @@ class NotSignedIn(AIError):
 class _SearchRefused(Exception):
     """The provider turned a request down because of its hosted web search tool. Only _Conversation sees this: it retries
     without web search."""
+
+
+class NoModelList(AIError):
+    """The provider has no model list and no model has been named yet. The Connect popup then asks for one."""
 
 
 class _HTTPProblem(Exception):
@@ -197,10 +197,9 @@ def _error(code: str | None, message: str | None, status: int = 0, provider: str
     if provider == "chatgpt":
         if code == "subscription_sharing_usage_limit_exceeded" or status == 429:
             _limit_hit_at = time.time()
-            return UsageLimitError("JobPortal reached its ChatGPT usage cap. Raise the cap in ChatGPT settings or wait for it to reset.")
+            return UsageLimitError("ChatGPT usage cap reached.")
         if code == "subscription_sharing_user_not_eligible" or status == 403:
-            return AIError("Using your plan in JobPortal needs a ChatGPT Go, Plus or Pro plan. No plan? Pick another AI in "
-                           "Settings, AI: OpenRouter and Gemini have free options.")
+            return AIError("This needs a ChatGPT Go, Plus or Pro plan.")
         if code == "subscription_sharing_invalid_user" or status == 401:
             signin.forget_tokens()
             return NotSignedIn("Your ChatGPT sign-in ended. Sign in again.")
@@ -210,19 +209,18 @@ def _error(code: str | None, message: str | None, status: int = 0, provider: str
     said = f"{code} {message}".lower()
     if status == 401 or "invalid_api_key" in said or "api_key_invalid" in said or "invalid api key" in said or \
             "authentication" in said and status in (400, 403):
-        return NotSignedIn(f"{name} didn't accept your key. Check it in Settings, AI.")
+        return NotSignedIn(f"{name} didn't accept your key.")
     if status == 402 or any(word in said for word in ("insufficient_quota", "credit_balance", "credit balance", "spend_limit",
                                                        "spend limit", "billing", "payment_required", "insufficient credits")):
         _limit_hit_at = time.time()
-        return UsageLimitError(f"Your {name} account is out of credit or reached its spending limit. Add credit or raise the "
-                               "limit there, then search again.")
+        return UsageLimitError(f"{name} is out of credit or over its spending limit.")
     if status == 429 or "resource_exhausted" in said or "rate_limit" in said:
         _limit_hit_at = time.time()
-        return UsageLimitError(f"{name} is limiting how many requests JobPortal can send right now. Searching waits a few minutes.")
+        return UsageLimitError(f"{name} rate limit reached.")
     if status == 404 and "model" in said:
-        return AIError(f"{name} doesn't have that model. Pick another one in Settings, AI.")
+        return AIError(f"{name} doesn't have that model.")
     if status in (500, 502, 503, 529) or "overloaded" in said:
-        return AIError(f"{name} is busy or having trouble right now. Try again in a few minutes.")
+        return AIError(f"{name} is busy. Try again soon.")
     detail = message or code or (f"HTTP {status}" if status else "")
     return AIError(f"{name}: {detail}"[:500] if detail else f"{name} reported an error.")
 
@@ -359,12 +357,19 @@ async def models(force: bool = False) -> list[str]:
     if entry["wire"] == "anthropic":
         url, headers = f"{entry['base']}/models?limit=1000", {"x-api-key": token, "anthropic-version": ANTHROPIC_VERSION}
     else:
-        url, headers = entry["base"] + entry.get("models", "/models"), {"Authorization": f"Bearer {token}"}
+        url = entry.get("models_url") or entry["base"] + entry.get("models", "/models")
+        headers = {"Authorization": f"Bearer {token}", **(entry.get("headers") or {})}
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.get(url, headers=headers)
     except (httpx.HTTPError, httpx.InvalidURL) as e:  # run() turns these into AIError the same way
-        raise AIError(f"network problem talking to {entry['name']}: {type(e).__name__}") from None
+        raise AIError(f"Can't reach {entry['name']} ({type(e).__name__}).") from None
+    if r.status_code in (404, 405, 501):  # no model list at this address: use the model the user named
+        chosen = str(settings_mod.get()["ai"].get("model") or "")
+        if not chosen:
+            raise NoModelList(f"{entry['name']} needs a model name.")
+        _models.update(at=time.time(), ids=[chosen], provider=pid)
+        return [chosen]
     if r.status_code != 200:
         err = _error_body(r.text)
         raise _error(err.get("code"), err.get("message"), r.status_code, pid)
@@ -402,6 +407,13 @@ async def models(force: bool = False) -> list[str]:
     return ids
 
 
+async def check_connection() -> None:
+    """One small real request, for a provider with no model list to check the key against. Raises AIError when it fails."""
+    await run("Set ok to true.", system="You check that a connection works.", stage="prefill", purpose="connection-check",
+              schema={"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}, label="checking the AI",
+              max_steps=3, timeout=90)
+
+
 async def _pick_model(cfg: dict, stage: str) -> str:
     """The model for a stage: the stage's own choice in Settings, else the default choice, else the first model the
     account lists (which may need a network call, see models())."""
@@ -410,7 +422,7 @@ async def _pick_model(cfg: dict, stage: str) -> str:
         return chosen
     ids = await models()
     if not ids:
-        raise AIError(f"Your {providers.info(cfg=cfg)['name']} account didn't list any models JobPortal can use.")
+        raise AIError(f"{providers.info(cfg=cfg)['name']} didn't list any usable models.")
     return ids[0]
 
 
@@ -459,10 +471,6 @@ async def _check_url(url: str) -> tuple[str, dict]:
         return "That isn't a valid URL.", {}
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return "Only public http(s) pages can be fetched.", {}
-    host_name = parts.hostname.lower()
-    if any(host_name == h or host_name.endswith("." + h) for h in NO_FETCH_HOSTS):
-        return ("That site doesn't allow automated reading, so it isn't opened. Use what the search results say about the post "
-                "or job, and look for the same opening on the employer's own site."), {}
     ip = await _public_address(parts.hostname)
     if not ip:
         return "That address isn't on the public internet, so it can't be fetched.", {}
@@ -700,6 +708,8 @@ class _ChatWire:
         self.provider = provider
         self.messages: list[dict] = []
         self.effort_ok = bool(provider.get("effort"))
+        self.tool_choice_ok = True  # dropped for a service that refuses the field
+        self.tools_ok = True  # False for a model or server with no tool calling: it answers in plain JSON instead
 
     def start(self, prompt: str) -> None:
         self.messages = [{"role": "system", "content": ""}, {"role": "user", "content": prompt}]
@@ -718,7 +728,14 @@ class _ChatWire:
         tools = [{"type": "function", "function": {"name": "submit_result", "description": SUBMIT_DESCRIPTION, "parameters": convo.schema}}]
         if convo.web:
             tools.append({"type": "function", "function": {"name": "fetch_url", "description": FETCH_DESCRIPTION, "parameters": FETCH_PARAMETERS}})
-        body = {"model": convo.model, "messages": self.messages, "tools": tools, "tool_choice": "auto"}
+        body = {"model": convo.model, "messages": self.messages}
+        if self.tools_ok:
+            body["tools"] = tools
+            if self.tool_choice_ok:
+                body["tool_choice"] = "auto"
+        if self.provider.get("max_tokens"):
+            body["max_tokens"] = self.provider["max_tokens"]
+        body.update(self.provider.get("body") or {})
         if self.effort_ok and f"{self.provider['id']}/{convo.model}" not in _no_reasoning:
             if self.provider["effort"] == "reasoning":
                 body["reasoning"] = {"effort": convo.effort}
@@ -726,20 +743,35 @@ class _ChatWire:
                 body["reasoning_effort"] = convo.effort
         return body
 
+    def _system(self, convo) -> str:
+        """The system prompt. A model without tool calling is told to answer in JSON instead."""
+        if self.tools_ok:
+            return convo.instructions()
+        return (f"{convo.instructions()}\n\nThis model can't call tools. Don't mention submit_result. Reply with only one JSON object "
+                f"that matches this JSON Schema, with no other text:\n{json.dumps(convo.schema)}")
+
     async def send(self, convo) -> dict:
-        self.messages[0] = {"role": "system", "content": convo.instructions()}
-        headers = {"Authorization": f"Bearer {await _token(self.provider['id'])}"}
+        headers = {"Authorization": f"Bearer {await _token(self.provider['id'])}", **(self.provider.get("headers") or {})}
         if self.provider["id"] == "openrouter":  # how OpenRouter names the app on the user's activity page
             headers.update({"HTTP-Referer": "https://github.com/mattsaund/JobPortal", "X-Title": "JobPortal"})
         while True:
+            self.messages[0] = {"role": "system", "content": self._system(convo)}
             try:
                 data = await _post_json(f"{self.provider['base']}/chat/completions", self._body(convo), headers)
                 break
             except _HTTPProblem as problem:
                 key = f"{self.provider['id']}/{convo.model}"
-                if problem.status == 400 and self.effort_ok and key not in _no_reasoning and problem.about("reasoning"):
-                    _no_reasoning.add(key)  # this model takes no reasoning effort: ask once more without it
-                    continue
+                if problem.status in (400, 422):
+                    if self.effort_ok and key not in _no_reasoning and problem.about("reasoning"):
+                        _no_reasoning.add(key)  # this model takes no reasoning effort: ask once more without it
+                        continue
+                    if self.tools_ok and self.tool_choice_ok and problem.about("tool_choice"):
+                        self.tool_choice_ok = False  # this service takes tools but not the field that says how to use them
+                        continue
+                    if self.tools_ok and problem.about("does not support tools", "doesn't support tools", "tools is not supported",
+                                                       "tools are not supported", "tool calling", "function calling", "tool use"):
+                        self.tools_ok = False  # no tools at all: the model answers in plain JSON
+                        continue
                 _raise_for(problem, self.provider["id"])
         if not data.get("choices") and data.get("error"):  # OpenRouter can report a failure inside a 200
             err = _error_body(json.dumps(data))
@@ -910,10 +942,12 @@ class _Conversation:
                 nudges += 1
                 if nudges > MAX_NUDGES:
                     raise AIError("the model didn't return a structured result")
+                # A model without tool calling answers in plain JSON (see _ChatWire), so it isn't told to call anything.
+                how = "by calling submit_result" if getattr(self.wire, "tools_ok", True) else "as one JSON object and nothing else"
                 if answer is None:
-                    self.wire.add_user("Call submit_result now with your final answer.")
+                    self.wire.add_user(f"Give your final answer now, {how}.")
                 else:
-                    self.wire.add_user(f"{error} Return a corrected result by calling submit_result.")
+                    self.wire.add_user(f"{error} Return a corrected result {how}.")
                 continue
 
             # Step 3: answer each tool call. A complete submit_result ends the task. Every other call gets a reply, which
@@ -1008,7 +1042,7 @@ async def run(prompt: str, *, system: str, schema: dict, stage: str, purpose: st
         error = "stopped"
         raise
     except (httpx.HTTPError, httpx.InvalidURL) as e:
-        error = f"network problem talking to {convo.provider['name']}: {type(e).__name__}"
+        error = f"Can't reach {convo.provider['name']} ({type(e).__name__})."
         raise AIError(error) from None
     except Exception as e:
         error = f"{type(e).__name__}: {e}"[:500]  # unexpected, but it must still be logged as a failure

@@ -22,14 +22,22 @@ from jobportal.core.textutil import NATIONWIDE_RE
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
 PER_HOST_LIMIT = 4  # requests in flight to one site at a time, unless a collector lowers it with host_limit()
 RETRY_STATUSES = (429, 502, 503, 504)  # rate limited, or a passing server problem: worth another try after a pause
+BLOCK_STATUSES = (401, 403, 407, 429, 451)  # the site said no, so Ctx.polite stops instead of asking again
 
 # Sources whose "jobs" are posts or comments, not job postings. The title is the post's first line and the URL is the post
 # itself, so there is no posting page to fetch more details from.
-SOCIAL_SOURCES = frozenset({"hackernews", "mastodon", "reddit", "bluesky", "x"})
+SOCIAL_SOURCES = frozenset({"hackernews", "mastodon", "reddit", "bluesky", "x",
+                            # the community places and event listings in the source catalog (catalog.py)
+                            "kijiji", "gumtree", "github_issue_boards", "lemmy", "discourse", "telegram_public",
+                            "hn_jobstories", "lobsters_jobs", "google_news", "nlx_events"})
 # An allowed location that means the whole country ("Nationwide", "Anywhere in the US", "USA"). Match it against the
 # lowercased, stripped text with fullmatch(). It's the location filter's own pattern, so a source and the filter always
 # agree on which entries are nationwide.
 NATIONWIDE = NATIONWIDE_RE
+
+
+class Blocked(Exception):
+    """A site refused this client: a status in BLOCK_STATUSES, or a page that asks for a person. Nothing tries to get past it."""
 
 
 @dataclass
@@ -38,8 +46,9 @@ class RawJob:
 
     The search run turns the ones that pass the rule filters and triage into rows of the leads table. Most fields keep the
     same name there."""
-    # Which collector found it: ats, linkedin, github, usajobs, themuse, hackernews, reddit, mastodon, bluesky, remote, rss,
-    # adzuna, google or ai_hunt. Leads the user adds by hand use "manual" (packages.add_manual_lead).
+    # Which collector found it: ats, linkedin, github, usajobs, hackernews, reddit, mastodon, bluesky, remote, rss, adzuna,
+    # google, ai_hunt, or the id of a source in the catalog (catalog.py). Leads the user adds by hand use "manual"
+    # (packages.add_manual_lead).
     source: str
     title: str
     company: str
@@ -60,7 +69,7 @@ class RawJob:
     # From a company board starred in the Sources dialog; the rule filters also set it for the Dream list.
     dream: bool = False
     # True means the title must contain a word for the user's levels (Settings filters.title_include) to pass the rule
-    # filters. Sources that already narrow results to those levels (LinkedIn, The Muse, the internship lists) set it to
+    # filters. Sources that already narrow results to those levels (LinkedIn, the internship lists) set it to
     # False, and so do sources whose titles rarely name a level (USAJobs) or aren't job titles at all (social posts, feeds,
     # the AI hunt).
     strict_titles: bool = True
@@ -106,6 +115,9 @@ class Ctx:
         self.run_id = run_id  # ties AI calls made by collectors (the AI hunt) to their run
         self.cancel = cancel or asyncio.Event()  # set by Stop or by a usage-cap pause
         self.cache: dict = {}  # scratch space collectors can reuse within one run, such as whole Ashby boards in details.py
+        # During a search run, the run's add_jobs: a collector with many small sources (catalog.py) hands each one's jobs over
+        # as it finishes, so a slow site never holds back the others. None outside a run.
+        self.deliver = None
         self.client = httpx.AsyncClient(headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"},
                                         timeout=httpx.Timeout(30.0, connect=15.0), follow_redirects=True,
                                         limits=httpx.Limits(max_connections=40, max_keepalive_connections=20))
@@ -145,6 +157,22 @@ class Ctx:
                     continue
                 return response
         raise last_error or RuntimeError(f"request failed: {url}")
+
+    async def polite(self, method: str, url: str, **kw) -> httpx.Response:
+        """A request for the many small sites the catalog and the company boards read. Any answer counts: only a connection that
+        dropped gets a second try. Raises Blocked when the site refuses or answers with a challenge (some send a 202 with
+        nothing in it, or redirect to a challenge page), and httpx.HTTPStatusError on any other error status."""
+        try:
+            response = await self.request(method, url, retries=0, **kw)
+        except httpx.TransportError:  # a dropped connection is worth one more try, which a refusal never is
+            await asyncio.sleep(1)
+            response = await self.request(method, url, retries=0, **kw)
+        if response.status_code in BLOCK_STATUSES:
+            raise Blocked(f"HTTP {response.status_code}")
+        if "botchallenge" in str(response.url) or (response.status_code == 202 and not response.content):
+            raise Blocked("a challenge page")
+        response.raise_for_status()
+        return response
 
     async def get_json(self, url: str, **kw):
         """GET a URL and parse its JSON. Raises httpx.HTTPStatusError on an error status."""

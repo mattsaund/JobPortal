@@ -638,14 +638,14 @@ async def learn_voice(reason: str = "manual") -> dict:
     Raises when the AI call fails."""
     sample = _writing_sample()
     if len(sample) < MIN_SAMPLE_CHARS:
-        return {"ok": False, "message": "Paste a longer writing sample (a cover letter or a few paragraphs) in Standard answers first."}
+        return {"ok": False, "message": "Writing sample is too short."}
     out = await ai.run(f"WRITING SAMPLE:\n{sample[:40000]}", system=VOICE_SYSTEM, schema=VOICE_SCHEMA, stage="profile",
                        purpose="profile-voice", label="profile: learn voice", timeout=900)
     summary = out.get("summary", "")
     save("voice", out["voice_md"].strip())
     db.kv_set("profile.voice_sample_sha", _sample_hash(sample))
     _log_change("voice", reason, ["voice"], [f"Learned your writing voice: {summary[:200]}"], out.get("_tokens", 0))
-    bus.publish("toast", {"title": "Learned your writing voice", "body": summary[:200]})
+    bus.publish("toast", {"title": "Writing voice saved"})
     return {"ok": True, "summary": summary}
 
 

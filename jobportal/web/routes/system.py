@@ -12,7 +12,7 @@ from jobportal import __version__
 from jobportal.ai import client as ai_client
 from jobportal.core import bus, db, osutil
 from jobportal.core.config import APP_STATUSES, DATA, EFFORTS, STATUS_LABELS
-from jobportal.search.collectors import COLLECTORS
+from jobportal.search.collectors import COLLECTORS, catalog
 
 router = APIRouter()
 
@@ -42,6 +42,7 @@ def meta():
     """Facts the dashboard needs once at startup: version, system, data folder, choices for menus, and whether PDF export works."""
     return {"version": __version__, "os": osutil.os_name(), "data_dir": str(DATA), "efforts": EFFORTS, "statuses": APP_STATUSES, "status_labels": STATUS_LABELS,
             "collectors": [{"key": key, "label": label} for key, (label, _fn) in COLLECTORS.items()],
+            "source_names": {source.id: source.name for source in catalog.SOURCES},  # the name each catalog source goes by on a lead
             "pdf_ready": bool(osutil.find_pdf_engine())}
 
 

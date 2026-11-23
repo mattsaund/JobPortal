@@ -9,7 +9,7 @@
 
 JobPortal is an AI-powered desktop application designed to help users find relevant employment opportunities and prepare personalized application materials.
 
-The application uses a Python/FastAPI backend, a JavaScript-based dashboard, SQLite for local data storage, and OpenAI's Responses API for AI-assisted tasks.
+The application uses a Python/FastAPI backend, a JavaScript-based dashboard, SQLite for local data storage, and whichever AI provider the user connects for AI-assisted tasks (Section 11).
 
 The proposed AI integration will support job matching, resume tailoring, cover letter generation, and interview preparation while keeping final application decisions under user control.
 
@@ -147,38 +147,56 @@ A key tradeoff is reliance on an external AI service. Although this approach red
 
 Input validation, restricted data sharing, clear error handling, and human review help address these limitations.
 
-## 11. AI Providers (added in v0.4.0)
+## 11. AI Providers (updated in v0.5.0)
 
-JobPortal no longer depends on a single AI service. The user chooses one in Settings, AI, and the welcome screen offers the
-main ones.
+JobPortal does not depend on a single AI service, and it has no default one. The user connects one in the Connect AI popup,
+from 122 providers listed as data in `jobportal/ai/provider_list.py`.
 
-| Provider | How the user connects | Hosted web search |
+| How the user connects | Providers | Hosted web search |
 |---|---|---|
-| ChatGPT | Sign in with ChatGPT, on a Go, Plus or Pro plan | Yes |
-| OpenRouter | Sign in with OpenRouter (OAuth PKCE, no app registration), or a pasted key | No, pages are read with fetch_url |
-| OpenAI API | An API key | Yes |
-| Claude (Anthropic) | An API key | Yes |
-| Gemini (Google) | An API key, with a free tier | No |
-| Mistral, Groq, DeepSeek, xAI, or another OpenAI-compatible service | An API key | No |
+| Browser sign-in (3) | ChatGPT on a Go, Plus or Pro plan, and OpenRouter and Pollinations (OAuth PKCE, no app registration). OpenRouter and Pollinations also take a pasted key | ChatGPT |
+| API key (104) | Model makers (Claude, Gemini, OpenAI, Grok, Mistral, DeepSeek and others), clouds (Azure, Bedrock, Cloudflare and others), model hosts and gateways | OpenAI API, Claude and Perplexity |
+| A server on the user's computer (14) | Ollama, LM Studio, llama.cpp, vLLM, LocalAI, Jan, KoboldCpp, text-generation-webui, GPT4All, MLX, Docker Model Runner, Lemonade, SGLang and the LiteLLM proxy | No |
+| Any address (1) | The Custom entry, for anything with an OpenAI-compatible API | No |
 
-- One request loop serves every provider. Three adapters ("wires") turn the conversation into OpenAI's Responses API, the
-  chat completions API most services share, or Anthropic's Messages API.
+Providers without hosted web search read pages with `fetch_url`, which only opens public internet addresses and checks every
+redirect.
+
+- One request loop serves every provider. Three adapters ("wires") turn the conversation into OpenAI's Responses API (3
+  providers), the chat completions API most services share (118), or Anthropic's Messages API (1). A provider that speaks
+  one of them needs only a data entry.
 - Each provider's own output (encrypted reasoning, thinking blocks, search results, thought signatures) goes back
   unchanged in the next request, as the providers require.
-- The result still comes back through the `submit_result` function. The call is never forced, because several providers
-  reject forced tool calls, so a turn that ends without it gets a short reminder.
+- The result comes back through the `submit_result` function. The call is never forced, because several providers reject
+  forced tool calls, so a turn that ends without it gets a short reminder.
 - Every result is checked against its task's full JSON Schema (with the `jsonschema` library), whichever provider sent it.
   A result with a missing field, a wrong type or a value out of range is not used. The model gets a short correction that
   names the field and tries again.
-- API keys are stored owner-only in the data folder and never reach the dashboard. A new key is checked against the
-  provider's model list before it is saved.
+- API keys are stored owner-only in the data folder and never reach the dashboard, which only sees their last four
+  characters.
+- A new connection is checked against the provider's model list and kept only if it works. A provider with no model list
+  asks for a model name, and is then checked with one small real request.
 - Errors are handled per provider. A refused key asks the user for a new one. No credit, a spending limit or a rate limit
   pauses searching for a while, and a short Retry-After wait is honored first.
 - Anthropic and Google do not let other apps sign people in with their Claude or Gemini subscriptions, so those come by
-  API key. Telegram content is not collected, because its terms bar using it with AI.
+  API key.
 
-Design rationale: several providers remove the single-vendor dependency named in Section 10, let people without a ChatGPT
-plan use the app (including free tiers), and keep the user in control of what they pay.
+### Models without tool calling
+
+Many local models and some hosted ones can't call functions. The chat wire handles that without any setting:
+
+1. If a service refuses the `tool_choice` field, the request is sent again without it.
+2. If a service says the model has no tool support, the wire stops offering tools for that task. The system prompt then
+   holds the task's JSON Schema and asks for one JSON object with no other text.
+3. The JSON is read from the model's plain-text answer and checked against the same schema as any other result. An answer
+   that doesn't fit gets a short correction, up to two times, and then the task fails with a clear error.
+
+A model without tools can't call `fetch_url` either, so web tasks on it work only from what's in the prompt. Automated tests
+cover this path against a mock service.
+
+Design rationale: many providers remove the single-vendor dependency named in Section 10, let people use the app without a
+paid plan (free tiers, or a server on their own computer), and keep the user in control of what they pay and where their data
+goes.
 
 ## References
 

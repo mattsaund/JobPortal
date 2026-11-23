@@ -69,14 +69,14 @@ function onEvent({ kind, data }) {
       break;
     case "usage":  // the AI card's numbers: the model, the tasks running, this session's totals (ai/client.py usage())
       S.state.usage = data;
-      renderNextStep();
+      renderSideRun();
       break;
     case "agents":  // the AI agents working right now
       S.state.active_agents = data;
-      renderNextStep();
+      renderSideRun();
       break;
     case "run_done":
-      toast(`Search #${data.run_id} ${data.status}`, `${data.stats.qualified || 0} good fits, ${data.stats.packaged || 0} ready to apply`);
+      toast(`Search #${data.run_id} ${data.status}`, `${data.stats.qualified || 0} good fits, ${data.stats.packaged || 0} ready`);
       refreshSoon();
       break;
     case "profile":  // the profile or your answers changed. Forms with unsaved edits are left alone.
@@ -89,12 +89,12 @@ function onEvent({ kind, data }) {
       break;
     case "questions":  // the questions JobPortal asks changed
       S.questions = data;
-      renderNextStep();
+      renderSideRun();
       if (S.route[0] === "home") renderFeed();
       break;
     case "documents":  // your extra documents changed: the new list
       S.documents = data;
-      renderNextStep();
+      renderSideRun();
       if (S.route[0] === "home") homeDocumentsChanged();
       break;
     case "analysis":  // an analysis started, finished or failed

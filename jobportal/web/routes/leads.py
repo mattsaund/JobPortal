@@ -4,12 +4,14 @@ import shutil
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from jobportal.ai import client as ai
 from jobportal.candidate import profile
 from jobportal.core import background, bus, db
 from jobportal.core.config import APP_STATUSES, APPLIED_STATUSES, LEADS_DIR, TRACKER_STATUSES
 from jobportal.core.textutil import coverage
+from jobportal.documents import exports
 from jobportal.search import packages, pipeline, posts
 from jobportal.web.common import ai_error, lead_or_404
 
@@ -41,11 +43,9 @@ INDUSTRY_GROUP = "COALESCE(NULLIF(industry, ''), 'Other')"
 LEAD_KINDS = ("posting", "program", "event", "intel")  # what a job added by hand can be (see RawJob.kind)
 
 
-@router.get("/api/leads")
-def leads(tab: str = "ready", q: str = "", sort: str = "score", kind: str = "", industry: str = "", dream: int = 0, limit: int = 400):
-    """One tab of the Leads page, filtered and sorted, plus the counts for every tab and industry chip."""
-    tab_where = TABS.get(tab, TABS["all"])
-    where, args = [tab_where], []
+def _lead_filter(tab: str, q: str, kind: str, industry: str, dream: int) -> tuple[str, list]:
+    """The WHERE clause and its values for one tab of the Leads page with its filters."""
+    where, args = [TABS.get(tab, TABS["all"])], []
     if industry:
         where.append(f"{INDUSTRY_GROUP}=?")  # "Other" also finds leads with no industry, as its chip counts them
         args.append(industry)
@@ -57,7 +57,27 @@ def leads(tab: str = "ready", q: str = "", sort: str = "score", kind: str = "", 
     if kind:
         where.append("kind=?")
         args.append(kind)
-    rows = db.q(f"SELECT {packages.LIST_FIELDS} FROM leads WHERE {' AND '.join(where)} ORDER BY {SORTS.get(sort, SORTS['score'])} LIMIT ?",
+    return " AND ".join(where), args
+
+
+@router.get("/api/export/leads.zip")
+async def export_leads(tab: str = "ready", q: str = "", sort: str = "score", kind: str = "", industry: str = "", dream: int = 0):
+    """The leads on one tab of the Leads page, with the same filters: a spreadsheet of them, and a folder for each with its
+    tailored resume, cover letter, emails, contacts and the rest (exports.leads_zip)."""
+    where, args = _lead_filter(tab, q, kind, industry, dream)
+    rows = db.q(f"SELECT * FROM leads WHERE {where} ORDER BY {SORTS.get(sort, SORTS['score'])} LIMIT ?", (*args, exports.MAX_EXPORT))
+    if not rows:
+        raise HTTPException(404, "No leads to export.")
+    path, filename = await exports.leads_zip([db.lead_row(row) for row in rows])
+    return FileResponse(path, filename=filename)
+
+
+@router.get("/api/leads")
+def leads(tab: str = "ready", q: str = "", sort: str = "score", kind: str = "", industry: str = "", dream: int = 0, limit: int = 400):
+    """One tab of the Leads page, filtered and sorted, plus the counts for every tab and industry chip."""
+    tab_where = TABS.get(tab, TABS["all"])
+    where, args = _lead_filter(tab, q, kind, industry, dream)
+    rows = db.q(f"SELECT {packages.LIST_FIELDS} FROM leads WHERE {where} ORDER BY {SORTS.get(sort, SORTS['score'])} LIMIT ?",
                 (*args, limit))
     open_questions = profile.open_counts_by_lead()
     for row in rows:
@@ -184,7 +204,7 @@ async def add_manual_lead(body: dict):
     location = (body.get("location") or "").strip()
     status, kind = body.get("app_status") or "new", body.get("kind") or "posting"
     if not url and not text and not (title and company):
-        raise HTTPException(400, "paste a link or the job text, or give a job title and company")
+        raise HTTPException(400, "Add a link, job text, or title and company.")
     if status not in APP_STATUSES or status == "trashed":
         raise HTTPException(400, "bad status")
     if kind not in LEAD_KINDS:

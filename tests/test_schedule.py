@@ -103,7 +103,7 @@ def test_a_time_that_comes_before_setup_is_skipped_with_the_reason():
 
 def test_the_ai_must_be_ready_too(monkeypatch):
     monkeypatch.setattr(schedule.profile, "ready_to_search", lambda: "")
-    assert schedule._not_ready() == ai.setup_problem() == "Sign in with ChatGPT first (Settings, AI)."
+    assert schedule._not_ready() == ai.setup_problem() == "Connect an AI first."
 
 
 def finished_run(stats: dict, status: str = "done") -> int:

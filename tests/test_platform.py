@@ -108,7 +108,7 @@ def test_cli_version_and_doctor(tmp_path):
     assert out.returncode == 0 and "JobPortal" in out.stdout
     doc = subprocess.run([sys.executable, "-m", "jobportal", "--doctor"], capture_output=True, text=True, env=env, timeout=120)
     assert doc.returncode == 0, doc.stderr
-    assert "Python" in doc.stdout and "ChatGPT" in doc.stdout and str(tmp_path) in doc.stdout
+    assert "Python" in doc.stdout and "Connect an AI" in doc.stdout and str(tmp_path) in doc.stdout
 
 
 class FakeThread:

@@ -76,9 +76,9 @@ def run() -> int:
     if status["ready"] and status["auth"] == "chatgpt":
         rows.append(_row(True, "AI", f"ChatGPT, signed in as {status['email'] or status['name'] or 'your account'}"))
     elif status["ready"]:
-        rows.append(_row(True, "AI", f"{status['provider_name']}, key {status['keys'].get(status['provider'], 'saved')}"))
+        rows.append(_row(True, "AI", f"{status['provider_name']}, {status['keys'].get(status['provider'], 'no key needed')}"))
     else:
-        rows.append(_row(None, "AI", f"{status['provider_name']}: {providers.problem()} Open JobPortal to connect it."))
+        rows.append(_row(None, "AI", providers.problem()))
     rows.append(_row(True, "Starts at login", "yes, for scheduled searches" if osutil.has_login_item() else "no"))
 
     engine = osutil.find_pdf_engine()

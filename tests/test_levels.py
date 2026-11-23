@@ -72,8 +72,6 @@ def test_board_filters_and_terms():
     assert levels.linkedin_experience(["internship", "entry"]) == "1,2"
     assert levels.linkedin_experience(["mid"]) == "3,4"
     assert levels.linkedin_experience(["apprenticeship"]) == "1,2"  # LinkedIn has no apprenticeship level
-    assert levels.muse_levels(["senior"]) == ["Senior Level"]
-    assert levels.muse_levels(["apprenticeship", "entry"]) == ["Internship", "Entry Level"]
     assert "intern" in levels.ats_search_terms(["internship"])
     assert levels.ats_search_terms(["apprenticeship"], ["electrician apprentice"]) == ["apprentice", "trainee", "electrician apprentice"]
     assert levels.ats_search_terms(["mid"], ["data engineer", "analytics engineer"])[:2] == ["data engineer", "analytics engineer"]

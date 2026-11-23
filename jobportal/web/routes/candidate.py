@@ -30,7 +30,7 @@ def _keep_copy_in_library(text: str, filename: str) -> None:
     the profile, and a failure here never affects setup."""
     async def save():
         item = await library.import_text(text, filename)
-        bus.publish("toast", {"title": "Saved to your resume collection", "body": item.get("name", "")})
+        bus.publish("toast", {"title": "Resume saved", "body": item.get("name", "")})
     background.spawn(save())
 
 
