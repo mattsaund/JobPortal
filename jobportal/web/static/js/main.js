@@ -60,6 +60,7 @@ window.addEventListener("beforeunload", (e) => {
     return;
   }
   S.meta = meta;
+  Object.assign(LABEL_SRC, meta.source_names || {});  // the job sites and public services, named on the leads they found
   S.state = S.stats?.state || S.state;
   S.profileStatus = profileStatus;
   S.questions = questions;

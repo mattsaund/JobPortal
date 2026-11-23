@@ -11,7 +11,7 @@
 function answerInput(f, value, big, extra = "") {
   const id = esc(f.id), placeholder = `placeholder="${esc(f.placeholder || "")}" ${extra}`;
   if (f.type === "select") {
-    if (!big) return `<select data-qf="${id}" ${extra}>${selectOptions([["", "Choose one"], ...f.options], value)}</select>`;
+    if (!big) return `<select data-qf="${id}" ${extra}>${selectOptions([["", "Choose"], ...f.options], value)}</select>`;
     return `<div class="choice-row">${f.options.map(([key, label]) => `<button type="button" class="choice${value === key ? " active" : ""}"`
       + ` data-act="home-pick" data-id="${id}" data-value="${esc(key)}">${esc(label)}</button>`).join("")}</div>`;
   }
@@ -30,16 +30,14 @@ function answerInput(f, value, big, extra = "") {
 // questions answered from your resume that you haven't checked yet; they get a tag.
 function answersForm(sections, values, fromResume = []) {
   const field = (f) => {
-    const wide = ["multi", "textarea", "list"].includes(f.type);
-    const tag = fromResume.includes(f.id) ? `<span class="tag green" title="Read from your resume. Check it.">FROM RESUME</span>` : "";
-    const label = `<span class="field-label">${esc(f.label)}${f.required ? `<b class="req" title="Required">*</b>` : ""}${tag}</span>`;
-    const help = f.help ? `<small>${esc(f.help)}</small>` : "";
-    // A pill group holds labels of its own, so its field is a <div>; every other field is a <label> around its input.
+    const tag = fromResume.includes(f.id) ? `<span class="tag green" title="From resume">Resume</span>` : "";
+    const label = `<span class="opt-label">${esc(f.label)}${f.required ? ` <b class="req" title="Required">*</b>` : ""} ${tag}</span>`;
+    // A pill group holds labels of its own, so its setting is a <div>; every other one is a <label> around its input.
     const tagName = f.type === "multi" ? "div" : "label";
-    return `<${tagName} class="field${wide ? " wide" : ""}">${label}${answerInput(f, values[f.id])}${help}</${tagName}>`;
+    return `<${tagName} class="opt">${label}<span class="opt-body">${answerInput(f, values[f.id])}</span></${tagName}>`;
   };
-  return sections.map((section) => `<section class="panel form-section"><h2>${esc(section.title)}</h2>`
-    + `${section.help ? `<p>${esc(section.help)}</p>` : ""}<div class="form-grid">${section.fields.map(field).join("")}</div></section>`).join("");
+  return sections.map((section) => `<section class="sect form-section"><div class="sect-head"><h2>${esc(section.title)}</h2></div>`
+    + `${section.fields.map(field).join("")}</section>`).join("");
 }
 
 // Reads the inputs inside root back into { question id: answer }. List fields become arrays of lines, multi-choice

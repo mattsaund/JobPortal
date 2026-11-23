@@ -1,0 +1,151 @@
+/* analysis.css: the Analysis page's own styles, on top of base.css. A full-screen report: a strip with Analyze, the chart in
+   a large pane with the roles table beside it, then the sections, split by thin lines. The chart's colors are the --viz-*
+   tokens in base.css, checked for color blindness and contrast in both themes. */
+.analysis { --split: minmax(0, 1.08fr) minmax(0, 1fr); min-height: 100%; }
+
+/* the chart and the roles, side by side */
+.analysis-hero { display: grid; grid-template-columns: var(--split); border-bottom: 1px solid var(--line); }
+.hero-chart { position: sticky; top: 49px; align-self: start; min-width: 0; border-bottom: 0; }
+.hero-chart .sect-head { flex-wrap: wrap; }
+.hero-roles { display: flex; flex-direction: column; min-width: 0; border-left: 1px solid var(--line); background: var(--rail-bg); }
+.hero-roles > .sect-head { margin: 0; padding: 22px var(--gutter) 10px; }
+
+/* the radar */
+.radar-box { display: flex; justify-content: center; }
+.radar { display: block; width: 100%; max-width: 760px; height: auto; max-height: max(380px, calc(100dvh - 190px)); stroke: none; }  /* each mark sets its own stroke */
+.radar .grid { fill: none; stroke: var(--border); stroke-width: 1; }
+.radar .spoke.on { stroke: var(--muted); }
+.radar .tick { fill: var(--muted); font-size: 12px; }
+.radar .rim { fill: var(--text); font-size: 12.5px; }
+.radar .series { fill-opacity: 0.1; stroke-width: 2; stroke-linejoin: round; }
+.radar .dot { stroke: var(--surface); stroke-width: 2; }
+.radar .s-prev.series { fill-opacity: 0; stroke-dasharray: 5 4; }
+.radar .peak { fill: var(--text); font-size: 12px; font-weight: 700; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.radar .hit { fill: transparent; }
+.s-fit { fill: var(--viz-fit); stroke: var(--viz-fit); background: var(--viz-fit); }
+.s-demand { fill: var(--viz-demand); stroke: var(--viz-demand); background: var(--viz-demand); }
+.s-interest { fill: var(--viz-interest); stroke: var(--viz-interest); background: var(--viz-interest); }
+.s-prev { fill: var(--viz-prev); stroke: var(--viz-prev); background: var(--viz-prev); }
+.analysis .legend { display: flex; flex-wrap: wrap; gap: 2px; }
+.analysis .legend-item { display: inline-flex; align-items: center; gap: 2px; padding: 4px 8px; border-radius: 6px; color: var(--text); font-size: 13px; }
+.analysis .legend-item:hover { background: var(--hover); }
+.analysis .legend-item.off { color: var(--muted); text-decoration: line-through; }
+.analysis .legend-item.off .swatch { opacity: 0.4; }
+.swatch { display: inline-block; width: 10px; height: 10px; margin-right: 5px; border-radius: 2px; }
+
+/* the chart's and the bars' tooltip */
+.viz-tip { position: fixed; z-index: 70; max-width: 320px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+  box-shadow: var(--shadow); font-size: 13px; pointer-events: none; }
+.tip-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.tip-row span { flex: 1; color: var(--muted); }
+.tip-row b { font-variant-numeric: tabular-nums; }
+.tip-note { margin-top: 5px; color: var(--muted); }
+
+/* the roles table */
+.roles-table { font-variant-numeric: tabular-nums; }
+.roles-table th, .roles-table td { padding-right: 6px; padding-left: 6px; }
+.roles-table th { border-top: 1px solid var(--line); }
+.roles-table .num { text-align: right; white-space: nowrap; }
+.roles-table th:last-child, .roles-table td:last-child { padding-right: 8px; }
+.role-row { cursor: pointer; }
+.role-row:hover td { background: var(--hover); }
+.role-row:focus-visible { outline-offset: -2px; }
+.role-name { display: flex; align-items: center; gap: 8px; min-width: 124px; }
+.role-name > svg { width: 14px; height: 14px; color: var(--muted); transform: rotate(-90deg); transition: transform 0.12s; }
+.role-row[aria-expanded=true] .role-name > svg { transform: none; }
+.role-label { display: grid; gap: 1px; min-width: 0; }
+.role-label b { font-size: 13.5px; line-height: 1.3; }
+.role-label small { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12.5px; line-height: 1.3; }
+.role-label small svg { width: 12px; height: 12px; color: var(--purple-ink); }
+.roles-table td.role-end { width: 34px; padding-left: 0; }
+.role-remove { width: 26px; height: 26px; opacity: 0; }
+.role-row:hover .role-remove, .role-row:focus-within .role-remove, .role-remove:focus-visible { opacity: 1; }
+.role-remove svg { width: 14px; height: 14px; }
+.role-remove:hover { background: var(--bad-bg); color: var(--bad-text); }
+.roles-table td.change svg { width: 13px; height: 13px; margin-right: 2px; }
+.roles-table td.change { white-space: nowrap; }
+@media (hover: none) { .role-remove { opacity: 1; } }
+
+/* a role's details */
+.role-details td { padding-top: 12px; padding-bottom: 16px; background: var(--surface); }
+.role-details h4 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0 0 5px; font-size: 13px; }
+.role-origin { font-size: 13px; }
+.role-facts { display: none; font-size: 13px; }
+.role-why { margin-top: 8px; color: var(--text); font-size: 13.5px; }
+.role-missing { margin-top: 12px; }
+.role-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px 22px; margin-top: 12px; }
+.role-grid .bullets { font-size: 13px; }
+.role-moves { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.role-moves b { display: flex; align-items: center; gap: 6px; }
+.role-moves svg { width: 14px; height: 14px; color: var(--green-dark); }
+.role-moves p { font-size: 13px; }
+
+/* Add role, and the roles you removed */
+.role-controls { display: grid; gap: 10px; margin-top: auto; padding: 14px var(--gutter) 22px; border-top: 1px solid var(--line); }
+.role-controls .inline-form input { min-width: 0; }
+.role-removed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--muted); font-size: 13px; }
+
+/* the report: two columns of sections, then three */
+.analysis .report { display: grid; grid-template-columns: var(--split); border-bottom: 1px solid var(--line); }
+.analysis .report:last-child { border-bottom: 0; }
+.analysis .report.thirds { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.analysis .report-col { min-width: 0; }
+.analysis .report > * + * { border-left: 1px solid var(--line); }
+.analysis .report.thirds > .sect { min-width: 0; border-bottom: 0; }
+.analysis .report-none { font-size: 13.5px; }
+.assessment { max-width: 780px; color: var(--text); font-size: 15px; line-height: 1.65; }
+
+/* top moves */
+.top-moves { display: block; margin: 0 calc(var(--gutter) * -1) -22px; padding: 0; border-top: 1px solid var(--line); list-style: none; }
+.top-move { display: flex; gap: 14px; padding: 14px var(--gutter); border-bottom: 1px solid var(--line); }
+.top-move:last-child { border-bottom: 0; }
+.top-move > div { min-width: 0; }
+.top-move-num { width: 18px; color: var(--green-dark); font-size: 18px; font-weight: 700; line-height: 1.15; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.top-move h3 { font-size: 14.5px; }
+.top-move .tags { margin: 6px 0; }
+.top-move p { max-width: 720px; color: var(--text); font-size: 13.5px; }
+.top-move p.why { margin-top: 2px; color: var(--muted); font-size: 13px; }
+
+/* search steering */
+.steer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+.steer-item { display: grid; align-content: start; justify-items: start; gap: 7px; min-width: 0; }
+.steer-item h3 { color: var(--muted); font-size: 13px; }
+.steer-note { max-width: 720px; margin-top: 14px; color: var(--text); font-size: 13.5px; }
+
+/* profile additions */
+.additions { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; }
+.additions p { font-size: 13.5px; }
+.additions-links { margin-top: 14px; }
+
+/* the bars: gaps, the funnel, industries and sources */
+.analysis .bars { display: grid; gap: 7px; }
+.analysis .bar-row { display: grid; grid-template-columns: minmax(104px, 36%) minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 13px; }
+.analysis .bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analysis .bar-track { height: 10px; }
+.analysis .bar-track i { display: block; height: 100%; min-width: 2px; background: var(--viz-fit); }
+.analysis .bar-value { color: var(--muted); font-size: 12.5px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.analysis .bar-value small { display: inline-block; width: 46px; font-size: 12px; }
+
+/* the roles table needs the width, so the chart and the table stack first */
+@media (max-width: 1320px) {
+  .analysis-hero { grid-template-columns: minmax(0, 1fr); }
+  .hero-chart { position: static; border-bottom: 1px solid var(--line); }
+  .hero-roles { border-left: 0; }
+  .radar { max-width: 640px; }
+  .analysis .report.thirds { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .analysis .report.thirds > :first-child { grid-column: 1 / -1; border-bottom: 1px solid var(--line); }
+  .analysis .report.thirds > :nth-child(2) { border-left: 0; }
+}
+@media (max-width: 1180px) {
+  .analysis .report { grid-template-columns: minmax(0, 1fr); }
+  .analysis .report > * + * { border-left: 0; border-top: 1px solid var(--line); }
+  .analysis .report.thirds { grid-template-columns: minmax(0, 1fr); }
+  .analysis .report.thirds > :first-child { border-bottom: 0; }
+}
+@media (max-width: 680px) {
+  .roles-table .extra { display: none; }
+  .role-facts { display: block; }
+  .role-name { min-width: 0; }
+  .steer { grid-template-columns: minmax(0, 1fr); }
+  .analysis .bar-row { grid-template-columns: minmax(90px, 40%) minmax(0, 1fr) auto; }
+}

@@ -16,26 +16,33 @@
     document.documentElement.dataset.theme = "light";
   }
 </script>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/css/base.css">
+<link rel="stylesheet" href="/static/css/home.css">
+<link rel="stylesheet" href="/static/css/leads.css">
+<link rel="stylesheet" href="/static/css/tracker.css">
+<link rel="stylesheet" href="/static/css/analysis.css">
+<link rel="stylesheet" href="/static/css/settings.css">
 </head>
 <body>
 <a href="#main" class="skip-link">Skip to content</a>
 <!-- The frame. js/layout.js fills in the sidebar and the top bar; every page draws itself inside <main>. -->
 <div class="app-shell">
   <aside class="sidebar" aria-label="Main navigation">
-    <a class="brand" href="#/home" aria-label="JobPortal home"><img src="/static/logo.png" alt="JobPortal" width="640" height="205"></a>
+    <a class="brand" href="#/home" aria-label="JobPortal home"><img class="brand-full" src="/static/logo.png" alt="JobPortal" width="640" height="205"><img class="brand-mark" src="/static/icon.png" alt="JobPortal" width="256" height="256"></a>
     <nav id="navigation" aria-label="Pages"></nav>
     <div class="sidebar-bottom">
-      <div class="next-step" id="next-step" aria-live="polite"></div>
-      <div class="sidebar-foot" id="sidebar-foot"></div>
+      <div class="side-run" id="side-run" aria-live="polite"></div>
+      <div id="ai-button"></div>
+      <a class="side-link" id="user-button" href="#/settings/profile"></a>
     </div>
   </aside>
   <div class="workspace">
     <header class="topbar">
-      <label class="search-box" id="search-box"></label>
+      <h1 id="page-title"></h1>
+      <nav class="page-tabs" id="page-tabs" aria-label="Sections"></nav>
       <div class="top-actions">
+        <label class="search-box" id="search-box"></label>
         <div class="run-control" id="run-control"></div>
-        <a class="user-button" id="user-button" href="#/settings"></a>
       </div>
     </header>
     <main id="main" tabindex="-1"></main>
@@ -53,6 +60,7 @@
 <script src="/static/js/components/settings-form.js"></script>
 <script src="/static/js/components/documents.js"></script>
 <script src="/static/js/components/resume-builder.js"></script>
+<script src="/static/js/components/connect.js"></script>
 <script src="/static/js/pages/home.js"></script>
 <script src="/static/js/pages/leads.js"></script>
 <script src="/static/js/pages/lead.js"></script>

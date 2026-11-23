@@ -1,8 +1,9 @@
-/* settings-form.js: the form plumbing shared by the Settings tabs and the Sources dialog. They edit S.cfg
+/* settings-form.js: the form plumbing shared by the Settings sections and the Sources dialog. They edit S.cfg
    (GET /api/settings) in place: every field says where its value lives (a data-* attribute), and onCfgEdit() copies each
    edit into S.cfg and remembers its path. saveCfg() then writes only the paths you edited, on top of the settings as
    they are on the server now (PUT /api/settings), so a change saved elsewhere meanwhile (the search area, the Dream
-   list, your answers) is kept. A form root is marked data-cfg; fields outside one are left alone. */
+   list, your answers) is kept. A form root is marked data-cfg; fields outside one are left alone.
+   It also holds the setting rows (.opt) and the Save bar pinned under the open Settings section. */
 "use strict";
 
 // A text, number, password or email field for the setting at a dotted path ("sources.linkedin.max_requests"). extra adds
@@ -17,6 +18,21 @@ const cfgLines = (path, label, rows) => `<label class="field"><span class="field
 // A switch for an on/off setting, with its label.
 const cfgSwitch = (path, label, on) => `<label class="switch-row">${toggle(`data-path="${path}" data-bool="1"`, on)}<span>${label}</span></label>`;
 
+// ---------------------------------------------------------------- setting rows
+// A setting as a row: its name on the left, its control on the right. wraps = the row is a <label> around one input, so
+// a click on the name focuses it. A control with labels of its own (a switch, pills) needs a plain row.
+const optRow = (label, control, wraps = false) => (wraps
+  ? `<label class="opt"><span class="opt-label">${label}</span><span class="opt-body">${control}</span></label>`
+  : `<div class="opt"><span class="opt-label">${label}</span><div class="opt-body">${control}</div></div>`);
+
+// The same three kinds of setting as above, as rows.
+const cfgOpt = (path, label, type = "text", extra = "") => optRow(label,
+  `<input type="${type}" data-path="${path}" value="${esc(getPath(S.cfg, path) ?? "")}" ${extra}>`, true);
+const cfgOptLines = (path, label, rows) => optRow(label,
+  `<textarea data-list="${path}" rows="${rows}">${esc((getPath(S.cfg, path) || []).join("\n"))}</textarea>`, true);
+const cfgOptSwitch = (path, label, on, note = "") => optRow(`${label}${note ? `<small>${note}</small>` : ""}`,
+  toggle(`data-path="${path}" data-bool="1" aria-label="${esc(label)}"`, on));
+
 // "name | url", or just the url, to { name, url } (the RSS feeds box in Sources).
 function parseFeed(line) {
   const [name, url] = line.includes("|") ? line.split("|").map((s) => s.trim()) : [line, line];
@@ -28,12 +44,14 @@ async function loadCfg() {
   S.cfg = await api("/api/settings");
   S.cfgDirty = false;
   S.cfgEdits.clear();
+  syncSaveBar();
 }
 
 // Marks a settings path as edited (adding or removing a company board or a mission edits its whole list).
 function markCfgEdit(path) {
   S.cfgEdits.add(path);
   S.cfgDirty = true;
+  syncSaveBar();
 }
 
 // Copies one edit into S.cfg. The field says where the value goes:
@@ -96,11 +114,45 @@ async function saveCfg() {
   S.cfgDirty = S.cfgEdits.size > 0;
   S.searchArea = S.cfg.locations.allowed;
   S.industries = S.cfg.industries;
-  toast("Saved", "Your settings are updated.");
+  syncSaveBar();
+  toast("Saved");
 }
 
-// The bar at the bottom of a settings form, with its Save button.
-const saveBar = (label = "Save settings") => `<div class="save-bar"><button class="button primary" type="button" data-act="save-cfg">${label}</button></div>`;
+// ---------------------------------------------------------------- the Save bar
+// One bar pinned under the open Settings section (#set-save, drawn by settings.js). It shows only while the section has
+// unsaved changes. Each section says what Save does with setSaver(fn); a section with nothing to save passes nothing.
+let settingsSaver = null;
+function setSaver(fn = null) {
+  settingsSaver = fn;
+  syncSaveBar();
+}
+function syncSaveBar() {
+  const bar = $("#set-save");
+  if (bar) bar.hidden = !(settingsSaver && (S.dirty || S.cfgDirty));
+}
+
+// Typing in the open section shows the bar. These run after onCfgEdit above, and after a section's own listeners.
+const editedInSettings = (e) => {
+  if (e.target.closest?.("#settings-body")) syncSaveBar();
+};
+document.addEventListener("input", editedInSettings);
+document.addEventListener("change", editedInSettings);
 
 // ---------------------------------------------------------------- actions
-onAction("save-cfg", () => saveCfg());
+onAction("set-save", async (el) => {
+  if (!settingsSaver) return;
+  el.disabled = true;
+  try {
+    await settingsSaver();
+  } finally {
+    el.disabled = false;
+    syncSaveBar();
+  }
+});
+onAction("set-discard", () => {  // back to what's saved: the section draws itself again from the server
+  S.dirty = false;
+  S.cfgDirty = false;
+  S.cfgEdits.clear();
+  syncSaveBar();
+  return renderSettings(S.route[1], S.route[2]);
+});

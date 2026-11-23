@@ -1,11 +1,12 @@
 /* layout.js: the frame around every page, and the router.
-   - The sidebar: the menu with its badges (leads ready, follow-ups due), a card that says what's happening (a search,
-     the AI agents at work) or the next useful step, Settings, and a line with the AI in use and the version.
-   - The top bar: the search box (it searches your leads; "/" jumps to it), Run search or Stop, and your account button.
+   - The sidebar: the menu with its badges (leads ready, follow-ups due), what's running right now, the AI in use (a click
+     opens the Connect popup, components/connect.js) and your name.
+   - The top bar: the page's name and tabs (pageHead), the search box (it searches your leads; "/" jumps to it), and Run
+     or Stop.
    - The hash router that picks the page (#/home, #/leads/12, #/settings/ai, ...) and sends old addresses where their
      content lives now, and what a page shows when its data can't load (loadError, with Try again).
    The frame is static HTML in index.html; these functions fill its parts.
-   APIs: GET /api/stats, POST /api/run and /api/run/stop, POST /api/ai/signin and /api/ai/signout. */
+   APIs: GET /api/stats, POST /api/run and /api/run/stop. */
 "use strict";
 
 // Puts html into el only when it changed. Live events redraw the frame (and parts of pages) often during a search; this
@@ -38,120 +39,86 @@ function renderNav() {
     + `${page === key ? ' aria-current="page"' : ""}>${inside(key, label, name)}</a>`).join(""));
 }
 
-// ---------------------------------------------------------------- the sidebar card
-// What a search is doing, in plain words (the server's phases are collecting, triaging and packaging).
-const RUN_PHASES = { collecting: "Looking for jobs", triaging: "Scoring what it found", packaging: "Tailoring applications" };
+// ---------------------------------------------------------------- the page's name and tabs
+// The left of the top bar. Every page calls this as it draws. tabs is HTML made with pageTab().
+function pageHead(title, tabs = "") {
+  $("#page-title").textContent = title;
+  setHtml($("#page-tabs"), tabs);
+}
+
+// One tab in the top bar. attrs says what it does: an href, or data-act with its data. count is an optional number.
+function pageTab(attrs, label, on, count) {
+  const tag = attrs.includes("href=") ? "a" : "button";
+  return `<${tag} class="page-tab${on ? " active" : ""}"${tag === "button" ? ' type="button"' : ""} ${attrs}${on ? ' aria-current="true"' : ""}>`
+    + `${esc(label)}${count == null ? "" : `<span>${esc(count)}</span>`}</${tag}>`;
+}
+
+// ---------------------------------------------------------------- what's running
+// What a search is doing (the server's phases are collecting, triaging and packaging).
+const RUN_PHASES = { collecting: "Searching", triaging: "Scoring", packaging: "Tailoring" };
 const runPhase = (phase) => RUN_PHASES[phase] || humanize(phase || "Starting");
 
 // A run's counts in words: "120 found, 40 new, 12 good fits". Each count shows once the run has it.
 const RUN_COUNTS = [["found", "found"], ["candidates", "new"], ["triaged", "scored"], ["qualified", "good fits"], ["packaged", "ready"]];
 const runCounts = (counts) => RUN_COUNTS.filter(([key]) => (counts || {})[key] != null).map(([key, label]) => `${counts[key]} ${label}`).join(", ");
 
-// The AI card at the bottom of the sidebar. Once you're signed in, its top part shows the AI's usage (aiUsage), and under
-// it comes what's happening: a search running (its phase, its counts and the AI agents at work), else the next useful step.
-function renderNextStep() {
-  const el = $("#next-step");
+// The block above the AI in the sidebar: a search running, AI work, or a profile build. Empty when nothing is running.
+function renderSideRun() {
+  const el = $("#side-run");
   if (!el) return;  // the frame is gone after Quit
-  const run = S.state || {}, profile = S.profileStatus || {};
-  const agents = Object.values(run.active_agents || {});
-  const waiting = homeWaiting();
-  const go = (href, label) => `<a class="button mint" href="${href}">${label} ${icon("arrow")}</a>`;
-  const act = (name, label) => `<button class="button mint" type="button" data-act="${name}">${label} ${icon("arrow")}</button>`;
-  let card;  // [eyebrow, title, text, button]
-  if (run.running) card = ["SEARCH RUNNING", runPhase(run.phase), runCounts(run.counts), go("#/leads", "Watch it live")];
-  else if (agents.length) card = ["AI AT WORK", `${plural(agents.length, "agent")} working`, "", ""];
-  else if (!aiReady()) card = ["START HERE", "Connect your AI", "Sign in with ChatGPT, or use another AI.", act("ai-connect", "Connect")];
-  else if (!profile.has_resume) card = ["NEXT STEP", "Drop your resume", "Add it with any certificates, awards or transcripts.", go("#/home", "Add documents")];
-  else if (profile.busy) card = ["BUILDING YOUR PROFILE", humanize(profile.phase || "Working"), "Usually 1 to 4 minutes.", ""];
-  else if (profile.error) card = ["NEEDS A LOOK", "The profile build stopped", "Try it again from Home.", go("#/home", "See what happened")];
-  else if (waiting) card = ["NEXT STEP", `Answer ${plural(waiting, "question")}`, "Each answer sharpens your matches.", go("#/home", "Answer now")];
-  else if (profile.built) card = ["READY WHEN YOU ARE", "Run a search", "JobPortal looks everywhere and ranks what it finds.", act("run", "Run search")];
-  else card = ["NEXT STEP", "Build your profile", "It's what every search and application is made from.", go("#/home", "Go to Home")];
-  const [eyebrow, title, text, button] = card;
-  const more = agents.length > 5 ? `<li>and ${agents.length - 5} more</li>` : "";
-  const working = agents.length ? `<ul class="agent-list">${agents.slice(0, 5).map((label) => `<li><span class="pulse"></span>${esc(label)}</li>`).join("")}${more}</ul>` : "";
-  setHtml(el, `${aiReady() ? aiUsage() : ""}<span class="eyebrow">${eyebrow}</span><h3>${esc(title)}</h3>${text ? `<p>${esc(text)}</p>` : ""}`
-    + `${working}${button}`);
-}
-
-// The AI's usage, from S.state.usage (GET /api/stats, then "usage" events; ai/client.py usage() says what each field means):
-// the model in use (or the last one used, or the default), utilization as the AI tasks running out of the ones that may run
-// at once (Settings, AI), and this session's tokens and requests. The providers don't report how much of a plan or credit
-// is used, so the card shows JobPortal's own numbers, and "Paused" while a cap, no credit or a rate limit holds new work back.
-function aiUsage() {
-  const u = S.state.usage || {};
-  const running = +u.running || 0, slots = Math.max(1, +u.slots || 1);
-  const status = u.capped ? ["Paused", "warn"] : running ? ["Working", "on"] : ["Idle", ""];
-  const model = u.model ? `${esc(u.model)}${u.model_note ? ` <small>${esc(u.model_note)}</small>` : ""}` : "Picked for you";
-  const provider = u.provider || aiName();
-  const capped = !u.capped ? "" : `<p class="ai-capped">${provider === "ChatGPT" ? "Your ChatGPT usage cap was reached."
-    : `${esc(provider)} is holding JobPortal back for now (a limit, or no credit left).`} New AI work waits a few minutes.</p>`;
-  return `<div class="ai-usage"><div class="ai-usage-head"><span class="eyebrow">${esc(provider.toUpperCase())}</span>`
-    + `<span class="ai-state ${status[1]}">${status[0]}</span></div>`
-    + `<dl><div><dt>Model</dt><dd>${model}</dd></div>`
-    + `<div><dt>Utilization</dt><dd>${running} of ${plural(slots, "AI task")}</dd></div>`
-    + `<progress value="${Math.min(running, slots)}" max="${slots}" aria-label="AI tasks running">${running} of ${slots}</progress>`
-    + `<div><dt>This session</dt><dd>${fmtTokens(+u.tokens || 0)} tokens, ${plural(+u.requests || 0, "request")}</dd></div></dl>${capped}</div>`;
+  const run = S.state || {}, profile = S.profileStatus || {}, agents = Object.values(run.active_agents || {});
+  const line = (title, text) => `<b><span class="pulse"></span>${esc(title)}</b>${text ? `<small>${esc(text)}</small>` : ""}`;
+  if (run.running) setHtml(el, line(runPhase(run.phase), runCounts(run.counts)));
+  else if (profile.busy) setHtml(el, line("Building profile", ""));
+  else if (agents.length) setHtml(el, line(plural(agents.length, "AI task"), agents[0]));
+  else setHtml(el, "");
+  renderAIButton();
 }
 
 // ---------------------------------------------------------------- the AI
-// True once the AI in use is ready: signed in with ChatGPT or OpenRouter, or its key saved (Settings, AI). The AI features
-// only work then.
+// True once the AI in use is connected. The AI features only work then.
 const aiReady = () => !!(S.state.ai && (S.state.ai.ready ?? S.state.ai.signed_in));
-// The name of the AI in use, like "ChatGPT" or "Gemini (Google)", and the short line the frame shows about it.
-const aiName = () => S.state.ai?.provider_name || "ChatGPT";
-const aiConnected = () => (aiReady() ? `${aiName()} connected` : "AI not connected");
+// The name of the AI in use, like "Gemini" or "Claude".
+const aiName = () => S.state.ai?.provider_name || "AI";
+const aiConnected = () => (aiReady() ? aiName() : "Not connected");
 
-// Your name for the avatar: from your standard answers, else from your ChatGPT account.
+// Your name for the sidebar: from your standard answers, else from your AI account's sign-in.
 const yourName = () => String(S.onboarding?.answers?.name || "").trim() || String(S.state.ai?.name || "").trim();
 
-// The line at the bottom of the sidebar, under the divider: the sign-in and the version. (The AI card above it has the usage.)
-function renderSidebarFoot() {
-  const el = $("#sidebar-foot");
+// The AI in the sidebar. A click opens the Connect popup.
+function renderAIButton() {
+  const el = $("#ai-button");
   if (!el) return;
-  setHtml(el, `<span class="status-dot${aiReady() ? "" : " off"}"></span><span>${esc(aiConnected())}</span>`
-    + `<span>v${esc(S.meta?.version || "")}</span>`);
+  if (!aiReady()) {
+    setHtml(el, `<button class="side-link connect" type="button" data-act="ai-connect" aria-label="Connect AI"><span>Connect AI</span></button>`);
+    return;
+  }
+  const u = S.state.usage || {};
+  const [dot, state] = u.capped ? [" warn", "Paused"] : +u.running ? ["", "Working"] : ["", ""];
+  setHtml(el, `<button class="side-link" type="button" data-act="ai-connect" aria-label="${esc(aiName())}, change AI" title="${esc(aiName())}">`
+    + `<span class="status-dot${dot}"></span><span>${esc(aiName())}</span>${state ? `<small>${state}</small>` : ""}</button>`);
 }
 
-// The account button at the right of the top bar. It opens Settings.
+// Your name at the bottom of the sidebar. It opens your profile.
 function renderUserButton() {
   const el = $("#user-button");
   if (!el) return;
   const name = yourName();
-  setHtml(el, `<span class="avatar">${esc(initials(name)) || icon("user")}</span>`
-    + `<span class="user-name"><strong>${esc(name || "Your account")}</strong><small>${esc(aiConnected())}</small></span>${icon("chevron")}`);
-  el.setAttribute("aria-label", `${name || "Your account"}, settings`);
+  setHtml(el, `<span class="avatar">${esc(initials(name)) || icon("user")}</span><span>${esc(name || "Profile")}</span>`);
+  el.setAttribute("aria-label", name ? `${name}, profile` : "Profile");
 }
 
-// Handles an "ai" event (the AI, its sign-in or its key changed): redraw the frame, say so once the AI is ready, and swap
+// Handles an "ai" event (the AI, its sign-in or its key changed): redraw the frame, say so once it's connected, and swap
 // Home's welcome for the dashboard (or back).
 function onAIStatus(data) {
-  const wasReady = aiReady();
+  const wasReady = aiReady(), wasProvider = S.state.ai?.provider;
   S.state.ai = data;
   renderFrame();
-  if (wasReady === aiReady()) return;
-  if (aiReady()) toast(`${aiName()} is connected`, data.email || data.name || "JobPortal's AI can work now.");
+  connectStatusChanged(data);
+  if (wasReady === aiReady() && wasProvider === data.provider) return;
+  if (aiReady()) toast(`${aiName()} connected`);
   if (S.route[0] === "home") renderHome();
   if (S.route[0] === "settings" && S.route[1] === "ai" && !S.cfgDirty) renderSettings("ai");
-}
-
-// Starts Sign in with ChatGPT, or with OpenRouter. It happens in the system browser: the server returns the provider's
-// sign-in page (POST /api/ai/signin or /api/ai/openrouter/signin), the provider sends the browser back to this app's server
-// when you're done, and the server publishes an "ai" event.
-async function aiSignIn(provider = "chatgpt") {
-  const [endpoint, name] = provider === "openrouter" ? ["/api/ai/openrouter/signin", "OpenRouter"] : ["/api/ai/signin", "ChatGPT"];
-  // In a normal tab, open the new tab now, during the click, so popup blockers allow it. Its address comes later.
-  const tab = ownWindow() ? null : window.open("", "_blank");
-  try {
-    const r = await api(endpoint, { method: "POST" });
-    if (ownWindow()) await openUrl(r.url);
-    else if (tab) tab.location = r.url;
-    else location.href = r.url;
-    toast("Finish signing in", `Sign in with ${name} in your browser. JobPortal updates when you're done.`);
-  } catch (e) {
-    if (tab) tab.close();
-    toast("Couldn't start sign-in", e.message, "error");
-  }
 }
 
 // ---------------------------------------------------------------- the profile and the counts
@@ -159,8 +126,8 @@ async function aiSignIn(provider = "chatgpt") {
 function onProfileStatus(data) {
   const was = S.profileStatus || {};
   S.profileStatus = data;
-  if (was.busy && !data.busy && data.built && !data.error) S.buildDone = true;  // Home says "Your profile is ready"
-  renderNextStep();
+  if (was.busy && !data.busy && data.built && !data.error) toast("Profile ready");
+  renderSideRun();
   if (S.route[0] === "home") homeStatusChanged();
   if (S.route[0] === "settings" && S.route[1] === "profile") renderProfileStatusLine();
 }
@@ -178,7 +145,7 @@ async function refreshStats() {
 
 // ---------------------------------------------------------------- the top bar
 // The ways to run a search. The button runs everything; its menu offers the rest.
-const RUN_MODES = [["full", "Run everything"], ["boards", "Job boards only"], ["hunt", "AI hunt only"], ["backlog", "Only the waiting queue"]];
+const RUN_MODES = [["full", "Everything"], ["boards", "Job boards"], ["hunt", "AI hunt"], ["backlog", "Queue"]];
 
 // Run search (with its menu), or Stop while a search runs. Starting or stopping swaps the buttons; when one of them had
 // the focus, the button that replaces it gets it, so a keyboard user can stop the search they just started.
@@ -191,8 +158,8 @@ function renderRunControl() {
       + `<button class="button stop" type="button" data-act="stop">${icon("stop", "filled")}<span>Stop</span></button>`);
   } else {
     const modes = RUN_MODES.map(([mode, label]) => `<button type="button" role="menuitem" data-act="run" data-mode="${mode}">${label}</button>`).join("");
-    setHtml(el, `<div class="split menu-wrap"><button class="button primary" type="button" data-act="run">${icon("play", "filled")}<span>Run search</span></button>`
-      + `<button class="button primary split-more" type="button" data-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Other ways to run">${icon("chevron")}</button>`
+    setHtml(el, `<div class="split menu-wrap"><button class="button primary" type="button" data-act="run">${icon("play", "filled")}<span>Run</span></button>`
+      + `<button class="button primary split-more" type="button" data-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Run options">${icon("chevron")}</button>`
       + `<div class="menu" role="menu" hidden>${modes}</div></div>`);
   }
   if (hadFocus && !el.contains(document.activeElement)) $("button", el)?.focus();
@@ -201,14 +168,13 @@ function renderRunControl() {
 // Everything in the frame that shows the sign-in, the run or the counts.
 function renderFrame() {
   renderNav();
-  renderNextStep();
-  renderSidebarFoot();
+  renderSideRun();
   renderUserButton();
   renderRunControl();
 }
 
 // The search box searches your leads: typing shows the Leads page filtered to what you typed.
-$("#search-box").innerHTML = `${icon("search")}<input id="search" type="search" placeholder="Search your leads" aria-label="Search your leads" autocomplete="off">`;
+$("#search-box").innerHTML = `${icon("search")}<input id="search" type="search" placeholder="Search leads" aria-label="Search leads" autocomplete="off">`;
 const searchLeads = () => {
   S.q = $("#search").value.trim();
   if (S.route[0] === "leads") loadLeads();
@@ -290,7 +256,8 @@ function route() {
   if (next[0] !== S.route[0]) {
     $$("dialog[open]").forEach((dialog) => dialog.close());
     if (S.leadView) closeLeadDetails();  // the lead that was open went with the page
-    window.scrollTo(0, 0);
+    main.scrollTo(0, 0);
+    pageHead(NAV.find(([key]) => key === next[0])?.[1] || "");  // the page adds its tabs when it draws
   }
   S.route = next;
   renderNav();
@@ -300,37 +267,27 @@ window.addEventListener("hashchange", route);
 
 // What a page shows where its content would be when loading it failed: what went wrong, and Try again, which draws the
 // page again. Without it, a failed request leaves a page half-drawn (no list, or "Loading" for good) until you leave it.
-const loadError = (err) => `<div class="empty-state"><h3>Couldn't load this</h3><p>${esc(err?.message || "")}</p>`
-  + `<button class="button outline" type="button" data-act="reload-page">${icon("refresh")}Try again</button></div>`;
+const loadError = (err) => `<div class="empty"><h3>Couldn't load</h3><p>${esc(err?.message || "")}</p>`
+  + `<button class="button outline" type="button" data-act="reload-page">${icon("refresh")}Retry</button></div>`;
 
 // ---------------------------------------------------------------- actions
-onAction("ai-signin", () => aiSignIn());
-onAction("openrouter-signin", () => aiSignIn("openrouter"));
-onAction("ai-connect", () => {  // ChatGPT signs in from here; any other AI is set up in Settings, AI
-  if ((S.state.ai?.provider || "chatgpt") === "chatgpt") aiSignIn();
-  else location.hash = "#/settings/ai";
-});
-onAction("ai-signout", async () => {
-  const r = await api("/api/ai/signout", { method: "POST" });
-  toast("Signed out of ChatGPT", r.note || "JobPortal no longer uses your plan.");
-});
+onAction("ai-connect", () => openConnect());
 onAction("run", async (el) => {
   // In a browser tab, the first run with alerts on asks for permission to notify.
   if (S.alerts && !desktop() && "Notification" in window && Notification.permission === "default") Notification.requestPermission();
   try {
     await api("/api/run", { method: "POST", body: { mode: el.dataset.mode || "full" } });
   } catch (err) {
-    toast("Can't search yet", err.message, "error");
+    toast("Can't search", err.message, "error");
     return;
   }
   S.logs = [];
-  S.buildDone = false;
   clearLog();
-  toast("Searching", "New leads show up on Leads as they're ready.");
+  toast("Search started");
 });
 onAction("stop", async () => {
   await api("/api/run/stop", { method: "POST" });
-  toast("Stopping", "Finishing up and saving what it found.");
+  toast("Stopping");
 });
 onAction("reload-page", () => {  // Try again under a loadError: the same address, drawn from scratch
   if ((S.dirty || S.cfgDirty) && !confirm("Discard your unsaved edits?")) return;
