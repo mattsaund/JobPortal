@@ -2,58 +2,28 @@
 
 The search run calls fetch() before triage (Pipeline.enrich in pipeline.py), and package building calls it before writing
 (packages.py), so the AI judges and tailors from the real posting. Known systems are read through their JSON APIs: Greenhouse,
-Lever, Workday, SmartRecruiters and Ashby, plus LinkedIn's guest posting page. Any other page is read as HTML: a schema.org
+Lever, Workday, SmartRecruiters, Ashby and BambooHR, plus LinkedIn's guest posting page. Any other page is read as HTML: a schema.org
 JobPosting block is preferred (many career sites embed one as JSON-LD for Google Jobs), and the page's visible text is the
 last resort.
 
 fetch() returns a dict that always has "description" and, when the source gives them, "apply_url", "deadline", "location",
 "posted_at", "company" and "title". It raises on network and HTTP errors; callers treat a failure as "no extra details"."""
 import asyncio
-import json
 import re
 from urllib.parse import parse_qs, unquote, urlparse
 
 from jobportal.core.textutil import clean, html_to_text, parse_date
 from jobportal.search.collectors.ats import LOCALE_SEGMENT, lever_description
 from jobportal.search.collectors.base import Ctx
+from jobportal.search.collectors.readers import jsonld_postings, ld_location as _ld_location
 
 MAX_DESC = 15000  # characters kept from a description (each AI prompt then takes its own, often shorter, excerpt)
 SNIPPET_LENGTH = 600  # a description shorter than this is probably a snippet from a list, so the full posting is worth fetching
 
 
 def _jsonld_jobposting(html: str) -> dict | None:
-    """The first schema.org JobPosting in the page's JSON-LD script blocks, or None. A block may hold one object, a list of
-    objects, or an "@graph" list."""
-    for block in re.findall(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html, re.S | re.I):
-        try:
-            data = json.loads(block.strip())
-        except json.JSONDecodeError:
-            continue
-        items = data if isinstance(data, list) else data.get("@graph", [data]) if isinstance(data, dict) else []
-        for item in items:
-            if isinstance(item, dict) and "JobPosting" in str(item.get("@type")):  # @type can be a string or a list
-                return item
-    return None
-
-
-def _ld_location(posting: dict) -> str:
-    """A JobPosting's locations as "City, ST | City, ST", plus "Remote" when it is marked as telecommuting. Sites write a
-    place as a Place object with an address, or as plain text ("Remote", "Columbus, OH"), which is used as it is."""
-    places = posting.get("jobLocation") or []
-    places = places if isinstance(places, list) else [places]
-    out = []
-    for place in places:
-        if isinstance(place, str):
-            out.append(clean(place))
-            continue
-        address = (place.get("address") or {}) if isinstance(place, dict) else {}
-        if isinstance(address, str):
-            out.append(clean(address))
-        elif isinstance(address, dict):
-            out.append(", ".join(x for x in [address.get("addressLocality"), address.get("addressRegion")] if x))
-    if str(posting.get("jobLocationType", "")).upper() == "TELECOMMUTE":
-        out.append("Remote")
-    return " | ".join(o for o in out if o)
+    """The first schema.org JobPosting in the page's JSON-LD script blocks, or None."""
+    return next(iter(jsonld_postings(html)), None)
 
 
 async def linkedin_detail(ctx: Ctx, job_id: str) -> dict:
@@ -102,11 +72,13 @@ async def fetch(ctx: Ctx, url: str, meta: dict | None = None) -> dict:
         d = await ctx.get_json(f"https://api.lever.co/v0/postings/{segments[0]}/{segments[1]}")
         return {"description": lever_description(d)[:MAX_DESC], "apply_url": d.get("applyUrl")}
 
-    if "myworkdayjobs.com" in host:
+    if "myworkdayjobs.com" in host or "myworkdaysite.com" in host:
         api = meta.get("api")
         if not api:  # <tenant>.wd5.myworkdayjobs.com/[en-US/]<site>/job/<location>/<title>_<id> -> its API address
             tenant = host.split(".")[0]
             path = [s for s in segments if not LOCALE_SEGMENT.fullmatch(s)]
+            if "myworkdaysite.com" in host and len(path) >= 3 and path[0] == "recruiting":  # .../recruiting/<tenant>/<site>/job/...
+                tenant, path = path[1], path[2:]
             if len(path) >= 2:
                 api = f"https://{host}/wday/cxs/{tenant}/{path[0]}/" + "/".join(path[1:])
         if api:
@@ -116,6 +88,11 @@ async def fetch(ctx: Ctx, url: str, meta: dict | None = None) -> dict:
             return {"description": html_to_text(info.get("jobDescription", ""))[:MAX_DESC],
                     "location": " | ".join(loc for loc in locations if loc), "posted_at": parse_date(info.get("startDate")),
                     "deadline": parse_date(info.get("endDate")), "apply_url": info.get("externalUrl")}
+
+    if host.endswith(".bamboohr.com") and len(segments) >= 2 and segments[0] == "careers":  # <slug>.bamboohr.com/careers/<id>
+        d = await ctx.get_json(f"https://{host}/careers/{segments[1]}/detail")
+        opening = (d.get("result") or {}).get("jobOpening") or {}
+        return {"description": html_to_text(opening.get("description", ""))[:MAX_DESC], "posted_at": parse_date(opening.get("datePosted"))}
 
     linkedin = re.search(r"linkedin\.com/jobs/view/(?:[^/?]*-)?(\d{6,})", url)  # /jobs/view/<id> or /jobs/view/<title>-<id>
     if linkedin:

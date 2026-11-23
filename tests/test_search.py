@@ -10,7 +10,7 @@ import pytest
 
 from jobportal.ai import client as ai
 from jobportal.candidate import profile
-from jobportal.core import db, settings, textutil
+from jobportal.core import db, settings
 from jobportal.core.levels import title_filters
 from jobportal.core.textutil import fingerprint
 from jobportal.search import collectors, packages, pipeline
@@ -892,29 +892,6 @@ def test_tech_only_sources_skip_themselves_for_other_fields():
     assert asyncio.run(github_lists.collect(ctx)) == [] and asyncio.run(feeds.hackernews(ctx)) == []
     assert all("aren't in tech" in line for line in logs)
     asyncio.run(ctx.close())
-
-
-def test_the_muse_searches_the_users_fields(monkeypatch):
-    _targets(["Pastry Chef", "Line Cook"])
-    asked = []
-
-    async def fake_get_json(url, **kw):
-        asked.append(url)
-        return {"results": [], "page_count": 1}
-
-    ctx = Ctx(make_cfg(levels=["entry"]), lambda *a, **k: None)
-    ctx.get_json = fake_get_json
-    asyncio.run(feeds.themuse(ctx))
-    assert "category=Food+and+Hospitality+Services" in asked[0] and "level=Entry+Level" in asked[0]
-    asyncio.run(ctx.close())
-
-
-def test_the_muse_searches_a_states_largest_cities():
-    assert feeds._muse_locations(["Maryland", "Remote", "DC", "Pittsburgh, PA"]) == [
-        "Baltimore, MD", "Columbia, MD", "Rockville, MD", "Frederick, MD", "Annapolis, MD", "Flexible / Remote", "Washington, DC",
-        "Pittsburgh, PA"]
-    assert set(textutil.MAJOR_CITIES) == set(textutil.STATES)  # every state and DC
-    assert all(len(cities) >= 2 for state, cities in textutil.MAJOR_CITIES.items() if state != "DC")
 
 
 def test_a_nationwide_search_area_is_no_remote_permission_and_no_place_name():

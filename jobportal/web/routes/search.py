@@ -4,9 +4,9 @@ import json
 
 from fastapi import APIRouter, HTTPException
 
-from jobportal.core import db
+from jobportal.core import db, settings
 from jobportal.search import pipeline, sources
-from jobportal.search.collectors import COLLECTORS
+from jobportal.search.collectors import COLLECTORS, catalog
 
 router = APIRouter()
 
@@ -64,10 +64,17 @@ async def detect_source(body: dict):
     return await sources.detect_board((body.get("url") or "").strip(), body.get("name") or "")
 
 
+@router.get("/api/sources/catalog")
+def source_catalog():
+    """Every job site and public service in the catalog, with its group, its switch, whether it runs for this person and the
+    keys it needs (catalog.overview). The switches are saved in the settings, under sources.catalog."""
+    return catalog.overview(settings.get())
+
+
 @router.post("/api/sources/test/{key}")
 async def test_source(key: str):
-    """Run one job source by itself and report how many of its jobs would pass the rule filters
-    (sources.test_collector)."""
-    if key not in COLLECTORS:
+    """Run one job source by itself (a collector, or a catalog id) and report how many of its jobs would pass the rule
+    filters (sources.test_collector)."""
+    if key not in COLLECTORS and key not in catalog.BY_ID:
         raise HTTPException(404)
     return await sources.test_collector(key)

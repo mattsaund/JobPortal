@@ -1,4 +1,4 @@
-"""Job feeds and public APIs, one collector function per source: Hacker News "Who is hiring?", The Muse, USAJobs, Reddit,
+"""Job feeds and public APIs, one collector function per source: Hacker News "Who is hiring?", USAJobs, Reddit,
 Mastodon, remote job boards (Remotive, RemoteOK, We Work Remotely), the user's own RSS or Atom feeds, Bluesky, and two
 optional aggregators that need the user's own API key (Adzuna, and Google Jobs through SerpAPI).
 
@@ -7,14 +7,15 @@ search/plan.py. For early-career users (every level picked is internship, appren
 search wording for those levels instead of the user's queries.
 
 Adapting to the user's fields: search/plan.fields() names the work genres the user's targets point at, and the maps below
-turn them into The Muse's categories, extra subreddits, Mastodon hashtags and instances, and We Work Remotely feeds. Every
-community, hashtag, category and feed in them was checked to exist and carry job posts (October 2026); add only ones
+turn them into extra subreddits, Mastodon hashtags and instances, and We Work Remotely feeds. Every
+community, hashtag and feed in them was checked to exist and carry job posts (October 2026); add only ones
 that do. Hacker News carries tech jobs, so it skips itself unless the user's targets are in tech (plan.in_tech).
 
 Social sources (Hacker News comments, Reddit, Mastodon, Bluesky) return posts, not postings: the title is the post's first
 line and strict_titles is False. A post is kept only when it matches the user's level or roles (_post_re) and also uses a
 hiring word. Each function's docstring notes its site's limits and API parameters."""
 import asyncio
+import base64
 import html
 import random
 import re
@@ -23,13 +24,11 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from urllib.parse import quote, urlencode
 
+from jobportal import __version__
 from jobportal.core.genres import DEFAULT_GENRES
-from jobportal.core.levels import early_career, muse_levels, posting_regex
+from jobportal.core.levels import early_career, posting_regex
 from jobportal.core.textutil import (
-    MAJOR_CITIES,
-    NAME_TO_ABBR,
     REMOTE_RE,
-    STATES,
     LocationMatcher,
     clean,
     html_to_text,
@@ -47,32 +46,12 @@ def _for(genres: list[str], values: list[str]) -> dict[str, list[str]]:
     return {genre: values for genre in genres}
 
 
-# The Muse's job categories for each genre (the names its API filters on; a wrong name returns nothing).
-MUSE_CATEGORIES = {
-    **_for(["swe", "frontend_mobile", "ml_ai", "systems_test"], ["Software Engineering"]), "data": ["Data and Analytics"],
-    **_for(["cloud_devops", "cyber", "it_support"], ["Computer and IT", "Software Engineering"]),
-    **_for(["embedded_hw", "robotics", "engineering", "research"], ["Science and Engineering"]),
-    "product_design": ["Design and UX", "Product Management"], "solutions": ["Sales", "Account Management"],
-    **_for(["nursing", "allied_health", "physicians", "health_admin"], ["Healthcare"]),
-    "behavioral_health": ["Healthcare", "Social Services"], "caregiving": ["Healthcare", "Personal Care and Services"],
-    **_for(["teaching", "early_childhood", "student_services"], ["Education"]), "library_museum": ["Education", "Arts"],
-    "admin_office": ["Administration and Office"], "customer_service": ["Customer Service"],
-    "sales": ["Sales", "Account Management"], "marketing": ["Advertising and Marketing", "Media, PR, and Communications"],
-    "finance_accounting": ["Accounting and Finance"], "hr": ["Human Resources and Recruitment"],
-    "management_ops": ["Business Operations", "Project Management", "Management"], "legal": ["Legal Services"],
-    "food_hospitality": ["Food and Hospitality Services", "Entertainment and Travel Services"], "retail": ["Retail"],
-    "personal_care": ["Personal Care and Services", "Sports, Fitness, and Recreation"],
-    "skilled_trades": ["Installation, Maintenance, and Repairs", "Construction"], "construction": ["Construction"],
-    "manufacturing": ["Manufacturing and Warehouse"], "maintenance_auto": ["Installation, Maintenance, and Repairs"],
-    "logistics": ["Transportation and Logistics", "Manufacturing and Warehouse"], "art_design": ["Design and UX", "Arts"],
-    "writing_media": ["Writing and Editing", "Media, PR, and Communications"], "performing_arts": ["Arts"],
-    "environment_ag": ["Farming and Outdoors", "Animal Care"], "nonprofit": ["Social Services"],
-    "public_safety": ["Protective Services"],
-}
 # Subreddits that carry job posts for a field, added to the general ones in Settings.
 REDDIT_FIELD_SUBS = {**_for(TECH_GENRES, ["techjobs"]), "art_design": ["DesignJobs", "HungryArtists", "gameDevClassifieds"],
                      "product_design": ["DesignJobs"], "writing_media": ["writingopportunities"]}
 REDDIT_REMOTE_SUBS = ["RemoteJobs"]  # added when Remote is allowed
+# Reddit's API asks every app to name itself in its User-Agent.
+REDDIT_APP = f"JobPortal/{__version__}"
 # Mastodon hashtags that carry job posts for a field, and instances whose public hashtag timelines see that field's posts.
 MASTODON_FIELD_TAGS = {
     **_for(TECH_GENRES, ["techjobs"]), "nursing": ["nursingjobs", "nursejobs", "healthcarejobs"],
@@ -232,55 +211,6 @@ async def hackernews(ctx: Ctx) -> list[RawJob]:
     return out
 
 
-# ------------------------------------------------------------------ The Muse
-def _muse_locations(allowed: list[str]) -> list[str]:
-    """Turn the allowed locations into values The Muse's location filter knows, which are "City, ST" names. A state becomes
-    its largest cities (core/textutil.MAJOR_CITIES), DC becomes "Washington, DC", anything remote becomes "Flexible /
-    Remote" (The Muse's name for remote work), and anything else is passed as typed."""
-    out = []
-    for a in allowed:
-        low = a.lower().strip()
-        if "remote" in low:
-            out.append("Flexible / Remote")
-            continue
-        state = a.upper() if a.upper() in STATES else NAME_TO_ABBR.get(low)
-        if re.search(r"\bd\.?c\.?\b", low):
-            state = "DC"
-        if state:
-            out += [f"{city}, {state}" for city in MAJOR_CITIES.get(state, [])]
-        else:
-            out.append(a)
-    return out
-
-
-async def themuse(ctx: Ctx) -> list[RawJob]:
-    """The Muse's public jobs API (no key needed): newest first, filtered to the user's levels, to the job categories of
-    their fields (MUSE_CATEGORIES; every category while their fields aren't known) and, unless the search area is
-    nationwide, to its locations. Reads up to Settings' page count. Titles skip the level check (strict_titles=False)
-    because the API's level filter already applied it."""
-    pages = int(ctx.cfg["sources"]["themuse"].get("pages", 8))
-    allowed = ctx.cfg["locations"]["allowed"]
-    nationwide = any(NATIONWIDE.fullmatch(a.lower().strip()) for a in allowed)
-    locations = [] if nationwide else _muse_locations(allowed)
-    categories = _field_values(ctx, MUSE_CATEGORIES)
-    # Repeated parameters mean "any of these": level=Internship&level=Entry Level&category=Healthcare&location=...
-    base = ([("level", lv) for lv in muse_levels(plan.levels(ctx.cfg))] + [("category", c) for c in categories]
-            + [("descending", "true")] + [("location", loc) for loc in locations])
-    out = []
-    for page in range(pages):
-        d = await ctx.get_json("https://www.themuse.com/api/public/jobs?" + urlencode(base + [("page", page)]))
-        for j in d.get("results", []):
-            job_locations = [loc.get("name", "") for loc in j.get("locations", [])]
-            out.append(RawJob(source="themuse", title=j.get("name", ""), company=(j.get("company") or {}).get("name", ""),
-                              url=(j.get("refs") or {}).get("landing_page", ""), locations=job_locations,
-                              description=html_to_text(j.get("contents", ""))[:12000],
-                              posted_at=parse_date(j.get("publication_date")), source_detail="The Muse", strict_titles=False))
-        if page + 1 >= d.get("page_count", 0):  # pages are numbered from 0
-            break
-    ctx.log("themuse", f"{len(out)} postings" + (f" in {', '.join(categories)}" if categories else ""))
-    return out
-
-
 # ------------------------------------------------------------------ USAJobs
 async def usajobs(ctx: Ctx) -> list[RawJob]:
     """USAJobs, the federal government's job board, through its search API. It needs a free API key and the email address the
@@ -341,15 +271,40 @@ def _reddit_subreddits(ctx: Ctx) -> list[str]:
     return unique(subs, key=str.lower)
 
 
-async def reddit(ctx: Ctx) -> list[RawJob]:
-    """Reddit search, read through its RSS feeds (no account or key needed). Searches each subreddit (_reddit_subreddits)
-    for hiring words (with the words of their levels for early-career users: intern, apprentice, new grad), plus two
-    site-wide "<query> hiring <place>" searches. Every search covers the last month, newest first.
+async def _reddit_token(ctx: Ctx, sc: dict) -> str:
+    """An app-only token for Reddit's official API, from the user's own free app (Sources dialog: client id and secret), or ""
+    without one. A refused key is logged."""
+    client_id, secret = str(sc.get("client_id") or "").strip(), str(sc.get("client_secret") or "").strip()
+    if not (client_id and secret):
+        return ""
+    login = base64.b64encode(f"{client_id}:{secret}".encode()).decode()
+    r = await ctx.request("POST", "https://www.reddit.com/api/v1/access_token", retries=0, content="grant_type=client_credentials",
+                          headers={"Authorization": f"Basic {login}", "Content-Type": "application/x-www-form-urlencoded", "User-Agent": REDDIT_APP})
+    if r.status_code != 200:
+        ctx.log("reddit", f"Reddit refused the app key (HTTP {r.status_code})", "warn")
+        return ""
+    return r.json().get("access_token") or ""
 
-    Reddit throttles anonymous feed readers hard: one request at a time, 4 to 7 seconds between searches, no retries, an 8
-    second wait after a refusal, and after three refusals the rest are skipped (the AI hunt's social mission still covers
-    Reddit). Only posts that read like hiring posts at the user's level are kept."""
+
+def _reddit_entries(data: dict) -> list[dict]:
+    """The posts in a Reddit API listing, in the shape _parse_feed gives."""
+    posts = [child.get("data") or {} for child in (data.get("data") or {}).get("children") or []]
+    return [{"title": clean(p.get("title")), "link": f"https://www.reddit.com{p.get('permalink', '')}", "summary": p.get("selftext") or "",
+             "date": parse_date(p.get("created_utc"))} for p in posts if p.get("permalink")]
+
+
+async def reddit(ctx: Ctx) -> list[RawJob]:
+    """Reddit search. With the user's own free Reddit app (Sources dialog) it uses the official API. Without one it tries the
+    public search feeds, which Reddit now mostly refuses: one refusal ends the source for this run (the AI hunt's social
+    mission still covers Reddit).
+
+    Searches each subreddit (_reddit_subreddits) for hiring words (with the words of their levels for early-career users:
+    intern, apprentice, new grad), plus two site-wide "<query> hiring <place>" searches. Every search covers the last month,
+    newest first, one request at a time with a pause in between. Only posts that read like hiring posts at the user's level
+    are kept."""
+    sc = ctx.cfg["sources"].get("reddit") or {}
     ctx.host_limit("www.reddit.com", 1)
+    ctx.host_limit("oauth.reddit.com", 1)
     subreddits = _reddit_subreddits(ctx)
     if _early(ctx):
         words = [f'"{w}"' if " " in w else w for w in _level_words(ctx)]
@@ -361,23 +316,31 @@ async def reddit(ctx: Ctx) -> list[RawJob]:
     for role in _queries(ctx, 2):
         searches.append((None, f"{role} hiring {place}".strip()))  # None: search all of Reddit
     post_re = _post_re(ctx)
-    out, failures = [], 0
-    for sub, search in searches:
-        if ctx.cancel.is_set() or failures >= 3:
+    token = await _reddit_token(ctx, sc)
+    out, refused = [], False
+    for i, (sub, search) in enumerate(searches):
+        if ctx.cancel.is_set():
             break
-        url = (f"https://www.reddit.com/r/{sub}/search.rss?" if sub else "https://www.reddit.com/search.rss?") + urlencode(
-            {"q": search, "restrict_sr": "1" if sub else "0",  # restrict_sr=1 keeps the search inside the subreddit
-             "sort": "new", "t": "month"})
+        if i:  # a quiet pace either way: the API allows more, the public feeds much less
+            await asyncio.sleep(1.0 if token else 4 + random.random() * 3)
+        params = {"q": search, "restrict_sr": "1" if sub else "0",  # restrict_sr=1 keeps the search inside the subreddit
+                  "sort": "new", "t": "month"}
         try:
-            r = await ctx.request("GET", url, retries=0)
+            if token:
+                path = f"/r/{sub}/search" if sub else "/search"
+                r = await ctx.request("GET", f"https://oauth.reddit.com{path}?" + urlencode({**params, "limit": 100, "raw_json": 1}), retries=0,
+                                      headers={"Authorization": f"bearer {token}", "User-Agent": REDDIT_APP})
+                entries = _reddit_entries(r.json()) if r.status_code == 200 else []
+            else:
+                r = await ctx.request("GET", (f"https://www.reddit.com/r/{sub}/search.rss?" if sub else "https://www.reddit.com/search.rss?")
+                                      + urlencode(params), retries=0)
+                entries = _parse_feed(r.text) if r.status_code == 200 else []
             refused = r.status_code != 200
-        except Exception:  # noqa: BLE001 (a network error counts as a refusal, so it can't end the whole source)
+        except Exception:  # noqa: BLE001 (a network error counts as a refusal, so it can't end the whole run)
             refused = True
         if refused:
-            failures += 1
-            await asyncio.sleep(8)
-            continue
-        for entry in _parse_feed(r.text):
+            break
+        for entry in entries:
             text = entry["summary"]
             title_and_text = f"{entry['title']} {text}"
             if not (post_re.search(title_and_text) and REDDIT_HIRING_RE.search(title_and_text)):
@@ -385,8 +348,10 @@ async def reddit(ctx: Ctx) -> list[RawJob]:
             out.append(RawJob(source="reddit", title=entry["title"][:160], company="", url=entry["link"], description=text[:6000],
                               posted_at=entry["date"], strict_titles=False,
                               source_detail=f"Reddit r/{sub}" if sub else "Reddit search", found_url=entry["link"]))
-        await asyncio.sleep(4 + random.random() * 3)
-    ctx.log("reddit", f"{len(out)} relevant threads" + (" (rate limited; the AI social mission covers the rest)" if failures >= 3 else ""))
+    note = ""
+    if refused:
+        note = " (Reddit refused the request; add a free Reddit app key in Sources, and the AI social mission covers it meanwhile)"
+    ctx.log("reddit", f"{len(out)} relevant threads{note}", "warn" if refused else "info")
     return out
 
 

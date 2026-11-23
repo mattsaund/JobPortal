@@ -21,6 +21,7 @@ from jobportal.candidate import profile
 from jobportal.core.genres import DEFAULT_GENRES, classify, group_of
 from jobportal.core.levels import clean as clean_levels
 from jobportal.core.textutil import unique
+from jobportal.search.countries import Area
 
 # How much each kind of phrase says about the user's fields: their own target roles most, then the role families the
 # profile build ranked, then dream job titles, then each search query (there are many of those).
@@ -131,6 +132,13 @@ def groups(cfg: dict) -> list[str]:
         if genre in by_id:
             weights[group_of(by_id[genre])] += weight
     return [group for group, _ in weights.most_common()]
+
+
+def area(cfg: dict) -> Area:
+    """The countries the search area covers, from the allowed locations and the home country in the standard answers
+    (search/countries.py). The source catalog runs national job services from it, and the location filter reads their jobs
+    with it."""
+    return Area((cfg.get("locations") or {}).get("allowed"), str((profile.standard_answers() or {}).get("country") or ""))
 
 
 def in_tech(cfg: dict) -> bool:

@@ -258,7 +258,7 @@ async def build_package(lead_id: int, run_id: int | None = None, ctx: Ctx | None
         summary = lead_summary(lead_id)
         bus.publish("lead", summary)
         if stage == "ready":
-            bus.publish("toast", {"title": f"New lead ready (fit {summary['score']})", "body": f"{summary['company']}: {summary['title']}", "lead_id": lead_id})
+            bus.publish("toast", {"title": f"New lead: {summary['score']}", "body": f"{summary['company']}: {summary['title']}", "lead_id": lead_id})
         log("package", f"ready {summary['score']}: {summary['company']}, {summary['title']} ({stage}, {tokens:,} tokens)")
         return summary
     except (ai.UsageLimitError, asyncio.CancelledError):
@@ -472,7 +472,7 @@ async def apply_answers(lead_id: int) -> dict:
     db.add_event(lead_id, "resume", f"Resume updated with {len(answered)} answer(s): {summary[:300]}")
     profile_mod.mark_answers_applied(lead_id)
     bus.publish("lead", lead_summary(lead_id))
-    bus.publish("toast", {"title": "Resume updated with your answers", "body": summary[:200], "lead_id": lead_id})
+    bus.publish("toast", {"title": "Resume updated", "lead_id": lead_id})
     return {"ok": True, "change_summary": summary, "coverage": ats_coverage}
 
 

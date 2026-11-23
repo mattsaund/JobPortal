@@ -35,7 +35,7 @@ from jobportal.core.genres import DEFAULT_INDUSTRIES, classify, classify_industr
 from jobportal.core.levels import TITLE_MARKERS
 from jobportal.core.textutil import LocationMatcher, TargetMatcher, age_days, fingerprint, outside_us, url_key
 from jobportal.search import plan
-from jobportal.search.collectors import COLLECTORS, details, hunt
+from jobportal.search.collectors import COLLECTORS, catalog, details, hunt
 from jobportal.search.collectors.base import SOCIAL_SOURCES, Ctx, RawJob
 from jobportal.search.packages import build_package, insert_lead, lead_summary
 
@@ -90,14 +90,16 @@ def is_dream(company: str, dreams: list[str]) -> bool:
     return any(re.search(rf"\b{re.escape(d.lower())}\b", c) for d in dreams if d)
 
 
-def location_ok_by_settings(cfg: dict, dream: bool, title: str) -> bool:
+def location_ok_by_settings(cfg: dict, dream: bool, title: str, source: str = "") -> bool:
     """What the triage AI is told about a job's location (location_ok_by_their_settings): True when a Dream list switch lets
     the job skip the search area. That means a dream lead with "Dream companies can be anywhere in the US" on
     (locations.dream_bypass), or a dream job title with "Dream jobs can be anywhere in the US too" on (dream_jobs_bypass).
-    Without it, the AI would rule such a job ineligible for being outside the allowed locations."""
+    Also True for a job from another country's national service when the search area covers that whole country
+    (catalog.home_source). Without it, the AI would rule such a job ineligible for being outside the allowed locations."""
     locations = cfg["locations"]
     return bool((dream and locations.get("dream_bypass"))
-                or (locations.get("dream_jobs_bypass") and is_dream_job(title, cfg.get("dream_jobs", []))))
+                or (locations.get("dream_jobs_bypass") and is_dream_job(title, cfg.get("dream_jobs", [])))
+                or catalog.home_source(cfg, source))
 
 
 def priority(score: int | None, deadline: str | None) -> int:
@@ -126,7 +128,8 @@ class RuleFilters:
     """The rule filters every collected job passes before any AI sees it, built from Settings.
 
     In order, check() drops a job that: has no title or URL; is from an excluded company; lacks a word for the user's levels
-    in its title (only for sources with strict_titles); has a too-senior or excluded title (postings only); is nowhere near
+    in its title (only for sources with strict_titles, and not in the user's kind of work when titles there rarely name a
+    level); has a too-senior or excluded title (postings only); is nowhere near
     the user's target roles, role families and queries (filters.require_target_match, textutil.TargetMatcher, skipped for
     NO_TARGET_GATE sources and while the user has no targets); is outside the search area (LocationMatcher), unless a Dream
     list switch lets it through; has an unknown location when Settings says to drop those; is older than run.max_age_days;
@@ -142,6 +145,7 @@ class RuleFilters:
         self.exclude = _any_of(filters["title_exclude"], "$^")  # too-senior and other unwanted title words
         self.level_words = _any_of([p for k in plan.levels(cfg) for p in TITLE_MARKERS.get(k, [])], "$^")  # for the pre-score
         self.matcher = LocationMatcher(cfg["locations"]["allowed"])
+        self.area = plan.area(cfg)  # the countries behind the search area, for jobs from a national service
         self.refresh()
 
     def refresh(self) -> None:
@@ -160,7 +164,7 @@ class RuleFilters:
             return False, "incomplete", 0
         if any(x.lower() in (j.company or "").lower() for x in filters.get("exclude_companies", []) if x):
             return False, "excluded company", 0
-        if j.strict_titles and not self.include.search(title):
+        if j.strict_titles and not self.include.search(title) and not self.targets.same_levelless_work(j.title):
             return False, "title doesn't match your levels", 0
         if j.kind == "posting" and self.exclude.search(title):
             return False, "too senior / excluded title", 0
@@ -171,6 +175,8 @@ class RuleFilters:
         dream_job = is_dream_job(j.title, self.cfg.get("dream_jobs", []))
         j.dream = dream_company or dream_job
         in_area = self.matcher.match(j.loc_list())  # True (allowed), False (known and not allowed) or None (can't tell)
+        # The matcher knows US places. A national service's job is judged by its country instead (countries.Area.judge).
+        in_area = self.area.judge(in_area, j.meta.get("country"))
         # The two Dream list switches: dream companies, and dream job titles, may be outside the search area.
         bypass = (dream_company and loc_cfg.get("dream_bypass")) or (dream_job and loc_cfg.get("dream_jobs_bypass"))
         if in_area is False and not bypass:
@@ -316,6 +322,7 @@ class Pipeline:
         self.genres = self.cfg["analysis"]["genres"]
         self.genre_ids = {g["id"] for g in self.genres}
         self.ctx = Ctx(self.cfg, self.log, self.run_id, self.cancel)
+        self.ctx.deliver = self.add_jobs  # the source catalog hands over each site's jobs as soon as that site is read
 
     # ------------------------------------------------------------ logging and live counters
     def log(self, source: str, msg: str, level: str = "info") -> None:
@@ -493,7 +500,8 @@ class Pipeline:
         missing" and is dropped. Raises ai.AIError (including ai.UsageLimitError) from the AI call."""
         items = [_triage_item(i, title=j.title, company=j.company, location=j.location or ", ".join(j.locations), kind=j.kind,
                               source=j.source_detail or j.source, posted=j.posted_at, deadline=j.deadline, description=j.description,
-                              max_chars=1500, location_ok=location_ok_by_settings(self.cfg, j.dream, j.title))
+                              max_chars=1500, location_ok=location_ok_by_settings(self.cfg, j.dream, j.title, j.source)
+                              or j.meta.get("country") in self.filters.area.whole)
                  for i, (_, j) in enumerate(batch)]
         results, tokens = await _ask_triage(items, triage_system(self.cfg), purpose="triage", label=f"triage ×{len(batch)}",
                                             run_id=self.run_id)
@@ -598,7 +606,8 @@ class Pipeline:
         source. Stop still works, because asyncio.CancelledError isn't an Exception and passes through."""
         try:
             jobs = await asyncio.wait_for(collect(self.ctx), timeout=900)
-            await self.add_jobs(label, jobs)
+            if jobs or not getattr(collect, "hands_over", False):  # the catalog's jobs have already arrived through ctx.deliver
+                await self.add_jobs(label, jobs)
         except Exception as e:  # noqa: BLE001
             self.log(label, f"failed: {type(e).__name__}: {str(e)[:200]}", "error")
 
@@ -771,7 +780,7 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
         min_score = int(cfg["run"].get("min_score", 60))
         system = triage_system(cfg)
         promoted, demoted, checked = [], [], 0
-        bus.publish("toast", {"title": "Scoring the new jobs" if lead_ids is not None else "Re-evaluating leads",
+        bus.publish("toast", {"title": "Scoring jobs" if lead_ids is not None else "Rescoring leads",
                               "body": f"{len(leads)} jobs from {reason}." if lead_ids is not None
                               else f"{len(leads)} below-threshold and queued leads against your updated profile ({reason})."})
         for offset in range(0, len(leads), RETRIAGE_BATCH):
@@ -779,12 +788,12 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
             items = [_triage_item(k, title=lead["title"], company=lead["company"], location=lead["location"], kind=lead["kind"],
                                   source=lead.get("source_detail") or lead["source"], posted=lead.get("posted_at"),
                                   deadline=lead.get("deadline"), description=lead.get("description"), max_chars=2200,
-                                  location_ok=location_ok_by_settings(cfg, bool(lead.get("dream")), lead["title"]))
+                                  location_ok=location_ok_by_settings(cfg, bool(lead.get("dream")), lead["title"], lead["source"]))
                      for k, lead in enumerate(batch)]
             try:
                 results, _ = await _ask_triage(items, system, purpose="retriage", label=f"re-evaluate ×{len(batch)}")
             except ai.AIError as e:
-                bus.publish("toast", {"title": "Re-evaluation stopped", "body": str(e)[:200], "level": "error"})
+                bus.publish("toast", {"title": "Rescoring stopped", "body": str(e)[:200], "level": "error"})
                 break
             for k, lead in enumerate(batch):
                 result = results.get(str(k))
@@ -807,7 +816,7 @@ async def retriage_leads(reason: str = "profile changed", stages: tuple = ("filt
                                  f"{lead.get('score')} → {result['score']} ({reason}): now {'qualifies' if qualifies else 'below threshold'}")
                     bus.publish("lead", lead_summary(lead["id"]))
         message = f"{checked} re-scored, {len(promoted)} now qualify" + (f", {len(demoted)} dropped below" if demoted else "")
-        bus.publish("toast", {"title": "Leads re-evaluated",
+        bus.publish("toast", {"title": "Leads rescored",
                               "body": message + (f": {promoted[0]['company']}, {promoted[0]['title']}" if promoted else "")})
         return {"ok": True, "checked": checked, "promoted": len(promoted), "demoted": len(demoted)}
 
