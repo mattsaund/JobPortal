@@ -54,8 +54,6 @@ USAGE_CAP_PAUSE = 900  # seconds that usage_high() stays True after a provider r
 MAX_NUDGES = 2  # plain-text answers a model may give (and be reminded to call submit_result) before its task fails
 GRACE_TURNS = 2  # tool turns a model still gets after it is told its tool budget is used up
 MAX_FETCHES_PER_TURN = 6  # fetch_url calls answered in one turn (max_steps counts turns, not calls)
-# Sites whose rules (robots.txt and terms) bar automated reading by anyone but search engines. fetch_url doesn't open
-# them; the model works from what search results show and finds the same job on the employer's own site.
 MAX_RETRIES = 2  # times a request is sent again after a short wait the provider asked for
 MAX_RETRY_WAIT = 60  # seconds: a longer wait counts as a rate limit, and searching pauses instead
 ANTHROPIC_VERSION = "2023-06-01"  # the Messages API version JobPortal speaks

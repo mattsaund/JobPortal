@@ -1,19 +1,23 @@
 # Documentation
 
-Our school project documents and design ideas live here. How the code works is in [CONTRIBUTING.md](../CONTRIBUTING.md).
-If you're not sure where something goes, put it here and mention it in the group chat.
+Our course documents and design ideas live here. How the code works is in [CONTRIBUTING.md](../CONTRIBUTING.md). If you're
+not sure where something goes, put it here and mention it in the group chat.
 
 | Folder or file | What goes in it |
 |---|---|
 | [USER_MANUAL.md](USER_MANUAL.md) | how to use JobPortal, page by page |
-| [INSTALL.md](INSTALL.md) | installing, updating and uninstalling on Windows, macOS and Linux, and running from source |
+| [INSTALL.md](INSTALL.md) | installing, connecting an AI (local servers too), updating and uninstalling on Windows, macOS and Linux, and running from source |
 | [API.md](API.md) | every endpoint of the local server, made from the routes and their docstrings |
+| [INTERFACE_CONTRACTS.md](INTERFACE_CONTRACTS.md) | what each part of JobPortal promises the others: the main request and response shapes, live events, internal functions, data and errors |
+| [DESIGN_RATIONALE.md](DESIGN_RATIONALE.md) | why JobPortal is built this way: separation of concerns, cohesion and coupling, the major tradeoff and the AI |
+| [AI_INTEGRATION_DESIGN.md](AI_INTEGRATION_DESIGN.md) | how the AI fits in, the AI providers, and models without tool calling |
+| [QUALITY_EVIDENCE.md](QUALITY_EVIDENCE.md) | the Unit 8 evidence: CI/CD, test coverage, benchmarks, code review and a live trial |
 | [USER_TESTING.md](USER_TESTING.md) | how to run the classmate trial and the desktop alert check on real computers |
-| [AI_INTEGRATION_DESIGN.md](AI_INTEGRATION_DESIGN.md) | how the AI fits in, and the AI providers |
+| [evidence/](evidence/) | screenshots of green CI and Release runs on GitHub Actions |
 | [screenshots/](screenshots/) | pictures of the app with a fictional user, for the README and the manual |
-| [school/](school/) | CMSC 495 7304 work: the proposal, reports, presentations, meeting notes and the final submission |
-| [design/logos/](design/logos/) | logo ideas and sketches. The app uses Becca's JP ring logo: `jobportal/web/static/logo.png` (sidebar), `icon.png` and `favicon.png` next to it, and the app icons in `packaging/icons/` are made from it. |
-| [design/colors/](design/colors/) | color scheme ideas, as images or hex codes like `#00c890`. The dashboard's colors are set at the top of `jobportal/web/static/style.css`. |
+| [school/](school/) | CMSC 495 7304 work: the UML architecture diagram, the proposal, reports, presentations, meeting notes and the final submission |
+| [design/logos/](design/logos/) | logo ideas and sketches. The app uses the team's JP ring logo: `jobportal/web/static/logo.png` (sidebar), `icon.png` and `favicon.png` next to it, and the app icons in `packaging/icons/` are made from it. |
+| [design/colors/](design/colors/) | color scheme ideas, as images or hex codes like `#00c890`. The dashboard's colors are set at the top of `jobportal/web/static/css/base.css`. |
 | [design/fonts/](design/fonts/) | font ideas and font files. Check that the license lets us ship the font. The dashboard uses Arial (Helvetica where Arial is missing), so there's no font file to ship. |
 
 The README and CONTRIBUTING guide stay at the top of the repo, because GitHub shows them from there.

@@ -1,5 +1,5 @@
 """Reaching more places: the new remote boards (Himalayas, Jobicy, Working Nomads), the Recruitee and Personio company
-boards, X's official search, the sites fetch_url leaves alone, and jobs from pasted community posts. Every collector reads
+boards, X's official search, fetch_url opening any public page, and jobs from pasted community posts. Every collector reads
 canned replies; nothing here reaches the network."""
 import asyncio
 import json

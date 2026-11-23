@@ -1,12 +1,13 @@
-# JobPortal API reference (v0.4.0)
+# JobPortal API reference (v0.5.0)
 
 Every endpoint of JobPortal's local server, which only answers on this computer (http://127.0.0.1:8788 by default). The
 dashboard uses all of them. While JobPortal runs, FastAPI serves the same API as interactive docs at
 http://127.0.0.1:8788/docs. This file is made from the server's routes and their docstrings, so it matches the code.
 
 Every request must be addressed to 127.0.0.1 or localhost, and a change (anything but GET) from another site's page is
-refused. Errors come back as JSON with a `detail` message. An AI failure is 401 when the AI needs connecting (a
-sign-in or a key), 429 for a cap, no credit or a rate limit, and 502 for anything else from the AI service.
+refused with a plain-text 403. Other errors come back as JSON with a `detail` message. An AI failure is 401 when the AI
+needs connecting (a sign-in or a key), 429 for a cap, no credit or a rate limit, and 502 for anything else from the AI
+service.
 
 ## App and live updates
 
@@ -42,45 +43,37 @@ From `jobportal/web/routes/ai.py`.
 
 ### `GET /api/ai/status`
 
-The AI in use and whether it's ready, who is signed in with ChatGPT, which providers have a key (never the keys or tokens themselves), tokens used since startup, and whether web search works.
+The AI in use and whether it's ready, the signed-in account, which providers have a key (never the keys or tokens themselves), tokens used since startup, and whether web search works.
 
 ### `GET /api/ai/providers`
 
-Every AI JobPortal can run on, for the picker in Settings, AI and on the welcome screen.
-
-### `POST /api/ai/provider`
-
-Run the AI on another provider, {"provider": id}, with {"custom_url": "..."} for another service. The model choices go back to that provider's default.
+Every AI JobPortal can run on, for the Connect popup.
 
 ### `PUT /api/ai/key`
 
-Save a provider's API key, {"provider": id, "key": "..."}, and switch to that provider. The key is checked first by asking the provider for its model list, so a wrong key is caught now rather than in the middle of a search. A key the provider refuses is not saved (401 with the reason). Returns the status and the models.
+Connect a provider by key or address, {"provider": id, "key": "...", "endpoint": {field: value}, "model": "..."}, and switch to it. An empty key keeps the one already saved. The connection is checked first by asking the provider for its model list, so a wrong key or address is caught now rather than in the middle of a search. One the provider refuses is not kept (401 with the reason). A provider with no model list answers 409 until a model is named, and is then checked with one small real request. Returns the status and the models.
 
-### `DELETE /api/ai/key`
+### `DELETE /api/ai/connection`
 
-Forget one provider's saved key. It stays valid at the provider: the user can delete it there.
+Stop using one provider: sign out of ChatGPT, or forget its key. A key stays valid at the provider, where the user can delete it.
 
 Parameters: `provider`.
 
-### `POST /api/ai/openrouter/signin`
+### `POST /api/ai/signin`
 
-Start Sign in with OpenRouter. The dashboard opens the returned address in the system browser.
+Start a provider's sign-in, {"provider": id}. The dashboard opens the returned address in the system browser.
+
+### `GET /auth/pollinations`
+
+A provider sends the browser back here after the user approves JobPortal. Finishing turns the one-time code into the user's key and switches to that provider, so the dashboard updates by itself.
 
 ### `GET /auth/openrouter`
 
-OpenRouter sends the browser back here after the user approves JobPortal. Finishing turns the one-time code into the user's key and switches to OpenRouter, so the dashboard updates by itself.
-
-### `POST /api/ai/signin`
-
-Start Sign in with ChatGPT. The dashboard opens the returned OpenAI address in the system browser.
+A provider sends the browser back here after the user approves JobPortal. Finishing turns the one-time code into the user's key and switches to that provider, so the dashboard updates by itself.
 
 ### `GET /auth/callback`
 
 OpenAI sends the browser back here after the user signs in. Finishing the sign-in publishes the new status, so the dashboard updates by itself.
-
-### `POST /api/ai/signout`
-
-Sign out of ChatGPT: revoke the sign-in at OpenAI when it can be reached, and forget the tokens either way.
 
 ### `GET /api/ai/models`
 
@@ -118,15 +111,25 @@ The last 200 AI requests with their purpose, model, tokens and outcome. The dash
 
 Find the company job board behind a pasted careers link ({"url", "name"}) and read it once (sources.detect_board).
 
+### `GET /api/sources/catalog`
+
+Every job site and public service in the catalog, with its group, its switch, whether it runs for this person and the keys it needs (catalog.overview). The switches are saved in the settings, under sources.catalog.
+
 ### `POST /api/sources/test/{key}`
 
-Run one job source by itself and report how many of its jobs would pass the rule filters (sources.test_collector).
+Run one job source by itself (a collector, or a catalog id) and report how many of its jobs would pass the rule filters (sources.test_collector).
 
 Parameters: `key` (path).
 
 ## Leads and the Tracker
 
 From `jobportal/web/routes/leads.py`.
+
+### `GET /api/export/leads.zip`
+
+The leads on one tab of the Leads page, with the same filters: a spreadsheet of them, and a folder for each with its tailored resume, cover letter, emails, contacts and the rest (exports.leads_zip).
+
+Parameters: `tab`, `q`, `sort`, `kind`, `industry`, `dream`.
 
 ### `GET /api/leads`
 
@@ -143,6 +146,7 @@ Parameters: `lead_id` (path).
 ### `PATCH /api/leads/{lead_id}`
 
 Save edits from the lead page and the Tracker: any field in EDITABLE (status, notes, follow-up date, the resume and cover letter text, title, company, location, deadline, apply link, industry, the dream star), and "package", which is merged into the saved package. Returns the lead as the Leads list shows it. An app_status outside config.APP_STATUSES is refused with a 400.
+
 Side effects: a status change goes into the lead's history. Moving a lead to Application sent or later (config.APPLIED_STATUSES) records the date it was applied for, and Application sent also schedules a follow-up in 7 days. Setting the dream star by hand is remembered (dream_manual), so re-checking the Dream list leaves it alone. Editing the resume recomputes its keyword coverage. Editing a document deletes its rendered files so downloads stay current, and a "lead" event tells open dashboards.
 
 Parameters: `lead_id` (path).
@@ -174,6 +178,7 @@ Parameters: `lead_id` (path).
 ### `POST /api/leads/manual`
 
 Add a job the user found, from the Leads page or straight onto a Tracker column.
+
 Body: url and/or text (the posting), or just title and company for a quick add, plus optional location, kind and app_status (where it goes on the Tracker; "new" leaves it on the Leads page only). With a link or posting text, the application package starts building right away. A quick add with neither has nothing to tailor a resume to, so it's only tracked until the user pastes the posting on its page. The same job added again isn't added twice: the saved lead comes back with "existing": true, and its package is left alone.
 
 ### `POST /api/leads/paste`

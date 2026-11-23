@@ -1,23 +1,16 @@
 ## What's new
 
-- **Pick your AI.** ChatGPT is still one click, and JobPortal now works without a ChatGPT plan too: sign in with
-  OpenRouter (it has free models), or use an API key from Google Gemini (with a free tier), Claude, OpenAI, Mistral, Groq,
-  DeepSeek, xAI or any OpenAI-compatible service. Choose in Settings, AI. Keys stay on your computer.
-- **Search on a schedule.** Pick the times and days in Settings, Search, and JobPortal searches by itself. Turn on
-  background searching and it keeps going after you close the window and after a restart. Off until you turn it on.
-- **No resume? No problem.** Answer a few questions and fill in a few boxes on Home, and JobPortal writes your first
-  resume from exactly what you wrote. With a resume, it still fills in everything your resume covers.
-- **Next moves** on Home: applications with no reply after three weeks, new openings at companies that turned you down
-  before, and companies with several openings that fit you.
-- **More places to look.** Himalayas, Jobicy and Working Nomads join the remote boards, Recruitee and Personio join the
-  company boards, and X is an option for people with their own X developer key. For Discord, Slack, Facebook groups,
-  Threads and LinkedIn posts, paste what you see there and JobPortal finds the jobs in it.
-- **Desktop alerts that work in the background,** with a Send a test alert button in Settings, Appearance.
-- **An app for Intel Macs** next to the Apple Silicon one.
-- Every AI answer is checked against what its task asked for, and the AI fixes one that doesn't fit before JobPortal
-  uses it.
-- Clearer first-run help on the welcome screen, and short waits a provider asks for are waited out instead of pausing
-  your search.
+- **Any AI.** There's no default AI now. One Connect AI popup lists 122 providers: ChatGPT, OpenRouter and Pollinations by
+  browser sign-in, 104 by API key, 14 servers on your own computer (Ollama, LM Studio and others), and any
+  OpenAI-compatible address.
+- **Any job, any schooling.** The filters now work for every kind of work, from nursing and teaching to welding, kitchens
+  and farms. Schooling choices now include no formal schooling, some high school and military training.
+- **Search everywhere.** 85 more job sites and public job services, 27 more hiring systems for company boards, and more AI
+  hunt missions. The Muse is gone because it shut down.
+- **Full-screen menus.** Every page runs edge to edge with no cards. Page titles and tabs sit in a slim top bar, and Leads
+  is a list with the details beside it.
+- **Far fewer words** on every screen.
+- **Export on Leads.** Download a zip with a spreadsheet of your leads and a folder of tailored documents for each.
 
 Download the file for your system and open it. There's nothing else to install.
 
@@ -28,8 +21,8 @@ Download the file for your system and open it. There's nothing else to install.
 | macOS (Intel) | `JobPortal-macOS-Intel.dmg` | The same, for Macs with an Intel processor. |
 | Linux (x86_64) | `JobPortal-Linux-x86_64.AppImage` | Run `chmod +x` on it, then open it. The first run adds it to your app menu. |
 
-Everything JobPortal needs comes inside the download, including PDF export. For the AI, bring a ChatGPT Go, Plus or Pro
-plan, an OpenRouter account, or an API key.
+Everything JobPortal needs comes inside the download, including PDF export. For the AI, connect one you already have: a
+sign-in, an API key, or a model server on your own computer.
 
 On Linux, JobPortal opens in its own window when Chrome, Edge, Chromium or Brave is installed. Otherwise it opens in a
 browser tab.
