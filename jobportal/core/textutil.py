@@ -723,7 +723,7 @@ _GENERIC_ROLE_WORDS = {
     "officer", "director", "consultant", "administrator", "admin", "clerk", "worker", "operator", "agent", "supervisor", "lead",
     "head", "member", "team", "staff", "professional", "aide", "helper", "attendant", "advisor", "adviser", "planner", "executive",
     "partner", "generalist", "expert", "trainee", "apprentice", "fellow", "leader", "president", "vice", "vp", "chief", "owner",
-    "services", "service", "support", "operations",
+    "services", "service", "support", "operations", "line", "home",  # "Line Cook" isn't "Line Worker", "Home Health" isn't "Home Depot"
 }
 # Other words for the same work, so a target "Registered Nurse" also finds "RN - Med Surg" and "Software Developer" finds
 # "Backend Engineer". The keys are stems (see _role_stem); _ROLE_ALIASES is filled in from the plain words below.

@@ -56,7 +56,7 @@ PEOPLE = [
     ("Machinist", ["CNC Machinist", "CNC Operator", "Tool and Die Maker"], "Nurse"),
     ("Graphic Designer", ["Visual Designer", "Production Artist"], "Plumber"),
     ("Photographer", ["Staff Photographer", "Portrait Photographer"], "Welder"),
-    ("Actor", ["Performer", "Theatre Actor", "Stage Actor"], "Accountant"),
+    ("Actor", ["Performer", "Theater Actor", "Stage Actor"], "Accountant"),
     ("Musician", ["Church Organist", "Music Director", "Session Musician"], "Plumber"),
     ("Journalist", ["Staff Reporter", "News Reporter", "Copy Editor"], "Cook"),
     ("Social Worker", ["LCSW", "Case Manager", "Licensed Social Worker"], "Machinist"),
@@ -74,6 +74,11 @@ def test_their_jobs_reach_them_and_others_dont(target, titles, other):
     assert genres.classify(target), f"no kind of work for {target}"
     assert [t for t in titles if not matcher.matches(t)] == []
     assert not matcher.matches(other)
+
+
+@pytest.mark.parametrize("target, title", [("Line Cook", "Electrical Line Worker"), ("Line Cook", "Line Tech"), ("Home Health Aide", "Home Depot Cashier")])
+def test_a_word_that_only_describes_the_job_doesnt_count(target, title):
+    assert not textutil.TargetMatcher([target]).matches(title)
 
 
 def job(title: str) -> RawJob:
