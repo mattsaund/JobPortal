@@ -22,21 +22,20 @@ run with a real certificate yet, so the release apps are still unsigned.
 
 ### Real runs
 
-These were the newest runs on GitHub when this page was written. They're from the v0.4.0 release on 2026-11-18. The 0.5.0
-work came after them, so it has no runs in this table. It goes through the same workflows once it's on GitHub.
+These are the runs on the 0.5.0 code from 2026-11-23, plus the last published release before it.
 
 | Workflow | Run | What it ran on | Result |
 |---|---|---|---|
-| CI | [44372355823](https://github.com/mattsaund/JobPortal/actions/runs/44372355823) | `main`, 8 jobs (5 test, 3 launcher) | success |
-| Writing rules | [44372355865](https://github.com/mattsaund/JobPortal/actions/runs/44372355865) | `main`, 1 job | success |
+| CI | [45267871154](https://github.com/mattsaund/JobPortal/actions/runs/45267871154) | `update0.5.0`, 8 jobs (5 test, 3 launcher) | success |
+| Writing rules | [45267871271](https://github.com/mattsaund/JobPortal/actions/runs/45267871271) | `update0.5.0`, 1 job | success |
+| Release (dry run) | [45267886124](https://github.com/mattsaund/JobPortal/actions/runs/45267886124) | 4 builds, each started and smoke tested, nothing published. The Apple Silicon job got no GitHub runner on the first attempt and passed when run again | success |
 | Release | [44372383040](https://github.com/mattsaund/JobPortal/actions/runs/44372383040) | tag `v0.4.0`, 4 builds and the publish | success |
-| Release (dry run) | [44366710095](https://github.com/mattsaund/JobPortal/actions/runs/44366710095) | started by hand before the tag, 4 builds, nothing published | success |
 
 A green CI run, with every test and launcher job passing on all three systems:
 
 ![A green CI run on GitHub Actions](evidence/ci-run.png)
 
-A green Release run, with the four app builds and the publish step:
+A green Release dry run, with the four app builds. The publish step only runs for a version tag:
 
 ![A green Release run on GitHub Actions](evidence/release-run.png)
 
