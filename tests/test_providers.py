@@ -46,17 +46,25 @@ def no_waiting(monkeypatch):
 
 # ---------------------------------------------------------------- choosing a provider and keys
 
-def test_chatgpt_is_the_default_and_every_provider_is_listed():
+def test_no_ai_is_assumed_and_every_provider_is_listed():
     status = providers.status()
-    assert status["provider"] == "chatgpt" and status["ready"] is False and status["keys"] == {}
-    assert ai.setup_problem() == "Sign in with ChatGPT first (Settings, AI)."
-    ids = [p["id"] for p in providers.listing()]
-    assert ids[:2] == ["chatgpt", "openrouter"] and {"openai", "anthropic", "gemini", "custom"} <= set(ids)
-    openrouter = next(p for p in providers.listing() if p["id"] == "openrouter")
-    assert openrouter["signin"] and openrouter["free"] and openrouter["key_url"].startswith("https://openrouter.ai/")
+    assert status["provider"] == "" and status["ready"] is False and status["keys"] == {}
+    assert ai.setup_problem() == "Connect an AI first."
+    listing = {p["id"]: p for p in providers.listing()}
+    assert {"chatgpt", "openrouter", "openai", "anthropic", "gemini", "custom"} <= set(listing)
+    assert listing["chatgpt"]["group"] == listing["openrouter"]["group"] == "signin" and listing["gemini"]["group"] == "key"
+    assert listing["custom"]["group"] == "custom" and listing["custom"]["fields"][0]["id"] == "url"
+    assert listing["openrouter"]["connect"] == "signin" and listing["openrouter"]["free"]
+    assert listing["openrouter"]["key_url"].startswith("https://openrouter.ai/")
+
+
+def test_someone_signed_in_before_providers_keeps_chatgpt(monkeypatch):
+    monkeypatch.setattr(providers.signin, "status", lambda: {"signed_in": True, "name": "", "email": ""})
+    assert providers.current() == "chatgpt" and providers.problem() == ""
 
 
 def test_switching_providers_clears_the_model_choices():
+    providers.set_provider("chatgpt")
     cfg = settings.get()
     cfg["ai"]["model"] = "gpt-test"
     cfg["ai"]["stages"]["triage"]["model"] = "gpt-mini-test"
@@ -69,15 +77,16 @@ def test_switching_providers_clears_the_model_choices():
     with pytest.raises(ValueError):
         providers.set_provider("nowhere")
     with pytest.raises(ValueError, match="http"):
-        providers.set_provider("custom", "ftp://example.com")
-    providers.set_provider("custom", "https://ai.example.com/v1/")
+        providers.set_endpoint("custom", {"url": "ftp://example.com"})
+    providers.set_provider("custom")
+    providers.set_endpoint("custom", {"url": "https://ai.example.com/v1/"})
     assert providers.info()["base"] == "https://ai.example.com/v1"
 
 
 def test_keys_are_kept_privately_and_never_shown_whole():
-    assert providers.problem() == "Sign in with ChatGPT first (Settings, AI)."
+    assert providers.problem() == "Connect an AI first."
     providers.set_provider("anthropic")
-    assert providers.problem() == "Add your Claude (Anthropic) key first (Settings, AI)."
+    assert providers.problem() == "Add your Claude key."
     providers.save_key("anthropic", "  sk-ant-test-1234abcd  ")
     assert providers.get_key("anthropic") == "sk-ant-test-1234abcd" and providers.problem() == ""
     status = providers.status()
@@ -96,17 +105,17 @@ def test_keys_are_kept_privately_and_never_shown_whole():
 def test_another_service_needs_its_address():
     providers.save_key("custom", "local-key-0000")
     providers.set_provider("custom")
-    assert providers.problem() == "Give the address of your AI service first (Settings, AI)."
-    providers.set_provider("custom", "http://ai.example.com/v1")
+    assert "address" in providers.problem()
+    providers.set_endpoint("custom", {"url": "http://ai.example.com/v1"})
     assert providers.problem() == ""
 
 
 # ---------------------------------------------------------------- Sign in with OpenRouter
 
 def test_sign_in_with_openrouter(monkeypatch):
-    url = providers.openrouter_start(8788)
+    url = providers.key_signin_start("openrouter", 8788)
     params = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
-    assert url.startswith("https://openrouter.ai/auth?") and params["callback_url"] == "http://127.0.0.1:8788/auth/openrouter"
+    assert url.startswith("https://openrouter.ai/auth?") and params["callback_url"] == "http://localhost:8788/auth/openrouter"
     assert params["code_challenge_method"] == "S256" and params["key_label"] == "JobPortal"
     verifier = providers._pending[params["state"]]["verifier"]
     expected = urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -117,24 +126,24 @@ def test_sign_in_with_openrouter(monkeypatch):
         seen.update(url=str(request.url), body=json.loads(request.content))
         return httpx.Response(200, json={"key": "sk-or-v1-" + "a" * 64, "user_id": "user_1"})
     mock_http(monkeypatch, handler)
-    asyncio.run(providers.openrouter_finish({"code": "one-time", "state": params["state"]}))
-    assert seen["url"] == providers.OPENROUTER_EXCHANGE
+    asyncio.run(providers.key_signin_finish("openrouter", {"code": "one-time", "state": params["state"]}))
+    assert seen["url"] == providers.KEY_SIGNINS["openrouter"]["token"]
     assert seen["body"] == {"code": "one-time", "code_verifier": verifier, "code_challenge_method": "S256"}
     assert providers.current() == "openrouter" and providers.get_key("openrouter").startswith("sk-or-v1-")
     assert providers.openrouter_key_page().startswith("https://openrouter.ai/keys/")
-    with pytest.raises(ValueError, match="old or didn't come from JobPortal"):  # a state can only be used once
-        asyncio.run(providers.openrouter_finish({"code": "one-time", "state": params["state"]}))
+    with pytest.raises(ValueError, match="link is old"):  # a state can only be used once
+        asyncio.run(providers.key_signin_finish("openrouter", {"code": "one-time", "state": params["state"]}))
 
 
 def test_a_refused_or_broken_openrouter_sign_in(monkeypatch):
-    state = parse_qs(urlparse(providers.openrouter_start(8788)).query)["state"][0]
+    state = parse_qs(urlparse(providers.key_signin_start("openrouter", 8788)).query)["state"][0]
     with pytest.raises(ValueError, match="didn't approve"):
-        asyncio.run(providers.openrouter_finish({"state": state}))
-    state = parse_qs(urlparse(providers.openrouter_start(8788)).query)["state"][0]
+        asyncio.run(providers.key_signin_finish("openrouter", {"state": state}))
+    state = parse_qs(urlparse(providers.key_signin_start("openrouter", 8788)).query)["state"][0]
     mock_http(monkeypatch, lambda request: httpx.Response(403, json={"error": "Invalid code or code_verifier"}))
     with pytest.raises(ValueError, match="HTTP 403"):
-        asyncio.run(providers.openrouter_finish({"code": "x", "state": state}))
-    assert providers.get_key("openrouter") == "" and providers.current() == "chatgpt"
+        asyncio.run(providers.key_signin_finish("openrouter", {"code": "x", "state": state}))
+    assert providers.get_key("openrouter") == "" and providers.current() == ""
 
 
 # ---------------------------------------------------------------- the chat completions wire
@@ -197,7 +206,7 @@ def test_a_plain_text_answer_and_a_model_without_reasoning(chat_mock):
     assert asyncio.run(ai.run("x", system="s", schema=SCHEMA, stage="triage", purpose="t"))["score"] == 12
     bodies = chat_mock["bodies"]
     assert bodies[0]["reasoning"] == {"effort": "low"} and "reasoning" not in bodies[1] and "reasoning" not in bodies[2]
-    assert bodies[2]["messages"][-1] == {"role": "user", "content": "Call submit_result now with your final answer."}
+    assert bodies[2]["messages"][-1] == {"role": "user", "content": "Give your final answer now, by calling submit_result."}
     assert chat_mock["headers"][0]["x-title"] == "JobPortal"
 
 
@@ -379,7 +388,7 @@ def test_gemini_errors_come_in_a_list():
     err = ai._error_body(json.dumps([{"error": {"code": 400, "status": "INVALID_ARGUMENT", "message": "API key not valid. API_KEY_INVALID"}}]))
     assert isinstance(ai._error(err.get("code"), err.get("message"), 400, "gemini"), ai.NotSignedIn)
     quota = ai._error("RESOURCE_EXHAUSTED", "Quota exceeded for metric", 429, "gemini")
-    assert isinstance(quota, ai.UsageLimitError) and "Gemini (Google)" in str(quota)
+    assert isinstance(quota, ai.UsageLimitError) and "Gemini" in str(quota)
     assert ai._error_body(json.dumps({"error": "Invalid username or password."})) == {"message": "Invalid username or password."}
     spend = ai._error_body(json.dumps({"type": "error", "error": {"type": "rate_limit_error", "message": "cap",
                                                                   "details": {"error_code": "enforced_spend_limit_reached"}}}))
@@ -418,20 +427,134 @@ def test_ai_routes(monkeypatch):
     mock_http(monkeypatch, handler)
     with TestClient(app) as client:
         listing = client.get("/api/ai/providers").json()
-        assert listing["status"]["provider"] == "chatgpt" and len(listing["providers"]) == len(providers.PROVIDERS)
+        assert listing["status"]["provider"] == "" and len(listing["providers"]) == len(providers.PROVIDERS)
         bad = client.put("/api/ai/key", json={"provider": "anthropic", "key": "sk-ant-wrong-0000"})
         assert bad.status_code == 401 and "didn't accept your key" in bad.json()["detail"]
-        assert providers.get_key("anthropic") == "" and providers.current() == "chatgpt"  # nothing kept from a refused key
+        assert providers.get_key("anthropic") == "" and providers.current() == ""  # nothing kept from a refused key
         ok = client.put("/api/ai/key", json={"provider": "anthropic", "key": good}).json()
         assert ok["ready"] and ok["provider"] == "anthropic" and ok["models"] == ["claude-sonnet-test"]
         assert good not in json.dumps(client.get("/api/ai/status").json())
-        assert client.post("/api/ai/provider", json={"provider": "nowhere"}).status_code == 400
-        assert client.post("/api/ai/provider", json={"provider": "gemini"}).json()["ready"] is False
-        gone = client.delete("/api/ai/key", params={"provider": "anthropic"}).json()
-        assert gone["keys"] == {} and gone["key_page"].startswith("https://platform.claude.com/")
-        url = client.post("/api/ai/openrouter/signin").json()["url"]
+        assert client.put("/api/ai/key", json={"provider": "nowhere", "key": "x"}).status_code == 400
+        assert client.put("/api/ai/key", json={"provider": "gemini"}).status_code == 400  # no key to check
+        assert providers.current() == "anthropic"  # and the AI in use stays
+        gone = client.delete("/api/ai/connection", params={"provider": "anthropic"}).json()
+        assert gone["keys"] == {} and gone["provider"] == "" and gone["key_page"].startswith("https://platform.claude.com/")
+        assert client.post("/api/ai/signin", json={"provider": "gemini"}).status_code == 400
+        url = client.post("/api/ai/signin", json={"provider": "openrouter"}).json()["url"]
         state = parse_qs(urlparse(url).query)["state"][0]
         page = client.get("/auth/openrouter", params={"state": "forged", "code": "x"})
         assert page.status_code == 200 and "didn" in page.text and providers.get_key("openrouter") == ""
         assert state in providers._pending  # the real sign-in is still waiting
     assert db.one("SELECT COUNT(*) n FROM ai_calls")["n"] == 0  # checking a key isn't an AI task
+
+
+# ---------------------------------------------------------------- every provider
+
+def test_every_provider_entry_is_complete():
+    listing = providers.listing()
+    assert len(listing) >= 100
+    assert {"signin", "key", "local", "custom"} == {p["group"] for p in listing}
+    assert [p["name"] for p in listing] == sorted((p["name"] for p in listing), key=str.lower)
+    for pid, entry in providers.PROVIDERS.items():
+        assert entry["wire"] in ("responses", "chat", "anthropic"), pid
+        assert entry["auth"] in ("chatgpt", "key"), pid
+        fields = entry.get("fields")
+        if fields:  # an address made from what the user fills in
+            assert "url" in {f["id"] for f in fields} or all("{" + f["id"] + "}" in entry["base"] + str(entry.get("headers")) for f in fields), pid
+        else:
+            assert entry["base"].startswith("https://") and not entry["base"].endswith("/"), pid
+        assert len(entry.get("note", "").split()) <= 10, pid
+
+
+def test_nothing_is_assumed_about_a_provider_in_the_list():
+    signins = {p["id"] for p in providers.listing() if p["group"] == "signin"}
+    assert signins == {"chatgpt", "openrouter", "pollinations"} and set(providers.KEY_SIGNINS) == signins - {"chatgpt"}
+
+
+def test_a_local_server_needs_no_key(chat_mock):
+    providers.set_provider("ollama")
+    ai.reset_provider_state()
+    assert providers.problem() == "" and providers.info()["base"] == "http://localhost:11434/v1"
+    assert asyncio.run(providers.credential()) == providers.LOCAL_KEY
+    providers.set_endpoint("ollama", {"url": "http://192.168.1.5:11434/v1/"})
+    assert providers.info()["base"] == "http://192.168.1.5:11434/v1"
+
+
+def test_an_address_part_cant_break_out_of_its_url():
+    with pytest.raises(ValueError):
+        providers.set_endpoint("azure", {"resource": "evil.example.com/path"})
+    with pytest.raises(ValueError):
+        providers.set_endpoint("bedrock", {"region": "us-east-1@evil"})
+    providers.set_endpoint("azure", {"resource": "my-resource"})
+    assert providers.info("azure")["base"] == "https://my-resource.openai.azure.com/openai/v1"
+
+
+def test_a_header_can_carry_an_address_part():
+    providers.set_endpoint("oci", {"region": "us-chicago-1", "project": "ocid1.project.example"})
+    assert providers.info("oci")["headers"] == {"OpenAI-Project": "ocid1.project.example"}
+
+
+def test_sign_in_with_pollinations(monkeypatch):
+    url = providers.key_signin_start("pollinations", 8788)
+    params = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
+    assert url.startswith("https://enter.pollinations.ai/authorize?") and params["redirect_uri"] == "http://localhost:8788/auth/pollinations"
+    assert params["response_type"] == "code" and params["code_challenge_method"] == "S256"
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(parse_qs(request.content.decode()))
+        return httpx.Response(200, json={"access_token": "sk_example_pollen_key", "token_type": "bearer", "expires_in": 604800})
+    mock_http(monkeypatch, handler)
+    asyncio.run(providers.key_signin_finish("pollinations", {"code": "one-time", "state": params["state"]}))
+    assert seen["grant_type"] == ["authorization_code"] and seen["redirect_uri"] == [params["redirect_uri"]] and seen["code_verifier"]
+    assert providers.get_key("pollinations") == "sk_example_pollen_key" and providers.current() == "pollinations"
+
+
+def test_a_sign_in_cant_be_finished_for_another_provider():
+    state = parse_qs(urlparse(providers.key_signin_start("openrouter", 8788)).query)["state"][0]
+    with pytest.raises(ValueError, match="old"):
+        asyncio.run(providers.key_signin_finish("pollinations", {"code": "x", "state": state}))
+    assert state in providers._pending  # the real sign-in still works
+
+
+def test_a_provider_with_no_model_list_asks_for_a_model(monkeypatch):
+    from jobportal.web.server import app
+    asked = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/models"):
+            return httpx.Response(404, text="not found")
+        asked.append(json.loads(request.content))
+        call = {"id": "c1", "type": "function", "function": {"name": "submit_result", "arguments": '{"ok": true}'}}
+        return httpx.Response(200, json={"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [call]}}]})
+    mock_http(monkeypatch, handler)
+    with TestClient(app) as client:
+        first = client.put("/api/ai/key", json={"provider": "stepfun", "key": "step-test-key"})
+        assert first.status_code == 409 and providers.current() == "" and providers.get_key("stepfun") == ""
+        second = client.put("/api/ai/key", json={"provider": "stepfun", "key": "step-test-key", "model": "step-3"}).json()
+        assert second["ready"] and second["provider"] == "stepfun" and second["models"] == ["step-3"]
+    assert asked[0]["model"] == "step-3" and asyncio.run(ai.models()) == ["step-3"]
+
+
+def test_a_service_that_refuses_tool_choice_is_asked_again_without_it(chat_mock):
+    use("groq")
+    settings_cfg = settings.get()
+    settings_cfg["ai"]["model"] = "test-model"
+    settings.save(settings_cfg)
+    chat_mock["replies"] = [httpx.Response(400, json={"error": {"message": "tool_choice is not supported"}}),
+                            {"choices": [{"message": {"role": "assistant", "content": '{"score": 4}'}}]}]
+    out = asyncio.run(ai.run("x", system="s", schema=SCHEMA, stage="triage", purpose="t"))
+    assert out["score"] == 4 and "tool_choice" in chat_mock["bodies"][0] and "tool_choice" not in chat_mock["bodies"][1]
+    assert chat_mock["bodies"][1]["tools"]
+
+
+def test_a_model_without_tools_answers_in_plain_json(chat_mock):
+    use("groq")
+    settings_cfg = settings.get()
+    settings_cfg["ai"]["model"] = "test-model"
+    settings.save(settings_cfg)
+    chat_mock["replies"] = [httpx.Response(400, json={"error": {"message": "This model does not support tools"}}),
+                            {"choices": [{"message": {"role": "assistant", "content": '```json\n{"score": 2}\n```'}}]}]
+    out = asyncio.run(ai.run("x", system="s", schema=SCHEMA, stage="triage", purpose="t"))
+    body = chat_mock["bodies"][1]
+    assert out["score"] == 2 and "tools" not in body and "JSON Schema" in body["messages"][0]["content"]

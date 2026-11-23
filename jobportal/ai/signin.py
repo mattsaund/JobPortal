@@ -267,7 +267,7 @@ def _signed_in() -> dict:
     """The saved sign-in data. Raises NotSignedIn when there is no refresh token (nobody is signed in)."""
     saved = _load()
     if not saved.get("refresh_token"):
-        raise NotSignedIn("Sign in with ChatGPT first (Settings or the sidebar).")
+        raise NotSignedIn("Sign in with ChatGPT.")
     return saved
 
 
