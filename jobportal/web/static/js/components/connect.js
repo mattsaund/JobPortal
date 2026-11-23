@@ -11,6 +11,7 @@ let connectList = null;   // the providers, while the popup is open
 let connectChosen = null; // the provider picked in the dropdown
 let connectWaiting = "";  // the id of a provider whose sign-in is open in the browser
 let connectNeedsModel = "";  // the id of a provider that has no model list, so the popup asks for a model name
+let connectBusy = false;  // a connection is being checked: "ai" events mustn't redraw the fields being sent
 
 const CONNECT_GROUPS = [["signin", "Sign in"], ["key", "API key"], ["local", "On this computer"], ["custom", "Other"]];
 
@@ -149,7 +150,7 @@ async function startProviderSignIn(p) {
 
 // An "ai" event: when the provider being connected is ready, say so and close the popup.
 function connectStatusChanged(data) {
-  if (!connectList) return;
+  if (!connectList || connectBusy) return;
   if (data.ready && connectChosen && data.provider === connectChosen.id && (connectWaiting === data.provider)) {
     connectWaiting = "";
     closeDialog($("#connect")?.closest("dialog"));
@@ -178,18 +179,17 @@ onAction("connect-key", async (el) => {
     toast("Model required", "", "error");
     return;
   }
-  const label = el.innerHTML;
+  const label = el.innerHTML, dialog = el.closest("dialog");
   el.disabled = true;
   el.innerHTML = `${spinner()}Checking`;
+  connectBusy = true;
   try {
     const r = await api("/api/ai/key", { method: "PUT", body: { provider: p.id, key, endpoint, model } });
-    S.state.ai = r;
-    renderFrame();
-    if (S.route[0] === "home") renderHome();
-    if (S.route[0] === "settings" && S.route[1] === "ai" && !S.cfgDirty) renderSettings("ai");
-    closeDialog(el.closest("dialog"));
-    toast(`${p.name} connected`);
+    connectBusy = false;
+    closeDialog(dialog);
+    onAIStatus(r);
   } catch (e) {
+    connectBusy = false;
     el.disabled = false;
     el.innerHTML = label;
     if (e.status === 409) {  // no model list here: keep what's typed and ask for the model name

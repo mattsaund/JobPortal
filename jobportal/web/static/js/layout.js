@@ -111,6 +111,7 @@ function renderUserButton() {
 // Handles an "ai" event (the AI, its sign-in or its key changed): redraw the frame, say so once it's connected, and swap
 // Home's welcome for the dashboard (or back).
 function onAIStatus(data) {
+  if (connectBusy) return;  // a key being checked isn't connected yet: the popup calls this once it passes
   const wasReady = aiReady(), wasProvider = S.state.ai?.provider;
   S.state.ai = data;
   renderFrame();
